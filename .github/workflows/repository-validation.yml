@@ -1,0 +1,65 @@
+name: Repository validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  repository-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate required repository files
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            README.md
+            SECURITY.md
+            .gitignore
+            .gitattributes
+            docs/README.md
+            docs/baseline/ACS-MASTER-ENGINEERING-SPECIFICATION-BASELINE-ENTERPRISE-v5.3-FINAL-CONSOLIDATED-ENGINEERING-EDITION.txt
+            docs/governance/ACS-v5.3-CODEX-EXECUTION-AUTHORITY-READEQUATION.txt
+            docs/governance/ACS-MASTER-ENGINEERING-INITIALIZATION-PROMPT-CODEX-DEVOPS-v5.3.txt
+          )
+          for path in "${required[@]}"; do
+            test -s "$path" || { echo "Missing or empty required file: $path"; exit 1; }
+          done
+
+      - name: Reject unsafe tracked file types
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -Ei '(^|/)(\.env($|\.)|secrets/|credentials/)|\.(pem|key|p12|pfx|log|dump|bak|backup)$'; then
+            echo 'Potentially sensitive or temporary files are tracked.'
+            exit 1
+          fi
+
+      - name: Detect private-key markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -I -E -- 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY'; then
+            echo 'Private-key material detected.'
+            exit 1
+          fi
+
+      - name: Check whitespace errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            base=HEAD^
+          else
+            base="$(git hash-object -t tree /dev/null)"
+          fi
+          git diff --check "$base" HEAD -- . ':(exclude)docs/**/*.txt'
