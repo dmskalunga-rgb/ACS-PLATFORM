@@ -1,0 +1,56 @@
+# Environment files and local configuration
+.env
+.env.*
+!.env.example
+*.local
+
+# Credentials, secrets, and private certificates
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# JavaScript dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+.next/
+.nuxt/
+
+# Python environments, caches, and build output
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs, temporary files, and local state
+*.log
+tmp/
+temp/
+*.tmp
+*.swp
+*.pid
+*.sqlite
+*.sqlite3
+*.db
+
+# Dumps and backups
+*.dump
+*.sql.gz
+*.bak
+*.backup
+
+# IDE and operating-system metadata
+.idea/
+.vscode/
+*.suo
+*.user
+.DS_Store
+Thumbs.db
+
