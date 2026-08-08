@@ -58,3 +58,19 @@ earlier foundation work.
 | OBSERVABILITY | Entirely absent |
 | DOCUMENTATION | Normative bootstrap exists; engineering execution records are missing |
 | TRACEABILITY | Initial assessment matrix exists; implementation-level mapping remains incomplete |
+
+## Phase 0 disposition
+
+The initial observations remain historical evidence. Phase 0 adds implementation for
+ACS-GAP-0010, 0011, 0014, 0015, and 0018-0022, subject to local/CI verification and review.
+It provides partial boundaries for 0008, 0009, 0016, 0017, and 0023-0025. It does not close
+functional gaps 0012/0013 or authorize domains 5.x.
+
+These conditions remain explicitly open:
+
+- ACS-GAP-0001: QG-18 through QG-22 are `UNDEFINED_IN_BASELINE`;
+- ACS-GAP-0002: baseline custody ambiguity;
+- ACS-GAP-0004/0005/0006: ECOM, EDIM, and EDOLM are incomplete working catalogs;
+- ACS-GAP-0007: individual `ACS-REQ` identifiers remain absent;
+- signing/provenance, production secrets, broker selection, IAM, AI engines, production
+  infrastructure, SLOs, and full performance/resilience/E2E suites remain pending.

@@ -51,6 +51,23 @@ Status values are limited to the assessment classifications defined by the Phase
 | ANX-B-EDIM | Enterprise Dependency & Integration Matrix | Transversal | Exhaustive producer/consumer contract catalog | Schema, rules, and minimum dependencies only | PARTIAL | Partial | Partial | Partial | N/A | Partial | Partial | Phase 0 onward | QG-34 | Non-exhaustive dependencies/contracts | Baseline ANX-B |
 | ANX-C-EDOLM | Enterprise Data Ownership & Lineage Matrix | Transversal | Exhaustive data ownership/lineage catalog | Schema, rules, and minimum governance only | PARTIAL | Partial | N/A | N/A | N/A | Partial | Partial | Phase 0 onward | QG-34 | Non-exhaustive data governance | Baseline ANX-C |
 
+## Phase 0 implementation traceability
+
+These rows supplement, rather than erase, the initial assessment snapshot.
+
+| Source | ADR | Implementation artifact | Validation | Evidence/status |
+| --- | --- | --- | --- | --- |
+| VOL-II-2.4-2.7; VOL-VII-7.1-7.10 | ADR-0001, 0003, 0010 | `package.json`; workspace; `services/`; `infrastructure/` | lint, types, build, Kustomize render | `VERIFIED` locally |
+| VOL-VII-7.2 | ADR-0002 | `apps/web/` | component tests and production build | `VERIFIED` locally |
+| VOL-VI-6.1-6.9 | ADR-0004 | migration, rollback, validator | PostgreSQL 17 migration/RLS/isolation | `VERIFIED` locally |
+| VOL-VII-7.4 | ADR-0005 | error contract; technical API/OpenAPI | API contract tests | `VERIFIED` locally |
+| VOL-VII-7.7 | ADR-0006 | canonical event envelope | positive/negative schema tests | `VERIFIED` locally |
+| VOL-II-2.7; VOL-III-3.2 | ADR-0007 | authz/audit ports; tenant context | fail-closed context tests | `VERIFIED` locally |
+| VOL-IV-4.2-4.10 | ADR-0008 | `packages/ai-gateway-contract/` | compile/build boundary | `VERIFIED`; engines not implemented |
+| VOL-VII-7.10 | ADR-0009 | logs, metrics, traces, probes | redaction/metrics/endpoint tests | `VERIFIED` locally |
+| VOL-III-3.2; VOL-VIII-8.3 | ADR-0010 | pinned CI, containers, Kustomize, SBOM | local checks plus remote CI | Remote execution pending |
+| ANX-A/B/C; VOL-VIII-8.4 | N/A | catalogs; gate/evidence process | documentary review | `PENDING_GOVERNANCE_APPROVAL` |
+
 ## Coverage statement
 
 - Normative and governance documents: present, with open governance gaps.

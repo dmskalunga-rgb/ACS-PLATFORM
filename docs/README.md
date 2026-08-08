@@ -19,3 +19,13 @@ execution and governance material.
 Documents under `architecture/`, `requirements/`, `decisions/`, `traceability/`,
 `operations/`, and `evidence/` are supporting records. They become authoritative
 only to the extent explicitly approved under the baseline's governance process.
+
+## Phase 0 implementation records
+
+- `architecture/decisions/` — ADR-0001 through ADR-0010.
+- `engineering/` — engineering, database, API, event, testing, and observability standards.
+- `security/ACS-DEVSECOPS-STANDARD.md` — pipeline and supply-chain controls.
+- `governance/ACS-QUALITY-GATE-PROCESS.md` — gate lifecycle; QG-18 through QG-22 remain
+  `UNDEFINED_IN_BASELINE`.
+- `governance/catalogs/` — non-normative ECOM, EDIM, and EDOLM working catalogs.
+- `evidence/` — evidence schema and phase records.
