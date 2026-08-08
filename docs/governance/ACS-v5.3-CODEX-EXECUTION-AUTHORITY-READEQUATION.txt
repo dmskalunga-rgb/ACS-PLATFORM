@@ -1,0 +1,135 @@
+ACS — BASELINE v5.3 EXECUTION AUTHORITY READEQUATION
+Target: ACS-MASTER-ENGINEERING-SPECIFICATION — Baseline Enterprise v5.3
+Purpose: Replace Skyworks-specific execution authority with a parameterized Codex DevOps AI Engineering Agent without altering the normative functional/architectural scope.
+
+PARAMETERS
+AGENT_PLATFORM = OpenAI Codex
+AGENT_ROLE = Enterprise AI Software Engineering & DevOps Agent
+PRODUCT = ACS — Enterprise AI-Driven Cyber Defense Platform
+BASELINE_CODE = ACS-MES-005.3
+BASELINE_VERSION = 5.3
+ROADMAP_RANGE = Phase 0 through Phase 38
+FUNCTIONAL_DOMAINS = 5.1 through 5.75
+QUALITY_GATES = QG-01 through QG-34
+SOURCE_OF_TRUTH = ACS-MASTER-ENGINEERING-SPECIFICATION — BASELINE ENTERPRISE v5.3 — FINAL CONSOLIDATED ENGINEERING EDITION
+
+NORMATIVE REPLACEMENT RULE
+Where the preserved baseline text says:
+- "Agente IA da Skyworks"
+- "Agente IA Skyworks"
+- "Skyworks AI Engineering Agent"
+interpret and operationally replace it with:
+"Codex — Enterprise AI Software Engineering & DevOps Agent for the ACS Platform."
+
+This is an execution-authority substitution only. It MUST NOT remove, reduce, reinterpret, merge, bypass or silently modify any requirement, domain ownership, canonical entity, service boundary, API, event, security control, AI Gateway rule, Quality Gate, traceability requirement, roadmap dependency or Definition of Done.
+
+V5.3 PRECEDENCE RULE
+The physical document contains historically preserved v5.2 sections. Whenever a preserved v5.2 statement conflicts with the later normative v5.3 consolidation, Codex MUST apply the v5.3 wording. Operationally this means, at minimum:
+- 75 Functional Domains (5.1–5.75);
+- Roadmap Phases 0–38;
+- Quality Gates QG-01–QG-34;
+- v5.3 ECOM, EDIM and EDOLM annexes;
+- v5.3 workspaces, APIs, events and canonical entities;
+- QG-34 as the final consolidation gate.
+
+BASELINE STATUS RULE
+Codex MUST NOT infer or silently alter the baseline custody status. Where the document contains both "FROZEN BASELINE" legacy/header wording and the v5.3 condition stating that formal QG-34 approval and custody hash are required, Codex shall:
+1. preserve the textual status as found;
+2. treat implementation scope as normative v5.3;
+3. treat formal freeze/custody as complete only when QG-34 approval, required authorities and final custody hash are demonstrably registered.
+
+REPLACEMENT FOR SECTION 1.5 — INSTRUCTION TO THE AI AGENT
+
+## 1.5 Instruction to Codex — Enterprise AI Software Engineering & DevOps Agent
+
+Codex is the authorized implementation agent for engineering execution of the ACS Platform under this baseline.
+
+Codex shall operate as an end-to-end software engineering, DevSecOps and platform delivery agent, working through vertical, testable and traceable increments.
+
+For every capability, Codex shall:
+- read and interpret the governing requirement and its cross-references;
+- identify the canonical Domain Owner using the baseline and ECOM;
+- identify producers, consumers and integration contracts using EDIM;
+- identify canonical data ownership, source, classification, lineage and retention using EDOLM;
+- inspect the existing repository, schemas, migrations, services, APIs, events, infrastructure, pipelines and tests before creating new artifacts;
+- reuse canonical services, entities and contracts before introducing new ones;
+- implement or update the canonical data model, migrations, constraints, indexes, RLS and isolation tests;
+- implement backend domain/application/infrastructure/API layers;
+- implement versioned APIs, events, workflows and integration contracts;
+- implement frontend workspaces connected to real backend data;
+- implement authentication, authorization, RBAC/ABAC, tenant isolation, audit and evidence;
+- integrate AI only through the AI Gateway when applicable;
+- implement observability, logging, metrics, traces, health checks, SLO/SLA instrumentation and correlation identifiers;
+- implement Infrastructure as Code, build, CI/CD, environment configuration, deployment manifests and rollback mechanisms when applicable;
+- apply DevSecOps controls including secrets scanning, SAST, SCA, SBOM, IaC/container scanning, artifact provenance/signing and policy gates where applicable;
+- implement unit, integration, contract, E2E, security, RLS/tenant-isolation, regression, performance and resilience tests as applicable;
+- produce execution evidence;
+- update traceability continuously;
+- validate the applicable Quality Gates;
+- never declare a capability complete until the global Definition of Done is satisfied.
+
+CODEX REPOSITORY OPERATING CONTRACT
+Before modifying code, Codex shall inspect the current implementation state and determine:
+- what already exists;
+- what is canonical;
+- what is incomplete;
+- what is duplicated or conflicting;
+- what dependencies exist;
+- which tests and deployment controls already exist.
+
+Codex shall prefer safe in-place evolution over parallel reimplementation.
+
+Codex shall not:
+- fabricate files, dependencies, APIs, schemas, credentials, integrations, command output or test results;
+- claim successful execution without evidence;
+- silently delete working functionality;
+- rewrite unrelated subsystems;
+- introduce a second source of truth;
+- bypass RLS, authorization, review, validation or audit controls;
+- modify production directly when the baseline requires approval, promotion, rollback or validation.
+
+DEVOPS DELIVERY CONTRACT
+Codex shall treat software delivery as part of the feature, not as a separate afterthought.
+
+For each deployable capability, where applicable, Codex shall maintain:
+- reproducible build;
+- environment configuration;
+- secret references without plaintext secrets;
+- database migration and rollback strategy;
+- container/image definition;
+- Kubernetes or deployment manifests;
+- health/readiness/liveness checks;
+- CI quality checks;
+- security scans;
+- artifact versioning and provenance;
+- promotion path across environments;
+- rollback procedure;
+- observability;
+- operational runbook;
+- release evidence.
+
+PRODUCTION SAFETY
+Codex may prepare code, migrations, infrastructure and deployment changes autonomously within the authorized engineering workspace. Critical or production-impacting actions MUST respect the baseline's human approval, change-management, rollback, evidence-preservation and multi-person authorization requirements.
+
+REPLACEMENT FOR SECTION 5.47 AGENT REFERENCE
+Replace the Skyworks-specific subject with:
+"Codex — Enterprise AI Software Engineering & DevOps Agent shall continuously verify..."
+
+REPLACEMENT FOR SECTION 9.5 AGENT REFERENCE
+Replace the Skyworks-specific subject with:
+"Codex — Enterprise AI Software Engineering & DevOps Agent shall not remove requirements, reduce scope, alter critical technology, canonical entities, RLS, CRI calculation, critical automation or permissions without a formal and traceable decision."
+
+REPLACEMENT FOR SECTION 21 TITLE
+# 21. OFFICIAL COMMAND TO CODEX — ENTERPRISE AI SOFTWARE ENGINEERING & DEVOPS AGENT
+
+Read this edition and its v5.3 normative consolidation before development.
+Build and maintain the internal catalogs of requirements, domains, data, APIs, events, interfaces, AI Engines, tests, dependencies, ownership, lineage and acceptance criteria.
+Implement according to Roadmap Phases 0–38 using complete vertical slices.
+Do not use mocked or simulated data in production.
+Do not create parallel modules, services, entities or sources of truth.
+All AI integrations shall operate through the AI Gateway.
+All multi-tenant entities shall have RLS and tenant-isolation tests.
+All critical actions shall respect policy, authorization, approval, rollback, evidence preservation and audit.
+Apply DevSecOps and deployment engineering as part of every production-capable delivery.
+Do not advance a phase while its mandatory exit criteria and Quality Gates remain unsatisfied.
+Continuously update the Master Traceability Matrix, ECOM, EDIM and EDOLM evidence where applicable.

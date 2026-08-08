@@ -1,0 +1,4134 @@
+ACS-MASTER-ENGINEERING-SPECIFICATION
+BASELINE ENTERPRISE v5.3
+FINAL CONSOLIDATED ENGINEERING EDITION
+
+Enterprise AI-Driven Cyber Defense Platform
+Software Architecture & Engineering Master Specification
+
+Código: ACS-MES-005.3
+Estado: FINAL CONSOLIDATED EDITION — FROZEN BASELINE
+Classificação: CONFIDENTIAL — ENTERPRISE ENGINEERING SPECIFICATION
+Formato oficial: texto UTF-8
+Autoridade de implementação: Agente IA da Skyworks
+Substitui integralmente: Baseline Enterprise v5.2 — Final Consolidated Engineering Edition
+
+========================================================================================
+
+ÍNDICE MESTRE ÚNICO
+
+VOLUME I — GOVERNANÇA E FUNDAÇÃO
+1. Governança Documental e Diretriz Mestre
+   1.1 Identificação
+   1.2 Propósito
+   1.3 Missão
+   1.4 Princípios não negociáveis
+   1.5 Instrução ao Agente IA da Skyworks
+   1.6 Critérios de interpretação
+
+VOLUME II — ARQUITETURA EMPRESARIAL
+2. Arquitetura Empresarial
+   2.1 Princípios arquitetónicos
+   2.2 Arquitetura de negócio
+   2.3 Arquitetura de informação
+   2.4 Arquitetura de aplicação
+   2.5 Arquitetura de integração
+   2.6 Arquitetura de implantação
+   2.7 Serviços transversais
+   2.8–2.13 Ecossistema ACS
+
+VOLUME III — ARQUITETURA DE CYBERDEFESA
+3. Arquitetura de Cyberdefesa
+   3.1 Referenciais
+   3.2 Autoproteção da ACS
+   3.3 Automação defensiva
+
+VOLUME IV — ARQUITETURA CORPORATIVA DE IA
+4. Enterprise Artificial Intelligence Architecture
+   4.1–4.10 AI Gateway, modelos, contexto, RAG, grafos, XAI e governação
+   4.11–4.15 Motores Marketplace, Learning, Threat Research e Collaborative Intelligence
+
+VOLUME V — DOMÍNIOS FUNCIONAIS ENTERPRISE
+5. Domínios 5.1–5.70
+   5.1–5.49 Fundamentos, operações e plataforma comercial
+   5.50–5.60 Inteligência e resiliência avançada
+   5.61 ACS Marketplace
+   5.62 ACS Academy
+   5.63 ACS Threat Research Labs
+   5.64 ACS Open Integration SDK
+   5.65 ACS Cyber Intelligence Exchange
+   5.66 ACS MSSP Edition
+   5.67 ACS Cyber Command Center
+   5.68 ACS Compliance Intelligence
+   5.69 ACS Autonomous Validation Lab
+   5.70 ACS Sector Packs
+
+VOLUME VI — ARQUITETURA CORPORATIVA DE DADOS
+6. Modelo de Dados Unificado
+   6.1–6.7 Princípios, camadas, modelo SQL, segurança, escala e entregáveis
+   6.4.19–6.4.23 Modelos Marketplace, Academy, Threat Labs, SDK e CIX
+   6.8 Relações e integridade v5.1
+
+VOLUME VII — FRONTEND, BACKEND E INTEGRAÇÃO
+7. Application and Integration Architecture
+   7.1–7.10 Arquitetura base
+   7.11–7.18 Workspaces, APIs, serviços e segurança do Ecossistema ACS
+
+VOLUME VIII — ROADMAP, ENGENHARIA E QUALIDADE
+8. Roadmap e Governança de Entrega
+   8.1 Roadmap 0–32
+   8.2 Definition of Ready
+   8.3 Definition of Done
+   8.4 Quality Gates
+   8.5 Identificadores
+   8.6 Matriz Mestre de Rastreabilidade
+   8.7 Glossário
+
+VOLUME IX — CONSOLIDAÇÃO EDITORIAL FINAL
+9. Baseline Governance
+10–22. Índices, matrizes, referências cruzadas, validação, comando ao Agente
+       IA da Skyworks e Termo Final de Congelamento
+
+================================================================================
+VOLUME I — GOVERNANÇA E FUNDAÇÃO
+================================================================================
+
+# 1. GOVERNANÇA DOCUMENTAL E DIRETRIZ MESTRE
+
+## 1.1 Identificação
+
+Código documental: ACS-MES-005.3
+Versão: 5.3
+Estado: FINAL CONSOLIDATED EDITION — FROZEN BASELINE
+Produto: Angola Cyber Shield — ACS
+Classificação: CONFIDENTIAL — ENTERPRISE ENGINEERING SPECIFICATION
+Finalidade: especificação normativa para o Agente IA da Skyworks
+Formato oficial: documento único em texto UTF-8
+
+## 1.2 Propósito
+
+Esta especificação é a fonte normativa única para projetar, implementar, testar,
+documentar, implantar, operar e evoluir a Plataforma ACS.
+
+A ACS deverá ser uma plataforma comercial SaaS multiempresa de cyberdefesa,
+resiliência, governança, inteligência, deteção, resposta e recuperação, adaptável
+a pequenas, médias e grandes organizações, incluindo instituições públicas,
+infraestruturas críticas e ambientes regulados.
+
+## 1.3 Missão
+
+Reduzir o risco cibernético e aumentar a resiliência das organizações mediante
+uma arquitetura integrada de segurança, dados, automação e inteligência artificial,
+com capacidade de prevenir, identificar, proteger, detetar, responder e recuperar.
+
+## 1.4 Princípios não negociáveis
+
+1. Proibição de dados mockados ou simulados em produção.
+2. Toda funcionalidade deverá integrar frontend, backend, API, Supabase/PostgreSQL,
+   autenticação, autorização, auditoria, observabilidade, IA quando aplicável e testes.
+3. Nenhuma página será concluída enquanto não consumir dados reais.
+4. Multi-tenancy, RLS, menor privilégio, Zero Trust e segregação de funções são obrigatórios.
+5. A IA deverá ser transversal, governada, explicável e independente de fornecedor externo.
+6. Funções essenciais deverão operar em modo degradado sem IA.
+7. Ações críticas exigirão aprovação humana, limites, rollback e preservação de evidências.
+8. A própria plataforma deverá possuir mecanismos de autoproteção em cloud e on-premises.
+9. A plataforma deverá suportar Linux e Windows Server, containers, Kubernetes,
+   cloud pública, privada, híbrida e implantação on-premises.
+10. É proibida a criação de módulos isolados, serviços duplicados ou fontes de verdade paralelas.
+
+## 1.5 Instrução ao Agente IA da Skyworks
+
+O Agente deverá desenvolver por entregas verticais e demonstráveis. Para cada capacidade:
+
+- interpretar o requisito;
+- identificar o domínio proprietário;
+- validar dependências;
+- criar ou reutilizar o modelo de dados canónico;
+- implementar migrations, constraints, índices e RLS;
+- implementar backend, APIs e eventos;
+- implementar frontend conectado;
+- aplicar segurança, auditoria e observabilidade;
+- integrar IA pelo AI Gateway quando aplicável;
+- produzir testes e evidências;
+- atualizar a Matriz Mestre de Rastreabilidade;
+- não declarar conclusão enquanto o Definition of Done não estiver satisfeito.
+
+## 1.6 Critérios de interpretação
+
+Em caso de ambiguidade, aplicar a seguinte ordem:
+
+1. segurança e preservação de evidências;
+2. isolamento multi-tenant;
+3. integridade e disponibilidade;
+4. requisitos explícitos desta baseline;
+5. arquitetura empresarial e domínios canónicos;
+6. rastreabilidade e critérios de aceite;
+7. decisão arquitetónica formal.
+
+Nenhum requisito poderá ser removido, reduzido ou substituído silenciosamente.
+
+================================================================================
+VOLUME II — ARQUITETURA EMPRESARIAL
+================================================================================
+
+# 2. ARQUITETURA EMPRESARIAL
+
+## 2.1 Princípios arquitetónicos
+
+- Business First;
+- Security by Design;
+- Privacy by Design;
+- AI by Design;
+- Data Centric;
+- API First;
+- Event Driven;
+- Multi-Tenant by Design;
+- Cloud Native com portabilidade on-premises;
+- Zero Trust;
+- Defense in Depth;
+- Model Agnostic;
+- Vendor Independent;
+- Observability by Design;
+- Resilience by Design;
+- Human-in-the-Loop;
+- Automation with Guardrails.
+
+## 2.2 Arquitetura de negócio
+
+As capacidades de negócio da ACS são organizadas em:
+
+- fundação da plataforma;
+- identidade e acessos;
+- inteligência de ativos;
+- proteção de endpoints;
+- defesa de rede;
+- segurança cloud e workloads;
+- segurança de aplicações e APIs;
+- vulnerabilidades e exposição;
+- inteligência de ameaças;
+- analytics e SOC;
+- resposta e automação;
+- resiliência;
+- segurança de dados;
+- IA e inteligência cognitiva;
+- inteligência executiva;
+- Cyber Mission Control;
+- governança, risco e conformidade;
+- comercial, faturação e customer success.
+
+## 2.3 Arquitetura de informação
+
+Entidades canónicas principais:
+
+- tenant;
+- unidade organizacional;
+- utilizador;
+- identidade;
+- ativo;
+- aplicação;
+- serviço;
+- dado;
+- vulnerabilidade;
+- exposição;
+- ameaça;
+- alerta;
+- incidente;
+- risco;
+- controlo;
+- evidência;
+- política;
+- workflow;
+- aprovação;
+- relatório;
+- subscrição;
+- fatura;
+- modelo de IA;
+- contexto;
+- inferência;
+- score de resiliência.
+
+Cada conceito deverá possuir uma única fonte de verdade.
+
+## 2.4 Arquitetura de aplicação
+
+A arquitetura deverá combinar:
+
+- módulos de domínio;
+- serviços de aplicação;
+- serviços transversais;
+- APIs versionadas;
+- Event Bus;
+- Workflow Engine;
+- Policy Engine;
+- AI Gateway;
+- Integration Gateway;
+- Reporting Service;
+- Security Data Lake;
+- Knowledge Graph;
+- Cyber Asset Graph;
+- observabilidade corporativa.
+
+## 2.5 Arquitetura de integração
+
+Meios suportados:
+
+- REST;
+- RPC;
+- WebSocket;
+- Supabase Realtime;
+- eventos;
+- webhooks;
+- syslog;
+- SNMPv3;
+- SSH;
+- WinRM;
+- WMI;
+- LDAP;
+- Kerberos;
+- SAML;
+- OAuth 2.0;
+- OpenID Connect;
+- RADIUS;
+- TACACS+;
+- STIX/TAXII;
+- NetFlow/IPFIX/sFlow;
+- agentes e coletores.
+
+## 2.6 Arquitetura de implantação
+
+A plataforma deverá suportar:
+
+- Linux;
+- Windows Server;
+- Docker;
+- Kubernetes;
+- cloud pública;
+- cloud privada;
+- cloud híbrida;
+- on-premises;
+- implantação distribuída;
+- modo desconectado limitado;
+- alta disponibilidade;
+- escalabilidade horizontal;
+- disaster recovery.
+
+## 2.7 Serviços transversais
+
+É proibida a duplicação dos seguintes serviços:
+
+- Identity Service;
+- Authorization Service;
+- Audit Service;
+- Notification Service;
+- Workflow Engine;
+- Policy Engine;
+- Event Bus;
+- Reporting Service;
+- Integration Gateway;
+- AI Gateway;
+- Configuration Service;
+- Secret Management;
+- Observability Platform;
+- Telemetry Platform;
+- Security Data Lake;
+- Knowledge Graph;
+- Cyber Asset Graph.
+
+## 2.8 Arquitetura do Ecossistema ACS
+
+A Baseline Enterprise v5.2 incorpora como capacidades empresariais nativas:
+
+- Marketplace Ecosystem;
+- Training, Academy and Certification Ecosystem;
+- Threat Research Ecosystem;
+- Partner and Publisher Ecosystem;
+- Open Integration Ecosystem;
+- Cyber Intelligence Exchange Ecosystem.
+
+Estas capacidades deverão reutilizar os serviços transversais existentes, incluindo
+Identity Service, Authorization Service, Audit Service, Event Bus, Workflow Engine,
+Policy Engine, Reporting Service, Integration Gateway, AI Gateway, Security Data Lake,
+Knowledge Graph e Cyber Asset Graph.
+
+## 2.9 Arquitetura Empresarial do ACS Marketplace
+
+O Marketplace deverá operar como ecossistema governado de publicação, certificação,
+licenciamento, aquisição, instalação, atualização e revogação de extensões.
+
+## 2.10 Arquitetura Empresarial da ACS Academy
+
+A Academy deverá operar como sistema corporativo de formação, laboratório, Cyber Range,
+avaliação, certificação e desenvolvimento contínuo de competências.
+
+## 2.11 Arquitetura Empresarial do ACS Threat Research Labs
+
+O Threat Research Labs deverá constituir o centro oficial de pesquisa, engenharia de
+deteção, análise de malware e produção de inteligência da plataforma.
+
+## 2.12 Arquitetura Empresarial do ACS Open Integration SDK
+
+O Open Integration SDK deverá fornecer contratos, bibliotecas, ferramentas, templates,
+sandbox, testes e certificação para extensões compatíveis com a ACS.
+
+## 2.13 Arquitetura Empresarial do ACS Cyber Intelligence Exchange
+
+O CIX deverá permitir intercâmbio federado e governado de inteligência cibernética
+entre organizações, comunidades setoriais, CERTs, CSIRTs, parceiros e instituições
+autorizadas, com classificação, consentimento, anonimização e revogação.
+
+## 2.14 Managed Security Services Ecosystem
+
+A ACS deverá suportar operações MSSP hierárquicas com isolamento rigoroso,
+RLS, SLA, billing, delegated administration e auditoria por cliente.
+
+## 2.15 Cyber Command and Crisis Management Architecture
+
+O Cyber Command Center deverá complementar Mission Control e Executive Decision
+Center, fornecendo sala de situação, common operating picture, cadeia de comando,
+gestão de crise, decisões, recursos, comunicações e recuperação.
+
+## 2.16 Compliance Intelligence Architecture
+
+A arquitetura deverá correlacionar requisitos regulatórios, frameworks, controlos,
+políticas, ativos, evidências, riscos, auditorias e planos de ação.
+
+## 2.17 Validation and Promotion Governance Architecture
+
+A ACS deverá possuir ambiente isolado para validar regras, playbooks, modelos,
+conectores, agentes, plugins, migrations, APIs e pacotes antes da promoção.
+
+## 2.18 Sector-Specific Cyber Defense Architecture
+
+Sector Packs deverão especializar a ACS por setor sem criar forks da plataforma.
+
+================================================================================
+VOLUME III — ARQUITETURA DE CYBERDEFESA
+================================================================================
+
+# 3. ARQUITETURA DE CYBERDEFESA
+
+## 3.1 Referenciais
+
+A ACS deverá utilizar como referências estruturantes:
+
+- NIST CSF nas funções Govern, Identify, Protect, Detect, Respond e Recover;
+- CIS Controls e CIS Implementation Groups;
+- CIS Benchmarks e baselines de fabricantes;
+- Zero Trust;
+- MITRE ATT&CK;
+- NIST para resposta a incidentes;
+- OWASP para aplicações e APIs;
+- práticas de segurança, privacidade, continuidade e auditoria aplicáveis.
+
+## 3.2 Autoproteção da própria ACS
+
+A plataforma deverá proteger:
+
+- identidade e autenticação;
+- APIs;
+- interfaces administrativas;
+- código e artefactos;
+- pipelines;
+- agentes e coletores;
+- configurações;
+- logs;
+- modelos de IA;
+- RAG e embeddings;
+- Data Lake;
+- backups;
+- segredos;
+- infraestrutura.
+
+Controlos mínimos:
+
+- WAF e API Gateway;
+- MFA e PAM;
+- rate limiting;
+- deteção de abuso;
+- hardening;
+- FIM;
+- SAST, DAST, SCA e SBOM;
+- assinatura de artefactos;
+- secrets management;
+- segmentação;
+- zero standing privileges;
+- backup e restore;
+- kill switch;
+- modo somente leitura;
+- modo degradado;
+- auditoria imutável.
+
+## 3.3 Níveis de automação defensiva
+
+Nível 0 — observação.
+Nível 1 — recomendação.
+Nível 2 — execução após aprovação humana.
+Nível 3 — automação condicionada por política.
+Nível 4 — contenção de emergência previamente autorizada, limitada e reversível.
+
+A plataforma não deverá realizar retaliação, exploração ofensiva não autorizada
+ou ações contra infraestrutura de terceiros.
+
+================================================================================
+VOLUME IV — ARQUITETURA CORPORATIVA DE INTELIGÊNCIA ARTIFICIAL
+================================================================================
+
+# 4. ENTERPRISE ARTIFICIAL INTELLIGENCE ARCHITECTURE
+
+## 4.1 Objetivo
+
+A IA constitui uma camada cognitiva transversal. Nenhum domínio poderá implementar
+modelos de forma isolada ou comunicar diretamente com modelos.
+
+## 4.2 AI Gateway
+
+O AI Gateway deverá realizar:
+
+- registo e descoberta de modelos;
+- autenticação e autorização;
+- isolamento por tenant;
+- roteamento por capacidade, custo, latência e classificação;
+- quotas;
+- versionamento;
+- fallback;
+- balanceamento;
+- observabilidade;
+- auditoria;
+- filtragem de entrada e saída;
+- proteção contra prompt injection e jailbreak;
+- sandbox de ferramentas;
+- gestão de GPU/CPU;
+- rollback;
+- modo degradado.
+
+## 4.3 Capacidades tecnológicas
+
+A arquitetura deverá suportar:
+
+- IA Generativa;
+- IA Preditiva;
+- PLN/NLP;
+- Machine Learning;
+- Deep Learning;
+- LLM e SLM;
+- OCR;
+- embeddings;
+- modelos de séries temporais;
+- deteção de anomalias;
+- Graph AI;
+- modelos de recomendação;
+- classificação e clustering.
+
+## 4.4 Engenharia de Contexto
+
+O Context Engineering Engine deverá construir contexto:
+
+- organizacional;
+- temporal;
+- operacional;
+- histórico;
+- de ativos;
+- de identidade;
+- de risco;
+- de incidentes;
+- de ameaças;
+- de dados;
+- de autorização.
+
+Deverá impedir mistura de contexto entre tenants e excluir dados expirados,
+revogados, não autorizados ou incompatíveis com a classificação do utilizador.
+
+## 4.5 RAG privado
+
+O RAG deverá possuir:
+
+- ingestão controlada;
+- parsing;
+- OCR;
+- chunking;
+- embeddings;
+- indexação;
+- pesquisa híbrida;
+- reranking;
+- ACL por documento;
+- tenant isolation;
+- citações;
+- validade;
+- revogação;
+- eliminação segura;
+- proteção contra conteúdo malicioso.
+
+## 4.6 Knowledge Graph e Cyber Asset Graph
+
+O Knowledge Graph deverá correlacionar conhecimento, políticas, controlos,
+ameaças, riscos, incidentes e evidências.
+
+O Cyber Asset Graph deverá correlacionar identidades, privilégios, ativos,
+serviços, aplicações, vulnerabilidades, dados, caminhos de ataque, backups
+e processos de negócio.
+
+## 4.7 Motores cognitivos
+
+### 4.7.1 Generative Intelligence Engine
+Relatórios, resumos, documentação, políticas, playbooks, recomendações e apoio à investigação.
+
+### 4.7.2 Predictive Intelligence Engine
+Previsão de risco, falhas, ataques, indisponibilidade, exposição, capacidade e recuperação.
+
+### 4.7.3 Behavioral Intelligence Engine
+UEBA, NBAD, Insider Risk e comportamento de identidades, entidades, dispositivos e rede.
+
+### 4.7.4 Security Intelligence Engine
+BAS, CTEM, Attack Path Analytics, DSPM, FIM, malware, vulnerabilidades e Threat Intelligence.
+
+### 4.7.5 Digital Twin Intelligence Engine
+Simulação de falhas, ransomware, blast radius, failover, impacto e recuperação.
+
+### 4.7.6 Executive Intelligence Engine
+CRI, KPIs, KRIs, risco financeiro, maturidade, tendências e recomendações executivas.
+
+### 4.7.7 Cyber Mission Control Orchestrator
+Correlação e priorização operacional entre todos os domínios.
+
+## 4.8 Explainable AI
+
+Toda inferência crítica deverá guardar:
+
+- modelo;
+- versão;
+- contexto;
+- fontes;
+- fatores;
+- nível de confiança;
+- limitações;
+- explicação;
+- decisão humana;
+- resultado posterior.
+
+## 4.9 AI Security
+
+Proteger contra:
+
+- prompt injection;
+- indirect prompt injection;
+- jailbreak;
+- data poisoning;
+- model poisoning;
+- model extraction;
+- membership inference;
+- fuga de dados;
+- tool abuse;
+- excessive agency;
+- denial of service;
+- supply-chain de modelos;
+- embeddings maliciosos.
+
+## 4.10 AI Governance e observabilidade
+
+Implementar catálogo, licenças, versões, avaliações, métricas, drift,
+bias, aprovação, implantação, rollback, incidentes, consumo e auditoria.
+
+Modelos não poderão conceder privilégios, aprovar pagamentos, eliminar evidências,
+alterar políticas críticas ou modificar código em produção.
+
+## 4.11 Marketplace Intelligence Engine
+
+Responsável por recomendação, compatibilidade, reputação, risco, classificação,
+descoberta e priorização de pacotes, conectores, playbooks, dashboards e modelos.
+
+## 4.12 Learning Intelligence Engine
+
+Responsável por trilhas adaptativas, avaliação de competências, recomendação de
+conteúdo, mentor virtual, personalização de laboratórios e apoio à certificação.
+
+## 4.13 Threat Research Intelligence Engine
+
+Responsável por classificação de malware, extração e correlação de IOC/IOA,
+geração assistida e validação de regras Sigma/YARA e produção de conhecimento.
+
+## 4.14 Collaborative Intelligence Engine
+
+Responsável pela correlação federada do CIX, cálculo de confiança, eliminação de
+duplicidades, anonimização assistida, deteção de campanhas e alertas setoriais.
+
+## 4.15 Regras de integração dos novos motores
+
+Todos os motores deverão:
+
+- operar exclusivamente através do AI Gateway;
+- respeitar tenant isolation, finalidade e classificação;
+- produzir explicações, confiança, auditoria e lineage;
+- suportar fallback e modo degradado;
+- exigir aprovação humana para publicação, partilha ou execução crítica.
+
+## 4.16 MSSP Operations Intelligence Engine
+Priorização multicliente, previsão de SLA, balanceamento de analistas, capacidade,
+campanhas comuns e rentabilidade, sem mistura de dados entre clientes.
+
+## 4.17 Cyber Command Intelligence Engine
+Situação operacional, cenários, impacto, dependências, prioridades, briefings e recuperação.
+
+## 4.18 Compliance Intelligence Engine
+Mapeamento de frameworks, aplicabilidade, evidências, gaps, drift e recomendações.
+
+## 4.19 Validation Intelligence Engine
+Seleção de testes, cenários, cobertura, regressões, risco de promoção e resultados.
+
+## 4.20 Sector Intelligence Engine
+Recomendações, benchmarks, maturidade, ameaças, controlos e relatórios setoriais.
+
+## 4.21 Regras dos motores v5.2
+Todos deverão operar pelo AI Gateway, com isolamento, explicabilidade, auditoria,
+fallback e aprovação humana para decisões críticas.
+
+================================================================================
+VOLUME V — DOMÍNIOS FUNCIONAIS ENTERPRISE
+================================================================================
+
+# 5. DOMÍNIOS E REQUISITOS FUNCIONAIS
+
+Cada domínio deverá definir objetivo, escopo, capacidades, dados, APIs, eventos,
+interfaces, IA, permissões, auditoria, testes, dependências e critérios de aceite.
+
+### 5.1 Governança de cibersegurança
+
+Baseado na função Govern do NIST CSF:
+
+* estratégia;
+* políticas;
+* responsabilidades;
+* apetite ao risco;
+* contexto organizacional;
+* requisitos legais;
+* cadeia de fornecimento;
+* gestão de exceções;
+* planos de tratamento;
+* comités;
+* decisões;
+* evidências;
+* indicadores;
+* revisões periódicas.
+
+### 5.2 Gestão de frameworks
+
+Criar biblioteca parametrizável para:
+
+* NIST CSF 2.0;
+* CIS Controls v8.1;
+* CIS Implementation Groups;
+* NIST SP 800-207;
+* NIST SP 800-61 Rev. 3;
+* MITRE ATT&CK;
+* OWASP;
+* CIS Benchmarks;
+* CIS Controls;
+* CIS Implementation Groups;
+* guias de hardening de fabricantes;
+* benchmarks de configuração segura para sistemas operativos, bases de dados, cloud, containers, aplicações, equipamentos de rede e dispositivos;
+* ISO/IEC 27001 e 27002, quando licenciadamente aplicável;
+* políticas internas;
+* requisitos legais angolanos;
+* frameworks setoriais adicionados futuramente.
+
+Permitir:
+
+* criação de perfis atuais e desejados;
+* mapeamento cruzado;
+* avaliação;
+* plano de ação;
+* evidências;
+* responsáveis;
+* prazos;
+* maturidade;
+* exceções;
+* relatórios de lacunas.
+
+Não copiar integralmente conteúdo protegido por licença. Armazenar referências, códigos, mapeamentos e conteúdo permitido.
+
+### 5.3 Inventário de ativos
+
+Gerir:
+
+* computadores;
+* servidores;
+* máquinas virtuais;
+* aplicações;
+* bases de dados;
+* equipamentos de rede;
+* dispositivos móveis;
+* contas;
+* identidades;
+* serviços cloud;
+* domínios;
+* certificados;
+* APIs;
+* fornecedores;
+* ativos OT/IoT;
+* dados críticos;
+* processos de negócio.
+
+Cada ativo deve possuir:
+
+* proprietário;
+* localização;
+* criticidade;
+* classificação;
+* dependências;
+* exposição;
+* vulnerabilidades;
+* controlos;
+* risco;
+* estado;
+* histórico;
+* fonte;
+* data da última verificação.
+
+### 5.4 Gestão de vulnerabilidades
+
+* importação de resultados;
+* normalização;
+* CVE/CVSS quando disponíveis;
+* classificação contextual;
+* criticidade do ativo;
+* explorabilidade;
+* exposição externa;
+* priorização baseada em risco;
+* criação de tarefas;
+* SLA;
+* exceções;
+* aceitação de risco;
+* evidência de correção;
+* reteste;
+* tendências.
+
+A plataforma não deve alegar realizar scanning sem que exista um coletor ou mecanismo real instalado e operacional.
+
+### 5.5 Gestão de risco
+
+Criar:
+
+* registo de riscos;
+* ameaças;
+* vulnerabilidades;
+* ativos afetados;
+* probabilidade;
+* impacto financeiro;
+* impacto operacional;
+* impacto legal;
+* impacto reputacional;
+* risco inerente;
+* controlos;
+* eficácia;
+* risco residual;
+* proprietário;
+* tratamento;
+* prazo;
+* aceite;
+* revisão.
+
+Disponibilizar metodologias qualitativas e quantitativas configuráveis.
+
+### 5.6 Zero Trust
+
+Implementar os pilares:
+
+* identidade;
+* dispositivos;
+* aplicações e workloads;
+* dados;
+* redes;
+* visibilidade e análise;
+* automação e orquestração.
+
+Funcionalidades:
+
+* score de confiança;
+* score de risco;
+* avaliação de sessão;
+* estado do dispositivo;
+* MFA;
+* reautenticação;
+* acesso adaptativo;
+* menor privilégio;
+* segmentação lógica;
+* acesso temporário;
+* decisão baseada em política;
+* revogação;
+* trilha de decisão;
+* inventário de relações de confiança.
+
+### 5.7 Phishing e conscientização
+
+Implementar:
+
+* campanhas autorizadas de simulação;
+* modelos de campanha;
+* grupos;
+* calendário;
+* formação;
+* questionários;
+* métricas;
+* botão de reporte;
+* triagem de mensagens reportadas;
+* análise de cabeçalhos;
+* extração segura de indicadores;
+* classificação por IA;
+* acompanhamento de reincidência;
+* microformação;
+* certificados;
+* políticas de privacidade;
+* anonimização para relatórios executivos.
+
+As campanhas deverão possuir autorização formal, escopo, data, responsáveis e salvaguardas. Não expor publicamente colaboradores nem aplicar punições automatizadas.
+
+### 5.8 Monitorização e deteção
+
+Criar pipeline real para ingestão de:
+
+* logs de autenticação;
+* eventos de aplicações;
+* eventos de servidores;
+* eventos de endpoints;
+* firewalls;
+* DNS;
+* proxies;
+* email;
+* cloud;
+* bases de dados;
+* APIs;
+* sistemas empresariais.
+
+Implementar:
+
+* coletores;
+* conectores;
+* normalização;
+* timestamp confiável;
+* identificação de origem;
+* deduplicação;
+* regras de deteção;
+* correlação;
+* enriquecimento;
+* severidade;
+* confiança;
+* supressão;
+* agrupamento;
+* criação de alertas;
+* retenção;
+* pesquisa.
+
+Quando não existir uma integração real, a interface deverá indicar claramente “conector não configurado”, sem apresentar eventos fictícios.
+
+### 5.9 SOC e gestão de alertas
+
+* fila de alertas;
+* severidade;
+* prioridade;
+* SLA;
+* atribuição;
+* investigação;
+* linha temporal;
+* evidências;
+* observações;
+* indicadores;
+* entidades relacionadas;
+* hipóteses;
+* decisão;
+* encerramento;
+* falso positivo;
+* tuning;
+* métricas de MTTD, MTTA, MTTR e recorrência.
+
+### 5.10 Resposta a incidentes
+
+Implementar ciclo completo:
+
+* preparação;
+* deteção;
+* validação;
+* análise;
+* classificação;
+* contenção;
+* erradicação;
+* recuperação;
+* comunicação;
+* preservação de evidências;
+* lições aprendidas;
+* acompanhamento.
+
+Criar tipos:
+
+* ransomware;
+* malware;
+* phishing;
+* comprometimento de email;
+* acesso não autorizado;
+* fuga de dados;
+* ameaça interna;
+* ataque a aplicações;
+* DDoS;
+* comprometimento de fornecedor;
+* fraude;
+* perda de dispositivo;
+* comprometimento de credenciais;
+* sabotagem;
+* incidente cloud;
+* incidente OT/IoT.
+
+### 5.11 SOAR e playbooks
+
+Criar motor visual e executável de playbooks com:
+
+* gatilhos;
+* condições;
+* ações;
+* aprovação;
+* timeout;
+* retry;
+* rollback;
+* evidências;
+* responsáveis;
+* logs;
+* versão;
+* ambiente de teste.
+
+Exemplos:
+
+* bloquear conta;
+* revogar sessão;
+* forçar alteração de senha;
+* colocar endpoint em quarentena;
+* bloquear domínio;
+* bloquear IP;
+* remover mensagem;
+* abrir ticket;
+* notificar responsável;
+* recolher evidências;
+* iniciar backup protegido;
+* ativar plano de continuidade.
+
+Ações dependentes de ferramentas externas somente podem ser executadas quando houver conector real, credenciais válidas e autorização.
+
+### 5.12 Defesa contra ransomware avançado
+
+Criar módulo específico para:
+
+* ransomware tradicional;
+* fileless ransomware;
+* ataques living-off-the-land;
+* roubo de credenciais;
+* movimento lateral;
+* dupla extorsão;
+* exfiltração;
+* destruição de backups;
+* encriptação distribuída;
+* ataques a hipervisores;
+* comprometimento cloud;
+* wipers;
+* campanhas sofisticadas.
+
+Capacidades:
+
+* baseline comportamental;
+* deteção de anomalias;
+* alterações massivas de ficheiros;
+* padrões de encriptação;
+* execução suspeita;
+* abuso de ferramentas administrativas;
+* criação incomum de serviços;
+* acesso anormal a partilhas;
+* desativação de segurança;
+* alteração de backups;
+* exfiltração;
+* canary files autorizados;
+* isolamento;
+* revogação de credenciais;
+* ativação de contingência;
+* preservação forense.
+
+Não prometer proteção absoluta. Apresentar níveis de confiança, limitações e dependências.
+
+### 5.13 Continuidade e recuperação
+
+* Business Impact Analysis;
+* processos críticos;
+* RTO;
+* RPO;
+* dependências;
+* planos;
+* contactos;
+* locais alternativos;
+* fornecedores;
+* testes;
+* exercícios;
+* backups;
+* cópias imutáveis;
+* restauração;
+* prioridades;
+* comunicação de crise;
+* retorno à operação;
+* evidências dos testes.
+
+### 5.14 Gestão de políticas
+
+* criação;
+* templates;
+* versionamento;
+* aprovação;
+* publicação;
+* aceite;
+* revisão;
+* exceções;
+* evidências;
+* assinatura;
+* histórico;
+* mapeamento aos controlos.
+
+### 5.15 Gestão de fornecedores
+
+* cadastro;
+* criticidade;
+* serviços prestados;
+* dados acedidos;
+* avaliação;
+* risco;
+* contratos;
+* SLA;
+* incidentes;
+* evidências;
+* revisão;
+* plano de saída.
+
+### 5.16 Privacidade e proteção de dados
+
+* inventário de tratamentos;
+* categorias de dados;
+* titulares;
+* finalidades;
+* bases aplicáveis;
+* retenção;
+* partilha;
+* operadores;
+* medidas de segurança;
+* incidentes de privacidade;
+* pedidos de titulares;
+* aprovações;
+* evidências.
+
+Não fornecer parecer jurídico automatizado como definitivo. As saídas devem ser apresentadas como apoio à decisão.
+
+
+### 5.17 Gestão de configuração segura, CIS Benchmarks e hardening
+
+Criar um módulo completo de **Security Configuration Management — SCM**, responsável por avaliar, orientar, aprovar, implementar, monitorizar e auditar configurações seguras.
+
+O módulo deverá suportar, quando aplicável e licenciado:
+
+* CIS Benchmarks;
+* CIS Controls;
+* Microsoft Security Baselines;
+* guias de segurança de fabricantes;
+* recomendações NIST;
+* STIGs e referências equivalentes quando legalmente utilizáveis;
+* políticas internas;
+* baselines específicas por segmento;
+* perfis diferenciados por criticidade;
+* exceções documentadas.
+
+#### 5.17.1 Escopos de hardening
+
+Implementar baselines para:
+
+* Windows Server;
+* Windows 10 e 11;
+* Linux Ubuntu, Debian, Red Hat, Rocky Linux, AlmaLinux e distribuições suportadas;
+* macOS;
+* Active Directory;
+* Microsoft Entra ID;
+* servidores de ficheiros;
+* servidores web;
+* Apache;
+* Nginx;
+* IIS;
+* PostgreSQL;
+* Microsoft SQL Server;
+* MySQL e MariaDB;
+* Oracle Database, quando aplicável;
+* Supabase/PostgreSQL;
+* Docker;
+* Kubernetes;
+* hipervisores;
+* firewalls;
+* routers;
+* switches;
+* access points;
+* VPN;
+* endpoints;
+* dispositivos móveis;
+* cloud;
+* aplicações;
+* APIs;
+* navegadores;
+* email;
+* DNS;
+* DHCP;
+* proxies;
+* backups;
+* equipamentos OT e IoT quando suportados.
+
+#### 5.17.2 Funcionalidades de baseline
+
+Permitir:
+
+* criação de baseline;
+* clonagem;
+* versionamento;
+* comparação entre versões;
+* associação por tipo de ativo;
+* associação por grupo;
+* atribuição por tenant;
+* perfil mínimo, recomendado e reforçado;
+* validação automática;
+* validação manual;
+* evidências;
+* exceções;
+* aceite de risco;
+* prazo de correção;
+* proprietário;
+* estado;
+* rollback;
+* auditoria;
+* relatório de conformidade.
+
+Cada regra deverá possuir:
+
+* identificador;
+* título;
+* descrição;
+* justificativa;
+* impacto;
+* criticidade;
+* método de verificação;
+* método de remediação;
+* possibilidade de automação;
+* necessidade de reinício;
+* dependências;
+* riscos operacionais;
+* referência;
+* sistema e versão aplicável;
+* evidência esperada;
+* estado de conformidade.
+
+#### 5.17.3 Avaliação real
+
+A plataforma deverá receber dados reais por:
+
+* agente instalado;
+* coletor;
+* script assinado;
+* API autorizada;
+* SSH seguro;
+* WinRM;
+* SNMPv3;
+* integração com ferramentas de gestão;
+* importação de resultados assinados;
+* formulário de avaliação com evidência.
+
+Não apresentar um ativo como conforme sem uma avaliação real e identificável.
+
+#### 5.17.4 Remediação assistida
+
+A plataforma deverá:
+
+* gerar plano de remediação;
+* priorizar por risco;
+* agrupar alterações;
+* detetar dependências;
+* alertar sobre impacto;
+* criar janela de mudança;
+* exigir aprovação;
+* criar backup da configuração;
+* executar teste prévio;
+* aplicar alteração;
+* validar o resultado;
+* permitir rollback;
+* preservar logs;
+* atualizar o score.
+
+Ações automáticas deverão respeitar change management, aprovação, manutenção, rollback e continuidade operacional.
+
+### 5.18 Gestão de postura de segurança
+
+Criar um módulo unificado de **Security Posture Management**, com visão consolidada da postura de:
+
+* endpoints;
+* servidores;
+* identidades;
+* redes;
+* cloud;
+* aplicações;
+* bases de dados;
+* containers;
+* APIs;
+* dispositivos;
+* fornecedores;
+* dados.
+
+Implementar:
+
+* score por ativo;
+* score por controlo;
+* score por unidade;
+* score por tenant;
+* tendência;
+* criticidade;
+* exposição;
+* risco residual;
+* gaps;
+* recomendações;
+* planos de ação;
+* evidências;
+* exceções;
+* comparação com baseline;
+* maturidade.
+
+Os scores deverão ser calculados com dados persistidos, metodologia documentada, pesos configuráveis e explicação dos fatores.
+
+### 5.19 Gestão de patches e atualizações
+
+Implementar:
+
+* inventário de versões;
+* identificação de patches pendentes;
+* criticidade;
+* dependências;
+* aprovação;
+* anéis de implantação;
+* piloto;
+* janela de manutenção;
+* rollback;
+* validação;
+* falha de instalação;
+* exceção;
+* compliance;
+* histórico.
+
+A plataforma poderá orquestrar patches somente por conectores reais e autorizados.
+
+### 5.20 Segurança de rede e segmentação
+
+Implementar funcionalidades para:
+
+* inventário de rede;
+* topologia;
+* zonas;
+* VLAN;
+* segmentos;
+* sub-redes;
+* ativos expostos;
+* rotas;
+* regras de firewall;
+* NAT;
+* VPN;
+* acessos administrativos;
+* portas e serviços;
+* comunicação leste-oeste;
+* segmentação;
+* microsegmentação;
+* deteção de regras excessivas;
+* revisão periódica;
+* recertificação;
+* análise de caminhos de ataque;
+* validação de mudanças;
+* backup de configurações.
+
+A plataforma deverá identificar:
+
+* any-any;
+* portas administrativas expostas;
+* regras sem proprietário;
+* regras expiradas;
+* objetos órfãos;
+* redes planas;
+* protocolos inseguros;
+* dispositivos sem gestão;
+* firmware desatualizado;
+* SNMP inseguro;
+* credenciais padrão;
+* administração sem MFA;
+* ausência de segmentação entre utilizadores, servidores, backups, segurança, convidados, OT e IoT.
+
+### 5.21 Segurança de identidades e privilégios
+
+Implementar:
+
+* inventário de identidades;
+* contas órfãs;
+* contas inativas;
+* contas partilhadas;
+* contas privilegiadas;
+* service accounts;
+* chaves;
+* tokens;
+* certificados;
+* MFA;
+* acesso condicional;
+* revisão de acessos;
+* recertificação;
+* Joiner-Mover-Leaver;
+* PAM;
+* JIT;
+* JEA;
+* rotação de segredos;
+* deteção de privilégios excessivos;
+* análise de caminhos de ataque de identidade;
+* monitorização de sessões privilegiadas.
+
+### 5.22 Segurança de endpoints, servidores e dispositivos
+
+Implementar:
+
+* postura do endpoint;
+* hardening;
+* estado de proteção;
+* firewall local;
+* encriptação de disco;
+* EDR/XDR quando integrado;
+* antivírus;
+* controlo de aplicações;
+* controlo de dispositivos USB;
+* integridade;
+* serviços;
+* processos;
+* persistência;
+* software instalado;
+* patches;
+* utilizadores locais;
+* privilégios;
+* credenciais;
+* configuração remota;
+* isolamento;
+* recolha forense;
+* inventário de firmware.
+
+### 5.23 Segurança de aplicações, APIs e DevSecOps
+
+Implementar:
+
+* inventário de aplicações;
+* classificação;
+* proprietários;
+* dependências;
+* secrets scanning;
+* SAST;
+* DAST autorizado;
+* SCA;
+* SBOM;
+* IaC scanning;
+* container scanning;
+* API security testing;
+* proteção de pipeline;
+* assinatura de artefactos;
+* provenance;
+* segregação de ambientes;
+* gestão de vulnerabilidades;
+* requisitos de segurança;
+* threat modeling;
+* revisão de código;
+* políticas de branch;
+* controlo de dependências;
+* gestão de exceções.
+
+### 5.24 Segurança de cloud, containers e workloads
+
+Implementar capacidades equivalentes a:
+
+* Cloud Security Posture Management;
+* Cloud Workload Protection;
+* Cloud Infrastructure Entitlement Management;
+* Kubernetes Security Posture Management;
+* Container Security;
+* SaaS Security Posture Management.
+
+Funcionalidades:
+
+* inventário;
+* configuração;
+* identidades;
+* permissões;
+* exposição pública;
+* storage;
+* logs;
+* chaves;
+* redes;
+* security groups;
+* workloads;
+* imagens;
+* registries;
+* secrets;
+* runtime;
+* políticas;
+* desvios;
+* remediação;
+* evidências.
+
+### 5.25 Gestão de exposição externa e superfície de ataque
+
+Implementar:
+
+* domínios;
+* subdomínios;
+* IPs públicos;
+* certificados;
+* serviços expostos;
+* aplicações públicas;
+* APIs públicas;
+* ativos desconhecidos;
+* cloud exposta;
+* credenciais divulgadas;
+* typosquatting;
+* shadow IT;
+* risco de terceiros;
+* mudanças;
+* validação de propriedade;
+* priorização.
+
+Qualquer atividade de descoberta ativa deverá estar limitada a ativos autorizados pelo tenant.
+
+### 5.26 Gestão de segredos, chaves e certificados
+
+Implementar:
+
+* inventário;
+* proprietário;
+* finalidade;
+* localização;
+* emissão;
+* expiração;
+* rotação;
+* revogação;
+* armazenamento seguro;
+* utilização;
+* alerta;
+* trilha de auditoria;
+* integração com secret managers e PKI.
+
+Segredos nunca deverão ser armazenados em texto simples.
+
+### 5.27 Segurança de dados e prevenção contra fuga
+
+Implementar:
+
+* descoberta;
+* classificação;
+* rotulagem;
+* proprietário;
+* localização;
+* fluxo;
+* retenção;
+* encriptação;
+* acesso;
+* partilha;
+* exposição;
+* exfiltração;
+* DLP quando integrada;
+* monitorização;
+* descarte seguro;
+* minimização;
+* cópias;
+* shadow data.
+
+### 5.28 Threat Intelligence e gestão de indicadores
+
+Implementar:
+
+* indicadores;
+* fontes;
+* confiança;
+* validade;
+* expiração;
+* campanhas;
+* atores;
+* TTPs;
+* MITRE ATT&CK;
+* enriquecimento;
+* correlação;
+* watchlists;
+* hunting;
+* partilha controlada;
+* TAXII/STIX quando integrado;
+* falsos positivos;
+* revogação.
+
+### 5.29 Threat Hunting e investigação avançada
+
+Implementar:
+
+* hipóteses;
+* consultas;
+* datasets;
+* resultados;
+* evidências;
+* entidades;
+* timelines;
+* técnicas MITRE;
+* notebooks controlados;
+* casos;
+* colaboração;
+* aprovação;
+* relatório;
+* conversão de achados em regras de deteção.
+
+### 5.30 Engenharia de deteção
+
+Implementar:
+
+* ciclo de vida de regras;
+* versionamento;
+* teste;
+* simulação autorizada;
+* validação;
+* cobertura MITRE;
+* qualidade;
+* falsos positivos;
+* eficácia;
+* promoção entre ambientes;
+* rollback;
+* revisão;
+* desativação.
+
+### 5.31 Deception defensiva
+
+Implementar mecanismos defensivos autorizados, como:
+
+* honeytokens;
+* contas isco;
+* documentos isco;
+* credenciais isco;
+* canary files;
+* serviços de deception;
+* alertas;
+* rastreabilidade;
+* regras de privacidade;
+* aprovação.
+
+Não utilizar deception para atacar terceiros.
+
+### 5.32 Segurança de email e colaboração
+
+Implementar:
+
+* postura SPF;
+* DKIM;
+* DMARC;
+* análise de configurações;
+* domínios autorizados;
+* forwarding;
+* regras suspeitas;
+* permissões OAuth;
+* partilhas;
+* links;
+* anexos;
+* impersonation;
+* BEC;
+* contas comprometidas;
+* investigação;
+* contenção por conector autorizado.
+
+### 5.33 Gestão de backups e resiliência contra ransomware
+
+Implementar:
+
+* inventário de backups;
+* cobertura;
+* RPO;
+* RTO;
+* imutabilidade;
+* air gap;
+* segregação de credenciais;
+* MFA;
+* integridade;
+* encriptação;
+* testes de restauração;
+* sucesso;
+* falha;
+* capacidade;
+* retenção;
+* cópias offline;
+* dependências;
+* alertas de alteração ou eliminação;
+* recuperação limpa;
+* clean room;
+* golden images.
+
+### 5.34 Gestão de mudanças de segurança
+
+Implementar:
+
+* pedido;
+* risco;
+* impacto;
+* aprovação;
+* janela;
+* plano;
+* evidência;
+* execução;
+* teste;
+* rollback;
+* revisão pós-implementação;
+* vínculo com incidentes, riscos, vulnerabilidades, patches e hardening.
+
+### 5.35 Guias inteligentes de configuração segura
+
+Criar um centro de orientação para equipas técnicas, contendo:
+
+* procedimentos passo a passo;
+* pré-requisitos;
+* comandos parametrizados;
+* scripts assinados;
+* validações;
+* riscos;
+* testes;
+* rollback;
+* evidências;
+* referências;
+* versões suportadas;
+* dependências;
+* janela de mudança;
+* aprovação.
+
+A IA poderá adaptar guias ao contexto do tenant, mas não deverá inventar comandos, parâmetros ou resultados. Conteúdo gerado deverá ser validado, versionado e aprovado antes de execução em produção.
+
+
+### 5.36 Gestão de identidades e controlo de acesso corporativo
+
+Criar um módulo corporativo completo de **Identity and Access Management — IAM**, distinto da gestão de utilizadores da própria plataforma, para administrar identidades, acessos e privilégios dos utilizadores da infraestrutura tecnológica de cada tenant.
+
+O módulo deverá abranger:
+
+* utilizadores humanos;
+* administradores;
+* contas privilegiadas;
+* contas técnicas;
+* contas de serviço;
+* contas de aplicações;
+* identidades de máquinas;
+* identidades de workloads;
+* identidades cloud;
+* certificados;
+* chaves;
+* tokens;
+* credenciais temporárias;
+* grupos;
+* funções;
+* perfis;
+* sessões;
+* dispositivos associados;
+* sistemas autorizados.
+
+#### 5.36.1 Ciclo de vida de identidades
+
+Implementar:
+
+* Joiner-Mover-Leaver;
+* criação;
+* ativação;
+* suspensão;
+* reativação;
+* transferência;
+* alteração de função;
+* revogação;
+* expiração;
+* recertificação;
+* desativação;
+* eliminação controlada;
+* preservação de histórico.
+
+#### 5.36.2 Controlo de acesso
+
+Implementar:
+
+* RBAC;
+* ABAC;
+* políticas condicionais;
+* menor privilégio;
+* segregação de funções;
+* MFA;
+* passwordless quando suportado;
+* acesso Just-in-Time;
+* Just-Enough-Administration;
+* acesso temporário;
+* elevação aprovada;
+* sessões privilegiadas;
+* gravação de sessão quando legalmente permitido;
+* aprovação;
+* reautenticação;
+* revogação imediata;
+* controlo por localização;
+* controlo por dispositivo;
+* controlo por risco;
+* controlo por horário;
+* controlo por classificação do sistema;
+* controlo por criticidade do dado.
+
+#### 5.36.3 Integração com diretórios e serviços de identidade
+
+Implementar conectores reais, desacoplados e seguros para:
+
+* Microsoft Active Directory Domain Services;
+* LDAP;
+* Microsoft Entra ID;
+* serviços de identidade cloud;
+* SAML;
+* OAuth 2.0;
+* OpenID Connect;
+* RADIUS;
+* TACACS+;
+* Kerberos;
+* PKI;
+* serviços equivalentes suportados.
+
+Quando não existir conector configurado, a plataforma deverá apresentar o estado “integração não configurada”, sem simular utilizadores, grupos, GPOs, autenticações ou decisões de acesso.
+
+### 5.37 Integração com Active Directory, GPO e políticas corporativas
+
+Criar um módulo especializado para integração com **Active Directory Domain Services — AD DS** e gestão assistida de políticas de domínio.
+
+Implementar:
+
+* descoberta de florestas;
+* domínios;
+* trusts;
+* sites;
+* sub-redes;
+* controladores de domínio;
+* unidades organizacionais;
+* utilizadores;
+* grupos;
+* computadores;
+* contas de serviço;
+* GPOs;
+* links de GPO;
+* herança;
+* bloqueio de herança;
+* filtros de segurança;
+* WMI filters;
+* políticas de senha;
+* políticas de bloqueio;
+* delegation;
+* permissões administrativas;
+* eventos de autenticação;
+* alterações críticas;
+* objetos órfãos;
+* replicação;
+* estado de serviços AD;
+* auditoria de alterações.
+
+A plataforma deverá:
+
+* avaliar GPOs segundo baselines aprovadas;
+* identificar configurações fracas;
+* detetar conflitos;
+* identificar GPOs não utilizadas;
+* detetar permissões excessivas;
+* sugerir remediações;
+* gerar plano de alteração;
+* criar backup da GPO;
+* exigir aprovação;
+* aplicar por conector autorizado;
+* validar resultado;
+* permitir rollback;
+* preservar trilha de auditoria.
+
+### 5.38 Monitorização e controlo de serviços críticos
+
+Criar um módulo de **Critical Service Monitoring and Recovery Orchestration** para monitorizar continuamente serviços críticos e sensíveis.
+
+O módulo deverá considerar:
+
+* serviços Windows;
+* systemd;
+* init;
+* containers;
+* pods;
+* workloads;
+* aplicações;
+* APIs;
+* bases de dados;
+* filas;
+* web servers;
+* agentes;
+* antivírus;
+* EDR;
+* serviços de autenticação;
+* DNS;
+* DHCP;
+* VPN;
+* firewalls;
+* proxies;
+* backup;
+* storage;
+* serviços de negócio;
+* integrações críticas.
+
+#### 5.38.1 Estados operacionais
+
+Monitorizar:
+
+* up;
+* down;
+* degraded;
+* starting;
+* stopping;
+* stopped;
+* restarting;
+* failed;
+* unknown;
+* maintenance;
+* dependency_failed.
+
+#### 5.38.2 Ações operacionais
+
+Permitir, por agente ou conector real autorizado:
+
+* start;
+* stop;
+* restart;
+* reload;
+* health check;
+* dependency check;
+* failover;
+* scale;
+* rollback;
+* ativação de modo de contingência;
+* abertura de incidente;
+* notificação;
+* escalonamento.
+
+A plataforma poderá executar **start ou restart automático** apenas quando:
+
+* existir política previamente aprovada;
+* o serviço estiver classificado;
+* dependências forem validadas;
+* não houver janela de manutenção;
+* a ação estiver dentro do limite de tentativas;
+* a execução for auditada;
+* existir timeout;
+* existir rollback ou fallback;
+* o impacto for conhecido;
+* ações críticas puderem exigir aprovação humana.
+
+A plataforma deverá impedir loops de reinício, execução concorrente, restart massivo não autorizado e ações que possam comprometer evidências de incidente.
+
+### 5.39 Arquitetura universal de endpoints, agentes e coletores
+
+A plataforma deverá considerar sistemas, servidores, aplicações, dispositivos, workloads, appliances, máquinas virtuais, containers, cloud assets, equipamentos de rede, OT e IoT como **endpoints geridos ou observáveis**.
+
+Criar uma arquitetura extensível de:
+
+* agentes leves;
+* agentes avançados;
+* coletores de rede;
+* coletores de logs;
+* conectores por API;
+* integração por syslog;
+* integração por webhook;
+* integração por SNMPv3;
+* integração por SSH;
+* integração por WinRM;
+* integração WMI;
+* integração por eventos;
+* integração por filas;
+* integração por ficheiros assinados;
+* integração por protocolos específicos.
+
+Cada agente ou coletor deverá possuir:
+
+* identidade única;
+* tenant;
+* certificado;
+* versão;
+* estado;
+* heartbeat;
+* capacidade;
+* sistema suportado;
+* política atribuída;
+* atualização segura;
+* assinatura;
+* integridade;
+* canal cifrado;
+* rotação de credenciais;
+* logs;
+* revogação;
+* desinstalação controlada;
+* proteção contra adulteração;
+* modo offline;
+* fila local resiliente;
+* limitação de recursos.
+
+Nenhum agente deverá possuir privilégios superiores aos estritamente necessários.
+
+### 5.40 Motor de deteção e investigação de malware
+
+Criar um **Malware Detection and Investigation Engine** defensivo, autorizado e seguro.
+
+O motor deverá suportar:
+
+* assinaturas;
+* hashes;
+* YARA;
+* indicadores;
+* reputação;
+* análise heurística;
+* análise comportamental;
+* machine learning;
+* deteção de persistência;
+* deteção de processos suspeitos;
+* deteção de scripts;
+* deteção de macros;
+* deteção de binários;
+* deteção de DLL sideloading;
+* fileless malware;
+* living-off-the-land;
+* rootkits quando tecnicamente suportado;
+* web shells;
+* cryptominers;
+* ransomware;
+* trojans;
+* spyware;
+* credential stealers;
+* loaders;
+* droppers;
+* backdoors;
+* ferramentas ofensivas não autorizadas.
+
+#### 5.40.1 Âmbito de busca
+
+Permitir varredura autorizada de:
+
+* diretórios de sistema;
+* perfis de utilizadores;
+* diretórios temporários;
+* startup;
+* tarefas agendadas;
+* serviços;
+* registos;
+* WMI persistence;
+* cron;
+* systemd;
+* web roots;
+* aplicações;
+* plugins;
+* extensões;
+* shares;
+* scripts;
+* containers;
+* volumes;
+* imagens;
+* diretórios configuráveis;
+* caminhos críticos definidos por política.
+
+#### 5.40.2 Fluxo de deteção
+
+Implementar:
+
+* descoberta;
+* recolha de metadados;
+* hash;
+* classificação;
+* correlação;
+* quarentena;
+* preservação;
+* isolamento;
+* evidência;
+* análise;
+* decisão;
+* remediação;
+* validação;
+* reporte;
+* aprendizagem controlada.
+
+Não eliminar automaticamente artefactos sem política aprovada, classificação suficiente, preservação de evidências e capacidade de recuperação.
+
+### 5.41 Scanning inteligente e autorizado da rede
+
+Criar um módulo completo de **Network Discovery, Mapping and Security Scanning**.
+
+O módulo deverá realizar, somente em redes e ativos autorizados:
+
+* descoberta de hosts;
+* identificação de sistemas;
+* identificação de dispositivos;
+* fingerprinting;
+* descoberta de serviços;
+* portas;
+* protocolos;
+* banners;
+* versões;
+* topologia;
+* relações;
+* dependências;
+* segmentação;
+* exposição;
+* vulnerabilidades;
+* configurações inseguras;
+* certificados;
+* serviços obsoletos;
+* protocolos inseguros;
+* shadow IT;
+* ativos desconhecidos;
+* alterações na rede.
+
+#### 5.41.1 Modos de scanning
+
+Implementar:
+
+* passivo;
+* ativo controlado;
+* autenticado;
+* não autenticado;
+* incremental;
+* agendado;
+* sob demanda;
+* baseado em evento;
+* por segmento;
+* por criticidade;
+* por janela de manutenção.
+
+#### 5.41.2 Segurança operacional
+
+O motor deverá possuir:
+
+* rate limiting;
+* controlo de concorrência;
+* perfis de intensidade;
+* listas de exclusão;
+* horários autorizados;
+* confirmação de propriedade;
+* kill switch;
+* timeout;
+* prevenção de indisponibilidade;
+* logs;
+* aprovação;
+* evidências;
+* proteção de ambientes OT e sistemas frágeis.
+
+O scanning não deverá ser utilizado contra terceiros nem fora do escopo autorizado.
+
+### 5.42 Deteção de movimento lateral e escalada de privilégios
+
+Criar um módulo inteligente dedicado à deteção, investigação, contenção e prevenção de:
+
+* movimento lateral;
+* privilege escalation;
+* credential dumping;
+* pass-the-hash;
+* pass-the-ticket;
+* Kerberoasting;
+* abuso de NTLM;
+* abuso de RDP;
+* abuso de SMB;
+* abuso de WinRM;
+* abuso de WMI;
+* abuso de PowerShell;
+* abuso de SSH;
+* remote services;
+* scheduled tasks;
+* service creation;
+* token manipulation;
+* abuso de sudo;
+* alterações de grupos privilegiados;
+* criação de contas;
+* desativação de controlos;
+* abuso de ferramentas administrativas;
+* exploração de trusts;
+* ataques a AD;
+* ataques a cloud identities.
+
+Implementar:
+
+* baseline de comportamento;
+* UEBA;
+* graph analytics;
+* caminhos de ataque;
+* correlação de identidades;
+* correlação de dispositivos;
+* análise temporal;
+* regras;
+* modelos de anomalia;
+* mapeamento MITRE ATT&CK;
+* score de risco;
+* investigação;
+* contenção autorizada;
+* revogação de sessão;
+* isolamento;
+* bloqueio temporário;
+* exigência de MFA;
+* retirada de privilégios;
+* preservação forense.
+
+### 5.43 Controlo de dupla e tripla autorização para sistemas sensíveis
+
+Criar um módulo de **Multi-Person Authorization — MPA**, baseado em four-eyes principle, dual control e segregação de funções.
+
+O módulo deverá permitir exigir aprovação de dois ou três utilizadores autorizados para operações críticas em sistemas, aplicações, dados e infraestrutura.
+
+Exemplos:
+
+* exportação massiva de dados;
+* consulta de dados altamente sensíveis;
+* alteração de regras de firewall;
+* criação de conta privilegiada;
+* elevação de privilégio;
+* alteração de GPO;
+* rotação de chaves;
+* desativação de EDR;
+* eliminação de logs;
+* restauração;
+* alteração de backup;
+* transferências ou transações críticas;
+* alteração de dados financeiros;
+* configuração de integrações;
+* acesso a cofres;
+* execução de playbooks de alto impacto;
+* suspensão de serviços críticos;
+* alterações em produção.
+
+#### 5.43.1 Regras de aprovação
+
+Implementar:
+
+* 1-de-N;
+* 2-de-N;
+* 3-de-N;
+* sequência obrigatória;
+* aprovação paralela;
+* papéis incompatíveis;
+* aprovação por áreas diferentes;
+* aprovação por nível hierárquico;
+* expiração;
+* motivo;
+* evidência;
+* reautenticação;
+* MFA;
+* assinatura digital quando disponível;
+* prevenção de autoaprovação;
+* prevenção de conluio básico por política;
+* quebra de vidro controlada;
+* auditoria imutável.
+
+As credenciais dos aprovadores nunca deverão ser partilhadas entre utilizadores.
+
+A plataforma não deverá solicitar que vários utilizadores revelem ou reutilizem credenciais administrativas numa mesma sessão. Cada aprovador deverá autenticar-se individualmente.
+
+### 5.44 Auditoria contínua de sistemas, aplicações e infraestrutura
+
+Criar um módulo de auditoria técnica e contínua para:
+
+* sistemas operativos;
+* aplicações;
+* bases de dados;
+* diretórios;
+* redes;
+* firewalls;
+* cloud;
+* containers;
+* APIs;
+* endpoints;
+* serviços;
+* identidades;
+* GPOs;
+* configurações;
+* privilégios;
+* logs;
+* alterações;
+* transações críticas;
+* integridade;
+* disponibilidade;
+* acessos;
+* políticas;
+* dados.
+
+Implementar:
+
+* planos de auditoria;
+* escopo;
+* critérios;
+* testes;
+* evidências;
+* amostragem;
+* auditoria contínua;
+* auditoria sob demanda;
+* achados;
+* risco;
+* severidade;
+* responsável;
+* remediação;
+* prazo;
+* exceção;
+* aceite;
+* reteste;
+* encerramento;
+* trilha;
+* relatórios executivos e técnicos.
+
+A auditoria deverá correlacionar eventos de configuração, identidade, serviço, rede, aplicação, base de dados e segurança.
+
+### 5.45 Correlação cognitiva transversal
+
+A camada de IA deverá correlacionar dados provenientes de:
+
+* identidades;
+* acessos;
+* AD DS;
+* GPOs;
+* endpoints;
+* agentes;
+* coletores;
+* serviços;
+* malware;
+* rede;
+* movimento lateral;
+* privilégios;
+* auditoria;
+* vulnerabilidades;
+* configuração;
+* incidentes;
+* backups;
+* aplicações;
+* bases de dados.
+
+A IA deverá:
+
+* explicar relações;
+* identificar sequência de ataque;
+* sugerir prioridade;
+* identificar raiz provável;
+* recomendar contenção;
+* propor remediação;
+* gerar linha temporal;
+* mapear MITRE ATT&CK;
+* indicar confiança;
+* citar fontes internas;
+* manter aprovação humana para ações críticas.
+
+### 5.46 Central Inteligente de Relatórios e BI
+
+Criar um módulo transversal de relatórios e Business Intelligence.
+
+Implementar:
+
+* central única de relatórios;
+* dashboards executivos;
+* dashboards técnicos;
+* dashboards SOC;
+* dashboards operacionais;
+* KPIs;
+* scorecards;
+* gráficos interativos;
+* drill-down;
+* filtros dinâmicos;
+* exportação PDF, Excel, CSV e PowerPoint;
+* agendamento;
+* distribuição automática;
+* assinatura digital opcional;
+* branding por tenant;
+* integração com motores BI;
+* APIs de dados;
+* templates premium;
+* relatórios comparativos;
+* indicadores históricos;
+* evidências anexadas;
+* relatórios auditáveis.
+
+Todos os módulos deverão alimentar esta central, sendo proibida a criação de relatórios isolados ou desconectados.
+
+A camada de IA deverá gerar resumos executivos, análises técnicas, tendências e recomendações sempre baseadas em dados reais.
+
+### 5.47 Auditoria de arquitetura e evolução contínua
+
+O Agente IA da Skyworks deverá verificar continuamente:
+
+* duplicidade de funcionalidades;
+* conflitos arquitetónicos;
+* módulos redundantes;
+* implementações parciais;
+* inconsistências de dados;
+* funcionalidades sobrepostas.
+
+Sempre que possível deverá:
+
+* complementar módulos existentes até cobertura funcional completa;
+* substituir componentes por versões mais robustas e evoluídas, preservando compatibilidade;
+* reutilizar serviços existentes antes de criar novos;
+* manter arquitetura modular, integrada e transversal;
+* impedir módulos isolados ou desconectados.
+
+Toda nova funcionalidade deverá ser tratada como evolução do ecossistema único da plataforma.
+
+### 5.48 Gestão comercial
+
+* leads;
+* oportunidades;
+* propostas;
+* contratos;
+* clientes;
+* tenants;
+* planos;
+* módulos;
+* limites;
+* utilizadores contratados;
+* armazenamento;
+* consumo;
+* onboarding;
+* renovação;
+* suspensão;
+* cancelamento;
+* upgrade;
+* downgrade;
+* descontos;
+* parceiros;
+* comissões.
+
+### 5.49 Faturação e cobrança
+
+Implementar:
+
+* planos mensais e anuais;
+* subscrições;
+* período de avaliação;
+* faturas;
+* linhas de fatura;
+* impostos configuráveis;
+* moeda configurável;
+* pagamentos;
+* pagamentos parciais;
+* créditos;
+* débitos;
+* notas;
+* vencimentos;
+* cobrança;
+* lembretes;
+* estado da conta;
+* reconciliação;
+* recibos;
+* histórico;
+* inadimplência;
+* suspensão controlada.
+
+A integração com meios de pagamento deverá ser desacoplada por adaptadores. Quando não houver gateway configurado, permitir registo manual e reconciliação autorizada, sem simular aprovação bancária.
+
+---
+
+### 5.50 BAS — Breach and Attack Simulation
+
+Implementar simulações defensivas autorizadas para validar SIEM, EDR/XDR, SOAR,
+firewalls, IAM, MFA, deteções de ransomware, phishing, movimento lateral, cloud,
+aplicações e APIs.
+
+Toda campanha deverá possuir escopo, autorização, janela, limites, ativos permitidos,
+responsável, kill switch, evidências e plano de rollback.
+
+### 5.51 CTEM — Continuous Threat Exposure Management
+
+Implementar ciclo contínuo de:
+
+- definição de escopo;
+- descoberta;
+- avaliação;
+- priorização;
+- validação;
+- mobilização;
+- remediação;
+- medição.
+
+Correlacionar vulnerabilidades, misconfigurations, identidades, dados, cloud,
+shadow IT, superfície externa, ameaças e contexto de negócio.
+
+### 5.52 Cyber Digital Twin
+
+Criar representação sincronizada de ativos, identidades, serviços, aplicações,
+redes, cloud, containers, dados, backups e dependências.
+
+Permitir simular ransomware, falha de AD, indisponibilidade, movimento lateral,
+perda de cloud, falha de backups, blast radius e recuperação.
+
+### 5.53 Attack Path Analytics
+
+Criar grafos de ataque e privilégio capazes de identificar caminhos para:
+
+- Domain Admin;
+- contas cloud privilegiadas;
+- crown jewels;
+- backups;
+- dados críticos;
+- sistemas financeiros;
+- serviços essenciais.
+
+Calcular probabilidade, complexidade, custo, impacto e prioridade do caminho.
+
+### 5.54 Insider Risk Management
+
+Expandir UEBA para monitorizar, dentro dos limites legais e de privacidade:
+
+- acesso anormal;
+- downloads massivos;
+- USB;
+- impressão;
+- clipboard;
+- screen capture quando permitido;
+- atividade fora de horário;
+- abuso de privilégio;
+- exfiltração;
+- alteração comportamental.
+
+### 5.55 DSPM — Data Security Posture Management
+
+Descobrir, classificar e correlacionar dados sensíveis, proprietários, localização,
+permissões, lineage, exposição, encriptação, partilha, retenção e shadow data.
+
+### 5.56 Cyber Asset Graph
+
+Manter grafo canónico entre ativos, identidades, grupos, privilégios, aplicações,
+serviços, redes, vulnerabilidades, incidentes, riscos, dados, fornecedores e controlos.
+
+### 5.57 Security Data Lake
+
+Implementar ingestão e retenção escalável de logs, fluxos, DNS, firewall, proxy,
+endpoints, cloud, identidade, email, aplicações e telemetria.
+
+Suportar hot, warm e cold storage, catálogo, schemas, lineage, pesquisa histórica
+e isolamento por tenant.
+
+### 5.58 Executive Decision Center
+
+Criar portal executivo com:
+
+- CRI;
+- cyber risk;
+- business risk;
+- financial impact;
+- maturidade;
+- compliance;
+- KPIs;
+- KRIs;
+- tendências;
+- ROI;
+- recomendações explicáveis.
+
+### 5.59 Cyber Mission Control
+
+Criar centro operacional unificado que consuma, sem duplicar, dados e serviços de:
+
+SOC, SIEM, SOAR, UEBA, NBAD, FIM, IAM, CTEM, BAS, Digital Twin, Threat Intelligence,
+DSPM, resiliência, IA e risco.
+
+### 5.60 Cyber Resilience Index — CRI
+
+Implementar score versionado, reproduzível e explicável, baseado em:
+
+- governança;
+- identidade;
+- ativos;
+- hardening;
+- patches;
+- vulnerabilidades;
+- exposição;
+- deteção;
+- resposta;
+- recuperação;
+- backups;
+- dados;
+- cloud;
+- insider risk;
+- terceiros;
+- continuidade;
+- maturidade.
+
+O CRI deverá possuir histórico, benchmark, tendência, projeção e recomendações.
+
+### 5.61 ACS Marketplace
+
+Objetivo: criar o ecossistema oficial de distribuição, publicação, certificação,
+licenciamento e gestão de conectores, agentes, coletores, playbooks, dashboards,
+relatórios, políticas, modelos de IA, Knowledge Packs, templates e extensões.
+
+Capacidades obrigatórias:
+
+- catálogo multi-tenant;
+- publishers e parceiros;
+- produtos, versões e dependências;
+- compatibilidade;
+- preços, licenças e entitlements;
+- reviews e reputação;
+- assinatura digital;
+- análise de segurança;
+- certificação;
+- instalação, atualização, rollback e revogação;
+- recomendações pelo Marketplace Intelligence Engine;
+- auditoria e métricas comerciais.
+
+Todo pacote deverá passar por validação de schema, análise estática, análise de
+dependências, malware scanning, sandbox, revisão de permissões, testes de
+compatibilidade, assinatura e aprovação antes da publicação.
+
+### 5.62 ACS Academy
+
+Objetivo: criar o ambiente oficial de formação, capacitação, laboratório,
+Cyber Range, avaliação e certificação da ACS.
+
+Capacidades obrigatórias:
+
+- cursos, módulos e aulas;
+- learning paths;
+- inscrições e progresso;
+- laboratórios hands-on;
+- Cyber Range isolado;
+- exercícios BAS e resposta a incidentes;
+- exames e avaliações;
+- certificações verificáveis;
+- badges e gamificação;
+- recomendações adaptativas e mentor IA;
+- métricas de competências.
+
+Dados operacionais somente poderão ser usados para ensino após autorização,
+minimização, anonimização ou pseudonimização.
+
+### 5.63 ACS Threat Research Labs
+
+Objetivo: criar o centro oficial de investigação, análise e engenharia de ameaças.
+
+Capacidades obrigatórias:
+
+- projetos de pesquisa;
+- receção e cadeia de custódia de amostras;
+- análise estática e dinâmica;
+- sandbox isolado;
+- IOC, IOA e TTP;
+- regras YARA, Sigma, IDS/IPS e SIEM;
+- Threat Hunting;
+- relatórios e datasets;
+- produção de feeds assinados;
+- promoção controlada para Threat Intelligence, SIEM, SOAR, BAS, CTEM,
+  Marketplace, RAG, Knowledge Graph e CIX.
+
+Nenhuma regra, indicador ou feed poderá ser promovido sem revisão, testes,
+confidence score, assinatura, versionamento e aprovação.
+
+### 5.64 ACS Open Integration SDK
+
+Objetivo: fornecer o framework oficial para desenvolvimento de integrações,
+conectores, agentes, coletores, plugins, playbooks, dashboards, relatórios,
+políticas e extensões da plataforma.
+
+Capacidades obrigatórias:
+
+- SDK e CLI;
+- bibliotecas oficiais;
+- schemas e contratos;
+- templates e exemplos;
+- simulador e test harness;
+- ambiente de desenvolvimento;
+- sandbox de plugins;
+- testes de segurança e compatibilidade;
+- packaging, assinatura e certificação;
+- publicação no Marketplace;
+- política de depreciação e atualização.
+
+### 5.65 ACS Cyber Intelligence Exchange — CIX
+
+Objetivo: criar uma rede federada, segura e governada de intercâmbio de
+inteligência cibernética.
+
+Capacidades obrigatórias:
+
+- membros e comunidades de confiança;
+- feeds e subscrições;
+- partilha de IOC, IOA, TTP, campanhas, atores, malware, alertas, regras,
+  playbooks e relatórios;
+- STIX/TAXII;
+- classificação e distribution markings;
+- consentimento;
+- anonimização e pseudonimização;
+- confidence score;
+- aprovação;
+- restrições de redistribuição;
+- revogação;
+- colaboração;
+- auditoria imutável;
+- Collaborative Intelligence Engine.
+
+Nenhuma informação deverá ser partilhada automaticamente sem política,
+autorização, classificação, validação de privacidade e registo de auditoria.
+
+### 5.66 ACS MSSP Edition
+
+Objetivo: operar múltiplos clientes por uma única instância, com isolamento rigoroso.
+
+Capacidades:
+- hierarquia Plataforma → MSSP → Cliente → Unidade → Ativo;
+- onboarding, delegação, catálogo de serviços, SLA, billing e reporting;
+- Managed SOC, SIEM, SOAR, MDR, CTEM, BAS e Compliance as a Service;
+- filas globais e por cliente;
+- customer health score e customer CRI;
+- capacidade operacional e auditoria.
+
+Segurança: contexto explícito do cliente, RLS, MFA, JIT, segregação de operadores,
+testes de tenant escape e proibição de mistura de dados.
+
+### 5.67 ACS Cyber Command Center
+
+Objetivo: coordenar crises, incidentes severos e infraestruturas críticas.
+
+Capacidades:
+- sala de situação e common operating picture;
+- cadeia de comando, war rooms, papéis, briefings, decisões, ordens e tarefas;
+- mapas geográficos, de incidentes, ativos e dependências;
+- impacto operacional, financeiro, setorial e geográfico;
+- recursos, comunicação, recuperação e after-action report;
+- integração com Mission Control, SOC, Digital Twin, CIX, CRI e continuidade.
+
+### 5.68 ACS Compliance Intelligence
+
+Objetivo: correlacionar requisitos, frameworks, controlos, políticas, ativos,
+evidências, riscos, auditorias e remediação.
+
+Capacidades:
+- catálogo regulatório, jurisdições, versões e aplicabilidade;
+- mapeamento cruzado, gap analysis, scoring e continuous compliance;
+- compliance drift, evidence freshness, compensating controls e audit readiness;
+- data room de auditoria e relatórios.
+A IA não poderá declarar conformidade legal definitiva sem validação humana.
+
+### 5.69 ACS Autonomous Validation Lab
+
+Objetivo: validar artefactos antes da promoção para produção.
+
+Suporta regras, playbooks, automações, conectores, agentes, plugins, modelos de IA,
+prompts, RAG, policies, baselines, dashboards, migrations, APIs, pacotes e conteúdo CIX.
+
+Capacidades:
+- ambientes efémeros, isolados e auditáveis;
+- snapshots, templates, dados sintéticos identificados e datasets anonimizados;
+- testes funcionais, integração, segurança, regressão, performance, resiliência,
+  multi-tenant, RLS, compatibilidade e rollback;
+- score de risco, aprovação humana, promoção e destruição segura.
+
+### 5.70 ACS Sector Packs
+
+Objetivo: oferecer pacotes especializados sem criar forks.
+
+Conteúdo:
+- dashboards, KPIs, KRIs, políticas, controlos, frameworks, hardening;
+- modelos de ativos e risco, regras, playbooks, workflows e relatórios;
+- conectores, BAS, Digital Twin, Academy e modelos de IA.
+
+Packs iniciais:
+Banking, Telecom, Energy, Oil and Gas, Government, Critical Infrastructure,
+Healthcare, Mining, Education, Retail, Industrial/OT e MSSP.
+
+Cada pack deverá possuir versão, dependências, compatibilidade, licenciamento,
+testes, assinatura, certificação, instalação, atualização, rollback e depreciação.
+
+================================================================================
+VOLUME VI — ARQUITETURA CORPORATIVA DE DADOS
+================================================================================
+
+# 6. MODELO DE DADOS UNIFICADO
+
+## 6.1 Princípios
+
+- fonte única de verdade;
+- ownership por domínio;
+- multi-tenancy por padrão;
+- RLS obrigatória;
+- segurança e classificação;
+- auditoria por padrão;
+- temporalidade;
+- eventos de domínio;
+- lineage;
+- retenção;
+- eliminação segura;
+- normalização;
+- ausência de entidades duplicadas.
+
+## 6.2 Camadas de dados
+
+1. Operational Data Store — Supabase/PostgreSQL.
+2. Security Data Lake — telemetria massiva.
+3. Knowledge and Graph Layer.
+4. AI and Vector Data Layer.
+5. Analytics and BI Layer.
+
+## 6.3 Padrão de tabela
+
+Avaliar, conforme aplicável:
+
+- id UUID;
+- tenant_id UUID;
+- created_at;
+- created_by;
+- updated_at;
+- updated_by;
+- deleted_at;
+- deleted_by;
+- version;
+- status;
+- source_system;
+- correlation_id;
+- metadata JSONB.
+
+JSONB não deverá substituir modelagem relacional adequada.
+
+## 6.4 Domínios SQL canónicos
+
+### 6.4.1 Platform Foundation
+tenants, tenant_units, tenant_settings, users, user_profiles, memberships, roles,
+permissions, role_permissions, membership_roles, access_policies, feature_flags,
+notifications, workflows, scheduled_jobs, audit_logs.
+
+### 6.4.2 Commercial
+plans, plan_features, subscriptions, usage_records, customers, leads, opportunities,
+proposals, contracts, invoices, invoice_items, payments, receipts, collection_actions,
+partners, support_cases, service_level_agreements.
+
+### 6.4.3 Identity
+enterprise_identities, identity_sources, identity_accounts, identity_groups,
+identity_group_memberships, access_entitlements, access_requests, access_approvals,
+access_certifications, privileged_accounts, privileged_sessions, directory_connectors,
+ad_forests, ad_domains, ad_trusts, ad_sites, ad_organizational_units, ad_gpos,
+ad_gpo_links, service_accounts, identity_risk_scores.
+
+### 6.4.4 Assets
+assets, asset_types, asset_owners, asset_locations, asset_identifiers, asset_software,
+asset_services, asset_relationships, asset_dependencies, asset_classifications,
+asset_discovery_sources, business_services, business_processes, crown_jewels,
+shadow_assets.
+
+### 6.4.5 Endpoint, Malware e FIM
+endpoint_agents, endpoint_agent_versions, endpoint_agent_policies, endpoint_heartbeats,
+endpoint_posture_assessments, endpoint_processes, endpoint_services, malware_scans,
+malware_findings, malware_artifacts, malware_quarantine_items, malware_rules,
+fim_policies, fim_baselines, fim_monitored_paths, fim_events, fim_integrity_results.
+
+### 6.4.6 Network
+network_segments, network_zones, network_routes, network_connections,
+network_scan_profiles, network_scans, discovered_hosts, discovered_services,
+network_findings, network_flows, network_behavior_baselines, network_anomalies,
+nbad_events, ndr_alerts, firewall_devices, firewall_rules, dns_events, vpn_connections.
+
+### 6.4.7 Cloud, Container e Applications
+cloud_accounts, cloud_assets, cloud_identities, cloud_permissions, cloud_security_findings,
+container_registries, container_images, container_vulnerabilities, container_workloads,
+kubernetes_clusters, kubernetes_resources, applications, application_versions,
+source_repositories, build_pipelines, sast_scans, dast_scans, sca_scans, iac_scans,
+api_security_scans, sboms, sbom_components, threat_models.
+
+### 6.4.8 Vulnerability, Exposure, CTEM e Attack Paths
+vulnerabilities, vulnerability_instances, vulnerability_scores, remediation_tasks,
+patch_catalog, patch_deployments, ctem_programs, ctem_exposures, ctem_priorities,
+attack_surfaces, external_assets, attack_paths, attack_path_nodes, attack_path_edges,
+attack_path_rankings, attack_graphs, attack_graph_nodes, attack_graph_edges.
+
+### 6.4.9 BAS
+bas_campaigns, bas_scenarios, bas_attack_profiles, bas_simulations,
+bas_simulation_steps, bas_targets, bas_validation_results, bas_detection_results,
+bas_control_coverage, bas_mitre_coverage, bas_approvals.
+
+### 6.4.10 Security Analytics e SOC
+event_sources, security_events, normalized_events, event_enrichments, detection_rules,
+detection_rule_versions, detection_rule_tests, alerts, alert_entities, behavior_profiles,
+ueba_baselines, ueba_anomalies, security_cases, security_incidents, incident_events,
+incident_timeline, incident_tasks, incident_evidence, chain_of_custody_records,
+playbooks, playbook_versions, playbook_runs, automation_actions, response_approvals.
+
+### 6.4.11 Threat Intelligence
+threat_intelligence_sources, threat_indicators, indicator_observations, threat_actors,
+threat_campaigns, threat_techniques, threat_reports, watchlists, stix_objects,
+taxii_collections.
+
+### 6.4.12 Insider Risk
+insider_risk_policies, insider_risk_events, insider_behavior_profiles,
+insider_risk_indicators, insider_risk_scores, insider_risk_cases,
+insider_risk_timelines, insider_risk_reviews.
+
+### 6.4.13 Data Security e DSPM
+data_assets, data_sources, data_locations, data_classifications, data_labels,
+data_owners, data_flows, data_lineage, data_access_permissions, data_exposures,
+dspm_scans, dspm_findings, dspm_risk_scores, dlp_policies, dlp_events,
+data_retention_policies.
+
+### 6.4.14 GRC
+frameworks, framework_functions, framework_categories, framework_requirements,
+controls, control_implementations, control_mappings, assessments, assessment_answers,
+compliance_findings, evidences, risks, risk_assessments, risk_treatments,
+risk_acceptances, policies, policy_versions, audit_programs, audit_tests, audit_findings.
+
+### 6.4.15 Resilience, Digital Twin e CRI
+business_impact_analyses, continuity_plans, recovery_plans, recovery_tests,
+backup_assets, backup_policies, backup_jobs, restore_tests, clean_room_environments,
+golden_images, digital_twins, digital_twin_versions, digital_twin_nodes,
+digital_twin_edges, digital_twin_scenarios, digital_twin_simulations,
+digital_twin_results, digital_twin_blast_radius, cyber_resilience_scores,
+cyber_resilience_score_components, cyber_resilience_history, cri_models,
+cri_model_versions, cri_dimensions, cri_metrics, cri_metric_weights, cri_calculations.
+
+### 6.4.16 Artificial Intelligence e RAG
+ai_gateways, ai_models, ai_model_versions, ai_model_deployments, ai_routes,
+ai_policies, ai_prompts, ai_prompt_versions, ai_contexts, ai_inferences,
+ai_inference_evidence, ai_explanations, ai_feedback, ai_evaluations,
+ai_security_events, ai_usage_records, rag_sources, rag_documents,
+rag_document_versions, rag_chunks, rag_embeddings, rag_access_policies,
+knowledge_graph_nodes, knowledge_graph_edges, cognitive_memories,
+context_engineering_policies.
+
+### 6.4.17 Cyber Asset Graph
+cyber_graph_nodes, cyber_graph_edges, cyber_graph_node_types,
+cyber_graph_edge_types, cyber_graph_snapshots, cyber_graph_paths,
+cyber_graph_queries, cyber_graph_findings, cyber_graph_scores.
+
+### 6.4.18 Executive e Mission Control
+executive_dashboards, executive_dashboard_widgets, executive_metrics,
+executive_kpis, executive_kris, executive_decisions, executive_recommendations,
+executive_reports, business_risk_metrics, cyber_risk_metrics,
+financial_impact_estimates, mission_control_workspaces, mission_control_views,
+mission_control_panels, mission_control_situations, mission_control_actions,
+mission_control_priorities, mission_control_escalations.
+
+### 6.4.19 ACS Marketplace
+
+marketplace_products, marketplace_categories, marketplace_publishers,
+marketplace_publisher_profiles, marketplace_versions, marketplace_dependencies,
+marketplace_compatibility_rules, marketplace_reviews, marketplace_ratings,
+marketplace_downloads, marketplace_installations, marketplace_updates,
+marketplace_certifications, marketplace_pricing, marketplace_licenses,
+marketplace_entitlements, marketplace_security_scans, marketplace_approval_records,
+marketplace_recommendations.
+
+### 6.4.20 ACS Academy
+
+academy_courses, academy_course_versions, academy_modules, academy_lessons,
+academy_learning_paths, academy_learning_path_items, academy_students,
+academy_enrollments, academy_progress, academy_labs, academy_lab_environments,
+academy_lab_sessions, academy_exams, academy_exam_attempts, academy_scores,
+academy_certifications, academy_certification_requirements, academy_certificates,
+academy_badges, academy_challenges, academy_instructor_profiles,
+academy_ai_recommendations.
+
+### 6.4.21 ACS Threat Research Labs
+
+threat_research_projects, threat_research_members, threat_research_tasks,
+malware_samples, malware_sample_hashes, malware_analysis_runs,
+malware_analysis_results, sandbox_sessions, yara_rules, yara_rule_versions,
+sigma_rules, sigma_rule_versions, ioc_repository, ioa_repository, threat_models,
+threat_lab_playbooks, threat_research_reports, threat_research_datasets,
+threat_feed_packages, threat_research_approvals.
+
+### 6.4.22 ACS Open Integration SDK
+
+sdk_packages, sdk_package_versions, sdk_plugins, sdk_plugin_versions,
+sdk_publishers, sdk_examples, sdk_templates, sdk_documentation,
+sdk_test_environments, sdk_test_runs, sdk_certifications, sdk_security_reviews,
+sdk_compatibility_results, sdk_signing_records, sdk_publication_requests,
+sdk_deprecation_records.
+
+### 6.4.23 ACS Cyber Intelligence Exchange
+
+cix_members, cix_member_profiles, cix_communities, cix_community_memberships,
+cix_trust_levels, cix_feeds, cix_feed_subscriptions, cix_iocs, cix_ioas,
+cix_ttps, cix_campaigns, cix_alerts, cix_reports, cix_sharing_rules,
+cix_distribution_markings, cix_anonymization_policies, cix_anonymization_runs,
+cix_exchange_logs, cix_confidence_scores, cix_revocations,
+cix_collaboration_threads, cix_approval_records.
+
+## 6.8 Relações e integridade dos domínios v5.1
+
+- Publishers publicam produtos; produtos possuem versões, dependências,
+  assinaturas, certificações e licenças.
+- Cursos possuem versões, módulos, aulas, avaliações, laboratórios,
+  matrículas, progresso e certificados.
+- Projetos de pesquisa possuem membros, tarefas, amostras, análises,
+  regras, relatórios, datasets e aprovações.
+- Pacotes SDK possuem versões, testes, certificações, assinaturas,
+  compatibilidade e pedidos de publicação.
+- Conteúdo CIX possui proprietário, classificação, confiança, validade,
+  regra de partilha, consentimento, comunidade e revogação.
+
+Todas as entidades multi-tenant deverão possuir RLS e testes de isolamento.
+
+## 6.5 Segurança de dados
+
+- todas as tabelas multi-tenant deverão possuir RLS;
+- operações privilegiadas deverão usar backend seguro;
+- funções SECURITY DEFINER deverão ser minimizadas e auditadas;
+- superadmins não terão acesso automático ao conteúdo dos tenants;
+- dados sensíveis deverão ser mascarados;
+- vetores, grafos e Data Lake deverão respeitar ACL e tenant isolation.
+
+## 6.6 Escalabilidade
+
+Aplicar particionamento e retenção a eventos, logs, alertas, flows, FIM, NBAD,
+UEBA, inferências e usage records.
+
+## 6.7 Entregáveis de dados
+
+- modelo conceitual;
+- modelo lógico;
+- modelo físico;
+- diagramas ER;
+- dicionário;
+- migrations;
+- RLS;
+- índices;
+- constraints;
+- views;
+- materialized views;
+- RPCs;
+- Storage;
+- Realtime;
+- Data Lake;
+- grafos;
+- testes SQL e de isolamento.
+
+### 6.4.24 ACS MSSP Edition
+mssp_organizations, mssp_units, mssp_operators, mssp_customers,
+mssp_customer_tenants, mssp_service_catalog, mssp_service_contracts,
+mssp_service_assignments, mssp_slas, mssp_sla_measurements, mssp_escalations,
+mssp_operator_assignments, mssp_customer_health_scores, mssp_capacity_metrics,
+mssp_billing_profiles, mssp_consolidated_invoices, mssp_customer_reports.
+
+### 6.4.25 ACS Cyber Command Center
+cyber_command_centers, cyber_command_sessions, cyber_command_incidents,
+cyber_command_roles, cyber_command_members, cyber_command_briefings,
+cyber_command_decisions, cyber_command_orders, cyber_command_tasks,
+cyber_command_status_updates, cyber_command_maps, cyber_command_resources,
+cyber_command_communications, cyber_command_recovery_status,
+cyber_command_after_action_reports.
+
+### 6.4.26 ACS Compliance Intelligence
+compliance_jurisdictions, compliance_regulations, compliance_regulation_versions,
+compliance_requirements, compliance_applicability_rules,
+compliance_framework_mappings, compliance_control_mappings,
+compliance_evidence_mappings, compliance_assessments, compliance_scores,
+compliance_gaps, compliance_drift_events, compliance_change_alerts,
+compliance_recommendations, compliance_certification_records, compliance_audit_rooms.
+
+### 6.4.27 ACS Autonomous Validation Lab
+validation_labs, validation_environments, validation_environment_templates,
+validation_runs, validation_test_suites, validation_test_cases,
+validation_test_results, validation_artifacts, validation_datasets,
+validation_security_results, validation_performance_results,
+validation_regression_results, validation_risk_scores,
+validation_promotion_requests, validation_approvals, validation_cleanup_records.
+
+### 6.4.28 ACS Sector Packs
+sector_packs, sector_pack_versions, sector_pack_categories, sector_pack_components,
+sector_pack_dependencies, sector_pack_compatibility_rules, sector_pack_policies,
+sector_pack_dashboards, sector_pack_playbooks, sector_pack_reports,
+sector_pack_ai_models, sector_pack_connectors, sector_pack_installations,
+sector_pack_certifications, sector_pack_benchmarks, sector_pack_recommendations.
+
+## 6.9 Integridade dos domínios v5.2
+- Operadores MSSP somente poderão aceder a clientes atribuídos.
+- Sessões de comando preservarão decisões, ordens e evidências.
+- Compliance manterá versão, jurisdição e aplicabilidade.
+- Ambientes de validação serão efémeros, isolados e auditáveis.
+- Sector Packs não alterarão o núcleo nem criarão fonte de verdade paralela.
+
+================================================================================
+VOLUME VII — FRONTEND, BACKEND E INTEGRAÇÃO
+================================================================================
+
+# 7. APPLICATION AND INTEGRATION ARCHITECTURE
+
+## 7.1 Regra de implementação vertical
+
+Toda capacidade deverá ligar:
+
+Experiência → Frontend → API → Serviço de aplicação → Regra de domínio →
+Banco de dados → Evento → Auditoria → IA → Observabilidade → Testes.
+
+## 7.2 Frontend
+
+A interface deverá ser profissional, responsiva, acessível, multilíngue,
+preparada para português de Angola, com modos claro e escuro e suporte a baixa largura de banda.
+
+Estados obrigatórios:
+
+- loading;
+- refreshing;
+- success;
+- empty;
+- partial;
+- error;
+- unauthorized;
+- forbidden;
+- not_configured;
+- disconnected;
+- degraded;
+- offline;
+- stale.
+
+Dashboards por perfil:
+
+- Superadmin;
+- Administrador do Cliente;
+- Gestor de Segurança;
+- Analista SOC;
+- Engenheiro;
+- Auditor;
+- Executivo;
+- Comercial;
+- Financeiro.
+
+Workspaces obrigatórios:
+
+- Cyber Mission Control;
+- Executive Decision Center;
+- SOC;
+- CTEM;
+- Digital Twin;
+- BAS;
+- GRC;
+- IAM;
+- Asset Intelligence;
+- Security Data Lake;
+- Reporting and BI.
+
+## 7.3 Backend
+
+Organizar por domínios e separar:
+
+- Domain Layer;
+- Application Layer;
+- Infrastructure Layer;
+- API Layer;
+- Workers;
+- Event Handlers;
+- Integrations.
+
+Cada serviço deverá validar entrada, tenant, permissão, regra de negócio,
+transação, auditoria, eventos e resposta normalizada.
+
+## 7.4 APIs
+
+- versionamento /api/v1;
+- OpenAPI;
+- schemas;
+- autenticação;
+- autorização;
+- rate limiting;
+- idempotência;
+- paginação;
+- tracing;
+- correlation ID;
+- erros normalizados;
+- testes de contrato.
+
+## 7.5 Supabase
+
+- Auth para autenticação base;
+- PostgreSQL como sistema transacional;
+- Storage para evidências e documentos;
+- Realtime para alertas, incidentes, aprovações e estados operacionais;
+- Edge Functions para callbacks e tarefas curtas;
+- workers dedicados para processamento pesado.
+
+## 7.6 Integrações, agentes e coletores
+
+Cada conector deverá possuir capacidade, versão, credenciais protegidas, health,
+última sincronização, erros, limites, estado e tenant.
+
+Cada agente deverá possuir identidade, certificado, assinatura, heartbeat,
+política, canal cifrado, atualização segura, revogação, fila offline e mínimo privilégio.
+
+## 7.7 Event Bus
+
+Eventos deverão possuir schema versionado, tenant, correlation_id, causation_id,
+timestamp, produtor, classificação e integridade.
+
+Suportar at-least-once, idempotência, retry, dead-letter e replay controlado.
+
+## 7.8 Workflow e automação
+
+Workflows deverão suportar estados, condições, responsáveis, SLA, aprovação,
+escalonamento, timeout, retry, rollback, evidência e auditoria.
+
+## 7.9 Relatórios e BI
+
+Implementar serviço transversal com:
+
+- dashboards;
+- KPIs;
+- KRIs;
+- filtros;
+- drill-down;
+- templates premium;
+- branding por tenant;
+- PDF;
+- CSV;
+- XLSX;
+- PPTX;
+- JSON;
+- agendamento;
+- distribuição;
+- assinatura;
+- auditoria;
+- IA para narrativa técnica e executiva baseada em dados reais.
+
+## 7.10 Observabilidade
+
+Propagar request_id, correlation_id, tenant_id, user_id, service_name e operation_name.
+
+Monitorizar logs, métricas, traces, health, SLO, SLA, filas, conectores, modelos,
+SQL, consumo, erros, desempenho e capacidade.
+
+## 7.11 Workspaces do Ecossistema ACS
+
+Criar os seguintes workspaces integrados:
+
+- ACS Marketplace;
+- ACS Academy;
+- ACS Threat Research Labs;
+- ACS SDK Center;
+- ACS Cyber Intelligence Exchange.
+
+Todos deverão reutilizar o Design System, Identity Service, Authorization Service,
+Audit Service, Reporting Service, Event Bus, Workflow Engine e AI Gateway.
+
+## 7.12 APIs do Ecossistema ACS
+
+Grupos oficiais:
+
+- `/api/v1/marketplace`;
+- `/api/v1/academy`;
+- `/api/v1/threat-research`;
+- `/api/v1/sdk`;
+- `/api/v1/cix`.
+
+## 7.13 Serviços Marketplace
+
+Catalog Service, Publisher Service, Package Service, Certification Service,
+Licensing Service, Installation Service, Update Service, Recommendation Service,
+Rating Service e Revenue Service.
+
+## 7.14 Serviços Academy
+
+Course Service, Enrollment Service, Progress Service, Assessment Service,
+Certification Service, Lab Service, Cyber Range Service, Learning Path Service,
+Gamification Service e Learning Intelligence Service.
+
+## 7.15 Serviços Threat Research Labs
+
+Research Project Service, Malware Intake Service, Sandbox Service,
+IOC/IOA Engineering Service, YARA Service, Sigma Service, Research Report Service
+e Threat Feed Packaging Service.
+
+## 7.16 Serviços Open Integration SDK
+
+Package Service, Plugin Service, Template Service, Test Harness Service,
+Compatibility Service, Signing Service, Certification Service e Publishing Service.
+
+## 7.17 Serviços CIX
+
+Membership Service, Community Service, Feed Service, Intelligence Service,
+Sharing Policy Service, Anonymization Service, Trust Service, Approval Service,
+Revocation Service e Collaboration Service.
+
+## 7.18 Regras especiais de segurança do ecossistema
+
+- pacotes Marketplace e plugins SDK deverão executar em sandbox;
+- laboratórios Academy deverão ser isolados e descartáveis;
+- amostras Threat Labs deverão permanecer em ambiente isolado;
+- partilha CIX deverá ser explícita, classificada e auditada;
+- modelos de IA não poderão publicar, certificar ou partilhar sem aprovação.
+
+## 7.19 Workspaces v5.2
+- ACS MSSP Operations Center;
+- ACS Cyber Command Center;
+- ACS Compliance Intelligence Center;
+- ACS Autonomous Validation Lab;
+- ACS Sector Pack Center.
+
+## 7.20 APIs v5.2
+- `/api/v1/mssp`;
+- `/api/v1/cyber-command`;
+- `/api/v1/compliance-intelligence`;
+- `/api/v1/validation-lab`;
+- `/api/v1/sector-packs`.
+
+## 7.21 Serviços v5.2
+MSSP Organization Service, Managed Customer Service, MSSP Operator Service,
+MSSP SLA Service, MSSP Billing Service, MSSP Reporting Service,
+Command Session Service, Crisis Coordination Service, Common Operating Picture Service,
+Regulation Service, Applicability Service, Compliance Mapping Service,
+Evidence Intelligence Service, Validation Environment Service,
+Test Orchestration Service, Promotion Service, Sector Pack Catalog Service,
+Sector Compatibility Service, Sector Installation Service e Sector Benchmark Service.
+
+================================================================================
+VOLUME VIII — ROADMAP, ENGENHARIA E QUALIDADE
+================================================================================
+
+# 8. ROADMAP E GOVERNANÇA DE ENTREGA
+
+## 8.1 Roadmap mestre
+
+Fase 0 — Governação e Fundação de Engenharia.
+Fase 1 — Platform Foundation e Multi-Tenancy.
+Fase 2 — Plataforma Comercial.
+Fase 3 — Governança, Risco e Conformidade.
+Fase 4 — Asset Intelligence e Descoberta.
+Fase 5 — Identity Security.
+Fase 6 — Hardening, Configuration e Patch Management.
+Fase 7 — Endpoint, Malware e FIM.
+Fase 8 — Network Defense, Scanning e NBAD.
+Fase 9 — Cloud, Container e Application Security.
+Fase 10 — Security Data Lake e Security Analytics.
+Fase 11 — SOC, Incident Response e SOAR.
+Fase 12 — Threat Intelligence e Threat Hunting.
+Fase 13 — CTEM e Attack Path Analytics.
+Fase 14 — BAS e Validação Contínua.
+Fase 15 — Data Security, DSPM e Insider Risk.
+Fase 16 — Cyber Digital Twin e Resiliência.
+Fase 17 — Enterprise AI Core.
+Fase 18 — CRI e Executive Intelligence.
+Fase 19 — Cyber Mission Control.
+Fase 20 — Produção, Certificação e Go-Live Core.
+Fase 21 — ACS Marketplace.
+Fase 22 — ACS Academy e Certificação.
+Fase 23 — ACS Threat Research Labs.
+Fase 24 — ACS Open Integration SDK.
+Fase 25 — ACS Cyber Intelligence Exchange.
+Fase 26 — Consolidação Enterprise Final.
+Fase 27 — ACS MSSP Edition.
+Fase 28 — ACS Cyber Command Center.
+Fase 29 — ACS Compliance Intelligence.
+Fase 30 — ACS Autonomous Validation Lab.
+Fase 31 — ACS Sector Packs.
+Fase 32 — Consolidação, Certificação e Go-Live da Baseline v5.2.
+
+Cada fase deverá possuir critérios de entrada, dependências, entregáveis,
+Quality Gates, critérios de saída, evidências e aceite.
+
+## 8.2 Definition of Ready
+
+Um requisito deverá possuir:
+
+- identificador;
+- objetivo;
+- domínio;
+- personas;
+- regras;
+- dados;
+- APIs;
+- dependências;
+- segurança;
+- IA;
+- auditoria;
+- critérios de aceite;
+- testes;
+- rastreabilidade;
+- aprovação.
+
+## 8.3 Definition of Done global
+
+Uma funcionalidade somente será concluída quando:
+
+- requisito e arquitetura estiverem aprovados;
+- dados, migration, constraints, índices e RLS estiverem implementados;
+- backend e API estiverem funcionais;
+- frontend consumir dados reais;
+- permissões, auditoria, eventos e observabilidade estiverem ativos;
+- estados de UI estiverem completos;
+- testes unitários, integração, E2E, segurança e isolamento passarem;
+- desempenho for aceitável;
+- rollback estiver definido;
+- documentação e rastreabilidade estiverem atualizadas;
+- não houver mocks, TODOs críticos, erros no console ou vulnerabilidades críticas conhecidas;
+- aceite funcional estiver registado.
+
+## 8.4 Quality Gates
+
+QG-01 Arquitetura.
+QG-02 Dados.
+QG-03 Segurança.
+QG-04 Multi-Tenancy.
+QG-05 Código.
+QG-06 API.
+QG-07 UX/UI.
+QG-08 Observabilidade.
+QG-09 IA.
+QG-10 Resiliência.
+QG-11 Documentação.
+QG-12 Produção.
+QG-13 Marketplace e assinatura de pacotes.
+QG-14 Academy, Cyber Range e certificações.
+QG-15 Threat Research, isolamento e promoção de conteúdo.
+QG-16 SDK, sandbox, segurança e compatibilidade.
+QG-17 CIX, consentimento, classificação, anonimização e revogação.
+
+QG-23 — MSSP Tenant Segregation.
+QG-24 — Cyber Command and Crisis Readiness.
+QG-25 — Compliance Mapping and Evidence Integrity.
+QG-26 — Validation Lab Isolation and Promotion Safety.
+QG-27 — Sector Pack Compatibility and Non-Fork Architecture.
+QG-28 — Baseline v5.2 Final Consolidation.
+
+## 8.5 Identificadores
+
+ACS-REQ — requisito.
+ACS-BR — regra de negócio.
+ACS-UC — caso de uso.
+ACS-CMP — componente.
+ACS-SVC — serviço.
+ACS-API — API.
+ACS-EVT — evento.
+ACS-DATA — entidade.
+ACS-UI — interface.
+ACS-AI — capacidade de IA.
+ACS-SEC — controlo.
+ACS-TST — teste.
+ACS-AC — critério de aceite.
+ACS-ADR — decisão arquitetónica.
+
+## 8.6 Matriz Mestre de Rastreabilidade
+
+Campos mínimos:
+
+- Requirement ID;
+- Requirement;
+- Source;
+- Domain;
+- Business Objective;
+- Business Rule;
+- Use Case;
+- Persona;
+- Component;
+- Frontend;
+- Backend Service;
+- API;
+- Data Entity;
+- Event;
+- AI Capability;
+- Security Control;
+- Audit Event;
+- Test Case;
+- Acceptance Criteria;
+- Roadmap Phase;
+- Status;
+- Owner;
+- Evidence;
+- Version.
+
+## 8.7 Glossário essencial
+
+ABAC — controlo de acesso baseado em atributos.
+AD DS — Active Directory Domain Services.
+AI Gateway — serviço central de governação e roteamento de IA.
+BAS — Breach and Attack Simulation.
+BIA — Business Impact Analysis.
+CIEM — Cloud Infrastructure Entitlement Management.
+CIS — Center for Internet Security.
+CMDB — Configuration Management Database.
+CNAPP — Cloud-Native Application Protection Platform.
+CRI — Cyber Resilience Index.
+CSPM — Cloud Security Posture Management.
+CTEM — Continuous Threat Exposure Management.
+CWPP — Cloud Workload Protection Platform.
+DAST — Dynamic Application Security Testing.
+DLP — Data Loss Prevention.
+DSPM — Data Security Posture Management.
+EDR — Endpoint Detection and Response.
+FIM — File Integrity Monitoring.
+GPO — Group Policy Object.
+IAM — Identity and Access Management.
+IOC — Indicator of Compromise.
+JEA — Just Enough Administration.
+JIT — Just-in-Time Access.
+KPI — Key Performance Indicator.
+KRI — Key Risk Indicator.
+LLM — Large Language Model.
+MFA — Multi-Factor Authentication.
+NBAD — Network Behavior Anomaly Detection.
+NDR — Network Detection and Response.
+OCR — Optical Character Recognition.
+PAM — Privileged Access Management.
+RAG — Retrieval-Augmented Generation.
+RBAC — Role-Based Access Control.
+RLS — Row Level Security.
+RPO — Recovery Point Objective.
+RTO — Recovery Time Objective.
+SAST — Static Application Security Testing.
+SBOM — Software Bill of Materials.
+SCA — Software Composition Analysis.
+SIEM — Security Information and Event Management.
+SLM — Small Language Model.
+SOAR — Security Orchestration, Automation and Response.
+SOC — Security Operations Center.
+STIX/TAXII — padrões para intercâmbio de Threat Intelligence.
+UEBA — User and Entity Behavior Analytics.
+XAI — Explainable Artificial Intelligence.
+XDR — Extended Detection and Response.
+
+ABAC — Attribute-Based Access Control.
+ADR — Architecture Decision Record.
+AI Gateway — ponto único de governação, segurança e roteamento de IA.
+BAS — Breach and Attack Simulation.
+BIA — Business Impact Analysis.
+CIX — ACS Cyber Intelligence Exchange.
+CIEM — Cloud Infrastructure Entitlement Management.
+CNAPP — Cloud-Native Application Protection Platform.
+CRI — Cyber Resilience Index.
+CSPM — Cloud Security Posture Management.
+CTEM — Continuous Threat Exposure Management.
+CWPP — Cloud Workload Protection Platform.
+DLP — Data Loss Prevention.
+DSPM — Data Security Posture Management.
+FIM — File Integrity Monitoring.
+HITL — Human-in-the-Loop.
+IOA — Indicator of Attack.
+IOC — Indicator of Compromise.
+JEA — Just Enough Administration.
+JIT — Just-in-Time Access.
+KRI — Key Risk Indicator.
+KPI — Key Performance Indicator.
+MFA — Multi-Factor Authentication.
+NBAD — Network Behavior Anomaly Detection.
+NDR — Network Detection and Response.
+PAM — Privileged Access Management.
+RAG — Retrieval-Augmented Generation.
+RBAC — Role-Based Access Control.
+RLS — Row Level Security.
+RPO — Recovery Point Objective.
+RTO — Recovery Time Objective.
+SBOM — Software Bill of Materials.
+SIEM — Security Information and Event Management.
+SOAR — Security Orchestration, Automation and Response.
+SSOT — Single Source of Truth.
+STIX — Structured Threat Information Expression.
+TAXII — Trusted Automated Exchange of Intelligence Information.
+UEBA — User and Entity Behavior Analytics.
+XAI — Explainable Artificial Intelligence.
+XDR — Extended Detection and Response.
+
+================================================================================
+VOLUME IX — CONSOLIDAÇÃO EDITORIAL FINAL
+================================================================================
+
+# 9. BASELINE GOVERNANCE
+
+## 9.1 Revisão editorial
+
+Validar:
+
+- índice;
+- numeração;
+- títulos;
+- terminologia;
+- referências;
+- IDs;
+- duplicidades;
+- domínios;
+- dados;
+- APIs;
+- IA;
+- testes;
+- critérios de aceite;
+- rastreabilidade.
+
+## 9.2 Validação cruzada
+
+Todo domínio deverá possuir dados, backend, APIs, eventos, frontend, segurança,
+auditoria, IA quando aplicável, testes e roadmap.
+
+Todo dashboard deverá possuir fórmula, fonte, query, periodicidade, owner,
+lineage e classificação.
+
+Toda capacidade de IA deverá possuir fontes, modelo, versão, avaliação,
+explicabilidade, fallback e human-in-the-loop.
+
+## 9.3 Quality Gates de congelamento
+
+BG-01 Estrutura editorial.
+BG-02 Integridade de conteúdo.
+BG-03 Ausência de duplicidades.
+BG-04 Referências cruzadas.
+BG-05 Arquitetura.
+BG-06 Dados.
+BG-07 IA.
+BG-08 Segurança.
+BG-09 Desenvolvimento.
+BG-10 Testes.
+BG-11 Rastreabilidade.
+BG-12 Roadmap.
+BG-13 Definition of Done.
+BG-14 Glossário.
+BG-15 Aprovação.
+
+## 9.4 Gestão de mudanças
+
+Após congelamento, alterações deverão usar:
+
+- RFC — Request for Change;
+- ADR — Architecture Decision Record;
+- SDR — Security Decision Record;
+- AIDR — AI Decision Record;
+- DMR — Data Model Revision;
+- ERRATA — correção editorial sem mudança de significado.
+
+Patch v5.0.x — correção compatível.
+Minor v5.x — capacidade adicional compatível.
+Major v6.0 — alteração incompatível ou nova baseline.
+
+## 9.5 Proibição de alteração silenciosa
+
+O Agente IA da Skyworks não poderá remover requisitos, reduzir escopo,
+alterar tecnologia crítica, entidade canónica, RLS, cálculo CRI, automação crítica
+ou permissões sem decisão formal e rastreada.
+
+## 9.6 Comando mestre de execução
+
+Utilize esta especificação como fonte normativa única.
+Desenvolva por entregas verticais.
+Não use dados simulados em produção.
+Não declare funcionalidades incompletas como concluídas.
+Não desenvolva módulos isolados.
+Reutilize serviços corporativos.
+Garanta isolamento multi-tenant.
+Implemente IA pelo AI Gateway.
+Preserve aprovação humana para ações críticas.
+Atualize continuamente a Matriz Mestre de Rastreabilidade.
+Inicie pela Fase 0 e avance apenas após cumprir critérios de saída e Quality Gates.
+
+## 9.7 Termo de congelamento
+
+A aprovação deste documento declara que:
+
+ACS-MASTER-ENGINEERING-SPECIFICATION Baseline Enterprise v5.2
+
+constitui a baseline oficial, única, definitiva e consolidada para o desenvolvimento da:
+
+ACS — Enterprise AI-Driven Cyber Defense Platform.
+
+Toda implementação deverá ser rastreável a esta especificação.
+Toda evolução deverá respeitar o processo formal de mudança.
+
+# 10. ÍNDICE CONSOLIDADO DE ARTEFACTOS
+
+A edição consolidada deverá manter catálogos únicos para:
+
+- 65 Domínios Funcionais Enterprise;
+- entidades e tabelas SQL;
+- APIs e contratos OpenAPI;
+- eventos e respetivos schemas;
+- workflows e policies;
+- páginas, workspaces e componentes frontend;
+- serviços backend, workers, agentes e conectores;
+- modelos, prompts, contextos e AI Engines;
+- controlos de segurança;
+- testes e critérios de aceite;
+- releases e evidências.
+
+# 11. MATRIZ CONSOLIDADA DE DEPENDÊNCIAS
+
+Campos mínimos:
+
+Volume | Domínio Produtor | Domínio Consumidor | Serviço | Entidade | API |
+Evento | Workflow | AI Engine | Criticidade | SLA | Fallback | Owner.
+
+Dependências estruturantes:
+
+- Volume I governa todos os volumes;
+- Volume II organiza capacidades e serviços empresariais;
+- Volume III define controlos e operações de cyberdefesa;
+- Volume IV fornece capacidades cognitivas;
+- Volume V define os 65 domínios;
+- Volume VI define os dados canónicos;
+- Volume VII define a implementação executável;
+- Volume VIII define a entrega e a qualidade;
+- Volume IX valida, consolida e congela a baseline.
+
+# 12. MATRIZ MESTRE DE RASTREABILIDADE CONSOLIDADA
+
+Campos obrigatórios:
+
+Requirement ID | Source Volume | Business Objective | Capability | Domain |
+Business Rule | Use Case | Persona | Data Entity | Migration | RLS Policy |
+Backend Service | API | Frontend | Event | Workflow | AI Capability |
+Security Control | Audit Event | Test Case | Acceptance Criteria |
+Roadmap Phase | Quality Gate | Owner | Status | Evidence | Release | Version.
+
+# 13. MATRIZ DE DADOS CONSOLIDADA
+
+Campos:
+
+Domínio | Entidade | Tabela | Owner | Tenant Strategy | RLS |
+Classificação | Retenção | API | Evento | Frontend | IA | Teste | Lineage.
+
+# 14. MATRIZ DE IA CONSOLIDADA
+
+Campos:
+
+AI Capability | Engine | Domain | Model | Version | Dataset | Context |
+Sources | Evaluation | Explainability | Human Oversight | Fallback |
+Security Controls | Audit | Roadmap Phase.
+
+# 15. MATRIZ DE SEGURANÇA CONSOLIDADA
+
+Campos:
+
+Control ID | Framework | Requirement | Domain | Asset | Identity |
+Data Classification | Preventive Control | Detective Control | Response Control |
+Evidence | Test | Owner | Status.
+
+# 16. MATRIZ DE TESTES CONSOLIDADA
+
+Campos:
+
+Test ID | Requirement | Domain | Test Type | Environment | Data |
+Preconditions | Expected Result | Obtained Result | Evidence |
+Quality Gate | Owner | Status.
+
+# 17. REFERÊNCIAS CRUZADAS NORMATIVAS
+
+Cada domínio do Volume V deverá referenciar:
+
+- princípios e governação do Volume I;
+- capacidades e serviços do Volume II;
+- controlos do Volume III;
+- AI Engines do Volume IV;
+- entidades do Volume VI;
+- interfaces e serviços do Volume VII;
+- fases, testes e Quality Gates do Volume VIII;
+- regras de baseline do Volume IX.
+
+Referências quebradas, órfãs ou circulares indevidas impedem o congelamento.
+
+# 18. VALIDAÇÃO EDITORIAL E ARQUITETÓNICA FINAL
+
+Antes da publicação oficial deverão ser executadas:
+
+- validação de índice e numeração;
+- deteção de IDs duplicados;
+- deteção de capítulos e funcionalidades repetidas;
+- validação de referências cruzadas;
+- validação de domínios sem dados;
+- validação de páginas sem backend;
+- validação de APIs sem consumidores;
+- validação de entidades sem RLS;
+- validação de eventos sem produtor ou consumidor;
+- validação de IA sem avaliação e fallback;
+- validação de requisitos sem teste;
+- validação de fases sem critério de saída.
+
+# 19. ORDEM OFICIAL DE PRECEDÊNCIA
+
+Em caso de conflito:
+
+1. Volume I — Governança e Fundação;
+2. decisões formais aprovadas na própria baseline;
+3. Volume IX — regras de consolidação e congelamento;
+4. Volume II — Arquitetura Empresarial;
+5. Volume III — Arquitetura de Cyberdefesa;
+6. Volume IV — Arquitetura Corporativa de IA;
+7. Volume V — Domínios Funcionais;
+8. Volume VI — Arquitetura de Dados;
+9. Volume VII — Aplicação e Integração;
+10. Volume VIII — Entrega e Qualidade.
+
+Conflitos deverão ser resolvidos por RFC e ADR, sem alteração silenciosa.
+
+# 20. DECLARAÇÃO DE SUBSTITUIÇÃO
+
+A ACS-MASTER-ENGINEERING-SPECIFICATION Baseline Enterprise v5.2 —
+Final Consolidated Edition substitui integralmente:
+
+- ACS-MASTER-ENGINEERING-SPECIFICATION v5.0;
+- ACS-MASTER-ENGINEERING-SPECIFICATION v5.1 — Extensão Consolidada;
+- prompts, adendas e versões intermediárias anteriores, salvo como histórico.
+
+# 21. COMANDO OFICIAL AO AGENTE IA DA SKYWORKS
+
+Leia integralmente esta edição antes de desenvolver.
+
+Construa internamente os catálogos de requisitos, domínios, dados, APIs,
+eventos, interfaces, AI Engines, testes, dependências e critérios de aceite.
+
+Implemente pela ordem do Roadmap 0–32, por entregas verticais completas.
+
+Não utilize dados mockados ou simulados em produção.
+
+Não crie módulos, serviços, entidades ou fontes de verdade paralelas.
+
+Toda IA deverá operar através do AI Gateway.
+
+Toda entidade multi-tenant deverá possuir RLS e teste de isolamento.
+
+Toda ação crítica deverá respeitar política, aprovação, rollback,
+preservação de evidências e auditoria.
+
+Não avance de fase enquanto os critérios de saída e Quality Gates não
+estiverem aprovados.
+
+Atualize continuamente a Matriz Mestre de Rastreabilidade.
+
+# 22. TERMO FINAL DE CONGELAMENTO
+
+Nome oficial:
+ACS-MASTER-ENGINEERING-SPECIFICATION
+
+Edição:
+Baseline Enterprise v5.2 — Final Consolidated Edition
+
+Estado:
+FROZEN BASELINE
+
+Autoridade:
+Documento normativo mestre e Single Source of Truth para desenvolvimento,
+teste, implantação, operação, certificação e evolução da Plataforma ACS.
+
+A alteração desta baseline somente poderá ocorrer por processo formal,
+originando versão posterior devidamente aprovada.
+
+# 23. DECLARAÇÃO DE CONSOLIDAÇÃO DA BASELINE v5.2
+
+A Baseline Enterprise v5.2 incorpora oficialmente os Domínios 5.66 a 5.70.
+
+Passa a possuir:
+- 70 Domínios Funcionais Enterprise;
+- Roadmap das Fases 0 a 32;
+- Quality Gates QG-01 a QG-28;
+- cinco novos AI Engines;
+- cinco novos domínios SQL;
+- cinco novos workspaces;
+- cinco novos grupos de APIs;
+- matrizes e critérios de aceite atualizados.
+
+A Baseline Enterprise v5.1 permanece preservada e imutável como histórico.
+
+# 24. TERMO FINAL DE CONGELAMENTO v5.2
+
+Nome oficial:
+ACS-MASTER-ENGINEERING-SPECIFICATION
+
+Edição:
+Baseline Enterprise v5.2 — Final Consolidated Engineering Edition
+
+Estado:
+FROZEN BASELINE
+
+Esta versão substitui a Baseline Enterprise v5.1 como fonte normativa vigente.
+Qualquer evolução posterior deverá originar versão 5.3 ou 6.0 por RFC, ADR,
+análise de impacto, atualização das matrizes e aprovação formal.
+
+========================================================================================
+REGISTO DE INTEGRIDADE DA BASELINE ENTERPRISE v5.3
+========================================================================================
+
+Documento: ACS-MASTER-ENGINEERING-SPECIFICATION-BASELINE-ENTERPRISE-v5.2-FINAL-CONSOLIDATED-EDITION.txt
+Fonte preservada: ACS-MASTER-ENGINEERING-SPECIFICATION-BASELINE-ENTERPRISE-v5.1-FINAL-CONSOLIDATED-EDITION(2).txt
+Algoritmo: SHA-256
+Hash do conteúdo anterior a este registo: 71add5b37f9d03658ad8135276d99c72bf0748250760abf688b9469578e6c08d
+Gerado em UTC: 2026-08-03T07:55:57Z
+Estado: FINAL CONSOLIDATED ENGINEERING EDITION — FROZEN BASELINE
+
+========================================================================================
+BASELINE ENTERPRISE v5.3 — CONSOLIDAÇÃO NORMATIVA INCORPORADA
+========================================================================================
+
+A presente secção integra no mesmo artefacto físico as evoluções oficiais aprovadas
+para a Baseline Enterprise v5.3. Em caso de divergência entre conteúdo histórico
+preservado da v5.2 e as disposições abaixo, prevalece a redação v5.3.
+
+A Baseline v5.3 incorpora oficialmente os Domínios 5.71–5.75, os Quality Gates
+QG-29–QG-34 e os Apêndices ANX-A, ANX-B e ANX-C.
+
+========================================================================================
+VOLUME V — DOMÍNIOS 5.71–5.75
+========================================================================================
+
+### 5.71 ACS OT/ICS & IoT Security Fabric
+
+Objetivo: fornecer cyberdefesa especializada para ambientes industriais,
+ciberfísicos e IoT, preservando segurança física, disponibilidade e continuidade.
+
+Capacidades obrigatórias:
+- descoberta passiva de ativos OT/ICS e IoT;
+- inventário, classificação, criticidade e ownership;
+- topologias, zonas, conduítes e segmentação IT/OT;
+- suporte governado a protocolos industriais;
+- análise comportamental e deteção de anomalias;
+- vulnerabilidades, firmware e configuração;
+- controlo de acesso remoto e fornecedores;
+- integração com CTEM, BAS, Digital Twin, CRI, Incident Response e Recovery;
+- backup de configuração, recovery e preservação de evidências.
+
+Regras: passive-first, safety-first, availability-first, sem automação destrutiva,
+scanning ativo apenas mediante autorização, aprovação humana e rollback obrigatório.
+
+### 5.72 ACS Cyber Economic Risk Engine
+
+Objetivo: traduzir riscos cibernéticos em impacto económico, perdas esperadas e
+retorno dos investimentos em segurança.
+
+Capacidades: modelos económicos versionados, cenários de perda, frequência,
+magnitude, expected loss, ALE, SLE, custos de indisponibilidade e recuperação,
+ROI, ROSI, análise de sensibilidade, priorização de investimentos, explicabilidade,
+fontes, pressupostos, intervalos e confiança.
+
+### 5.73 ACS Third-Party & Supply Chain Cyber Hub
+
+Objetivo: gerir continuamente o risco cibernético de fornecedores, parceiros,
+prestadores, software e cadeia de fornecimento.
+
+Capacidades: inventário, tiering, due diligence, questionários, contratos,
+obrigações de segurança, acessos, partilha de dados, evidências, certificações,
+SBOM, fourth-party risk, concentration risk, monitorização, incidentes,
+remediação, recertificação e offboarding.
+
+Fronteira: o domínio 5.15 mantém a gestão administrativa do fornecedor; o 5.73
+mantém o risco cibernético do terceiro.
+
+### 5.74 ACS Cyber Executive Board Portal
+
+Objetivo: fornecer ambiente estratégico, confidencial e auditável para Conselhos
+de Administração e órgãos executivos.
+
+Capacidades: identidades e funções do Conselho, reuniões, agendas, Board Packs,
+briefings, CRI, risco económico, compliance, incidentes materiais, terceiros,
+OT, Human Risk, decisões, ações, atas, aprovações e assinaturas.
+
+Segurança: Board Confidential, MFA, RBAC, ABAC, need-to-know, watermark,
+export control, auditoria imutável e revisão humana de briefings de IA.
+
+### 5.75 ACS Enterprise Security Awareness & Human Risk Management
+
+Objetivo: reduzir continuamente o risco humano por meio de formação,
+consciencialização, simulações autorizadas, aprendizagem adaptativa e eficácia mensurável.
+
+Capacidades: programas, campanhas, phishing, spear phishing, BEC, smishing,
+vishing e QR phishing quando legalmente permitido, microlearning, trilhas por perfil,
+coaching, conteúdos multimédia, quizzes, gamificação, badges, certificados, botão
+de reporte, Human Risk Score, Security Culture Score e métricas históricas.
+
+Fronteiras:
+- 5.32 é proprietário da análise técnica de phishing real;
+- 5.62 é proprietário do LMS, laboratórios e certificações técnicas;
+- 5.75 é proprietário das campanhas, comportamento, Human Risk e eficácia.
+
+========================================================================================
+VOLUME VI — EXTENSÕES DO MODELO DE DADOS v5.3
+========================================================================================
+
+Entidades canónicas adicionais mínimas:
+
+OT/ICS & IoT: ot_sites, ot_areas, ot_zones, ot_conduits, ot_assets,
+ot_asset_types, ot_asset_criticality, ot_processes, ot_protocols,
+ot_communications, ot_topologies, ot_vulnerabilities, ot_findings,
+ot_anomalies, ot_events, ot_incidents, ot_remote_access_sessions,
+ot_vendor_access, ot_firmware_inventory, ot_configuration_backups,
+ot_recovery_plans, ot_safety_constraints, iot_devices, iot_gateways,
+iot_device_profiles, iot_communications, iot_posture_findings.
+
+Cyber Economic Risk: cyber_economic_models, cyber_economic_model_versions,
+loss_scenarios, loss_event_frequencies, loss_magnitudes,
+expected_loss_calculations, financial_exposure_scores, downtime_cost_models,
+recovery_cost_models, regulatory_exposure_models, control_investments,
+control_costs, roi_calculations, rosi_calculations, economic_risk_assumptions,
+economic_risk_sensitivity_results, economic_risk_results,
+economic_risk_recommendations, economic_risk_approvals.
+
+Third-Party & Supply Chain: third_parties, third_party_tiers,
+third_party_services, third_party_contracts, third_party_accesses,
+third_party_data_sharing, third_party_assessments, third_party_questionnaires,
+third_party_evidence, third_party_certifications, third_party_findings,
+third_party_risks, third_party_incidents, third_party_remediation_plans,
+third_party_recertifications, third_party_offboarding, fourth_party_dependencies,
+supplier_sboms, supplier_sbom_components, supplier_monitoring_events.
+
+Board Portal: board_members, board_roles, board_meetings, board_agendas,
+board_packs, board_pack_versions, board_briefings, board_decisions,
+board_actions, board_minutes, board_reports, board_access_logs,
+board_export_logs, board_signatures.
+
+Security Awareness: awareness_programs, awareness_audiences,
+awareness_campaigns, awareness_content, awareness_learning_paths,
+awareness_enrollments, awareness_simulations, awareness_reported_messages,
+awareness_coaching_sessions, awareness_human_risk_models,
+awareness_human_risk_scores, awareness_human_risk_factors,
+awareness_security_culture_scores, awareness_effectiveness_metrics,
+awareness_effectiveness_goals, awareness_effectiveness_results,
+awareness_privacy_settings, awareness_consent_records.
+
+========================================================================================
+VOLUME VII — WORKSPACES, APIS E EVENTOS v5.3
+========================================================================================
+
+Workspaces adicionais:
+- ACS OT/ICS & IoT Security Operations;
+- ACS Cyber Economic Risk Center;
+- ACS Third-Party & Supply Chain Cyber Hub;
+- ACS Cyber Executive Board Portal;
+- ACS Security Awareness & Human Risk Center.
+
+APIs:
+/api/v1/ot-ics-iot
+/api/v1/cyber-economic-risk
+/api/v1/third-party-supply-chain
+/api/v1/board-portal
+/api/v1/security-awareness
+
+Eventos canónicos adicionais:
+ot.asset_discovered; ot.topology_changed; ot.anomaly_detected;
+ot.remote_access_started; ot.incident_declared; ot.recovery_completed;
+cyber_economic.model_approved; cyber_economic.scenario_created;
+cyber_economic.calculation_completed; cyber_economic.exposure_changed;
+third_party.registered; third_party.assessment_completed;
+third_party.risk_changed; third_party.incident_reported;
+board.meeting_created; board.pack_published; board.decision_recorded;
+board.action_assigned; awareness.program_started; awareness.campaign_launched;
+awareness.simulation_event_recorded; awareness.message_reported;
+human_risk.changed; security_culture.changed; awareness.effectiveness_calculated.
+
+========================================================================================
+VOLUME VIII — ROADMAP E QUALITY GATES v5.3
+========================================================================================
+
+Fase 33 — ACS OT/ICS & IoT Security Fabric.
+Fase 34 — ACS Cyber Economic Risk Engine.
+Fase 35 — ACS Third-Party & Supply Chain Cyber Hub.
+Fase 36 — ACS Cyber Executive Board Portal.
+Fase 37 — ACS Enterprise Security Awareness & Human Risk Management.
+Fase 38 — Consolidação, certificação e congelamento final da Baseline v5.3.
+
+QG-29 — OT/ICS Safety and Availability
+Valida descoberta segura, segmentação, protocolos OT, continuidade operacional,
+preservação da disponibilidade, ausência de escrita não autorizada e proibição de
+automação destrutiva.
+
+QG-30 — Cyber Economic Risk Model Validation
+Valida modelos, pressupostos, fontes, fórmulas, unidades, moedas, cenários,
+reprodutibilidade, sensibilidade, confiança e explicabilidade.
+
+QG-31 — Third-Party Risk Governance
+Valida inventário, avaliações, contratos, acessos, evidências, SBOM, fourth parties,
+monitorização, incidentes, remediação, recertificação e offboarding.
+
+QG-32 — Executive Board Confidentiality
+Valida MFA, RBAC, ABAC, need-to-know, classificação, encriptação, versionamento,
+assinaturas, export control, auditoria, integridade das decisões e revisão humana de IA.
+
+QG-33 — Security Awareness Effectiveness
+Valida programas, campanhas, cobertura, participação, conclusão, simulações,
+report rate, Human Risk, Security Culture, privacidade, proporcionalidade e eficácia.
+
+Metas mensuráveis: cobertura, conclusão, aprendizagem, reporte, redução de cliques,
+redução de submissão de credenciais, redução de reincidência, melhoria do Human Risk,
+melhoria do Security Culture e redução de incidentes humanos.
+
+QG-34 — Baseline Enterprise v5.3 Final Consolidation
+Valida os nove volumes, 75 domínios, QG-01 a QG-34, ECOM, EDIM, EDOLM,
+modelo SQL único, AI Engines, APIs, eventos, workspaces, frontend, backend,
+RLS, segurança, testes, referências cruzadas, glossário, rastreabilidade,
+ausência de duplicações críticas, hash e termo de congelamento.
+
+========================================================================================
+ANX-A — ENTERPRISE CAPABILITY OWNERSHIP MATRIX — ECOM
+========================================================================================
+
+Campos: Capability ID, Capability Name, Domain Owner, Business Owner,
+Technical Owner, Security Owner, Data Owner, Proprietary Services, APIs,
+Events, Canonical Entities, AI Engines, Consumers, Workspaces, Quality Gates,
+Definition of Done e References.
+
+Regras: cada capacidade possui exatamente um Domain Owner; consumidores reutilizam
+serviços oficiais; capacidades transversais são centralizadas; alterações de ownership
+exigem decisão formal.
+
+Ownership mínimo v5.3:
+Technical Phishing Analysis→5.32; Security Awareness and Human Risk→5.75;
+LMS and Technical Certification→5.62; Incident Record→5.10;
+Response Orchestration→5.11; Daily Operations→5.59; Crisis Coordination→5.67;
+Executive Metrics→5.58; Board Governance→5.74; Supplier Administration→5.15;
+Third-Party Cyber Risk→5.73; Enterprise Risk→5.5; Economic Quantification→5.72;
+Asset Inventory→5.3; Cyber Asset Graph→5.56; Security Data Lake→5.57;
+OT/ICS & IoT Security→5.71.
+
+========================================================================================
+ANX-B — ENTERPRISE DEPENDENCY & INTEGRATION MATRIX — EDIM
+========================================================================================
+
+Campos: Dependency ID, Producer, Consumer, Purpose, Type, Direction, API, Event,
+Workflow, Data Product, Classification, Authentication, Authorization, Tenant Scope,
+SLA, Timeout, Retry, Circuit Breaker, Fallback, Tests, Owner e Evidence.
+
+Regras: integrações críticas exigem contrato; consumidores não escrevem diretamente
+nas tabelas do produtor; eventos possuem schema e versão; consumers são idempotentes;
+integrações possuem timeout, retry, observabilidade e fallback; tenant context é
+preservado ponta a ponta.
+
+Dependências mínimas:
+5.71→Asset Inventory, CTEM, BAS, Digital Twin, Incident Response e CRI;
+5.72→Risk Management, Executive Decision Center, Board Portal e Reporting;
+5.73→Supplier Management, IAM, Compliance, Incident Response e CIX;
+5.74→Executive Decision Center, CRI, Compliance, Economic Risk e Command Center;
+5.75→Academy, Email & Phishing Defense, UEBA, Insider Risk, Compliance e Reporting.
+
+========================================================================================
+ANX-C — ENTERPRISE DATA OWNERSHIP & LINEAGE MATRIX — EDOLM
+========================================================================================
+
+Campos: Data Asset ID, Data Asset Name, Data Type, Domain Owner, Data Owner,
+Data Steward, Technical Custodian, Authoritative Source, Purpose, Classification,
+Tenant Scope, Storage Location, Consumers, Transformations, Lineage, Retention,
+Legal Hold, Secure Deletion, Backup Treatment, AI Usage, RAG Usage, Graph Usage,
+Tests e Evidence.
+
+Regras: toda entidade possui owner e fonte; scores e inferências preservam fontes;
+dados derivados não se tornam fontes canónicas; retenção e eliminação abrangem caches,
+grafos, vetores, embeddings e exports; legal hold prevalece; IA exige finalidade,
+autorização e lineage; Board data é Board Confidential; OT safety-critical recebe
+classificação reforçada; Human Risk é minimizado e não gera punição automática.
+
+========================================================================================
+VOLUME IX — TERMO DE CONSOLIDAÇÃO E CONGELAMENTO
+========================================================================================
+
+A Baseline v5.3 somente será oficialmente congelada após validação dos nove volumes,
+dos domínios 5.1–5.75, de QG-01–QG-34, de ECOM, EDIM e EDOLM, do modelo de dados,
+do frontend, backend, APIs, eventos, integrações, AI Gateway, multi-tenancy, RLS,
+segurança, auditoria, observabilidade, testes, QG-34, hash e aprovações.
+
+TERMO OFICIAL DE SUBSTITUIÇÃO
+
+A ACS-MASTER-ENGINEERING-SPECIFICATION — Baseline Enterprise v5.3 — Final
+Consolidated Engineering Edition substitui integralmente a Baseline Enterprise v5.2
+como referência normativa vigente para desenvolvimento, teste, implantação, operação,
+manutenção e evolução da ACS — Enterprise AI-Driven Cyber Defense Platform.
+
+TERMO OFICIAL DE CONGELAMENTO
+
+Após aprovação formal do QG-34 e registo do hash do arquivo físico, a presente edição
+constitui a Baseline oficial, única, definitiva e congelada para desenvolvimento da ACS.
+Enquanto QG-34, aprovações e hash de custódia não estiverem formalmente registados,
+o estado permanece FINAL CONSOLIDATION CANDIDATE.
+
+========================================================================================
+FIM DA CONSOLIDAÇÃO NORMATIVA v5.3
+========================================================================================
+
+
+========================================================================================
+REGISTO DE INTEGRIDADE DO ARQUIVO FÍSICO
+========================================================================================
+
+Arquivo: ACS-MASTER-ENGINEERING-SPECIFICATION-BASELINE-ENTERPRISE-v5.3-FINAL-CONSOLIDATED-ENGINEERING-EDITION.txt
+Encoding: UTF-8
+Tamanho antes deste registo: 120104 bytes
+Linhas antes deste registo: 4119
+SHA-256 do conteúdo anterior a este registo: 37560abcdb01fa3dcacad3e476051b0a42296e9245a9fff4156bce6e0d1ddffb
+Data de geração: 2026-08-03T11:33:33Z
+Estado: FINAL CONSOLIDATION CANDIDATE
+Condição para FROZEN BASELINE: aprovação formal do QG-34 e registo das autoridades.
+
+Nota: para custódia definitiva, calcular um novo hash externo sobre o arquivo final completo.

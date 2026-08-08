@@ -1,0 +1,329 @@
+ACS — OFFICIAL DEVELOPMENT INITIALIZATION PROMPT
+Baseline Enterprise v5.3 — Final Consolidated Engineering Edition
+OFFICIAL MASTER INSTRUCTION
+FOR THE SKyWORKS AI ENGINEERING AGENT
+
+Document Code: ACS-ODIP-005.3
+
+Version: 5.3
+
+Status: OFFICIAL DEVELOPMENT INITIALIZATION PROMPT
+
+Target Platform:
+ACS — Enterprise AI-Driven Cyber Defense Platform
+
+Authoritative Engineering Baseline:
+
+ACS-MASTER-ENGINEERING-SPECIFICATION — BASELINE ENTERPRISE v5.3 — FINAL CONSOLIDATED ENGINEERING EDITION
+
+OFFICIAL DEVELOPMENT AUTHORIZATION
+
+The engineering specification attached to this prompt is the single authoritative engineering source for the complete implementation of the ACS Platform.
+
+From this point forward, every engineering activity, architectural decision, software component, database object, API, workflow, AI capability, integration, interface and deployment artifact shall be derived exclusively from the attached Baseline Enterprise v5.3.
+
+No secondary interpretation shall replace or override the attached specification.
+
+PRIMARY OBJECTIVE
+
+Develop the complete production-ready implementation of the ACS — Enterprise AI-Driven Cyber Defense Platform exactly as specified in the attached engineering baseline.
+
+The final solution shall represent an Enterprise-grade commercial cyber defense platform suitable for SaaS, Private Cloud, Hybrid Cloud and On-Premises deployments.
+
+The implementation shall be fully functional and shall not be considered a prototype.
+
+AUTHORITATIVE ENGINEERING SOURCE
+
+The attached document is the official engineering baseline.
+
+It defines:
+
+Enterprise Architecture
+Cyber Defense Architecture
+AI Architecture
+Functional Domains
+Data Architecture
+SQL Canonical Model
+APIs
+Events
+AI Engines
+Frontend
+Backend
+Integration Architecture
+Workspaces
+Security
+Compliance
+Multi-tenancy
+Roadmap
+Quality Gates
+Engineering Rules
+Traceability
+Governance
+
+No engineering artifact shall be created outside this specification.
+
+ABSOLUTE ENGINEERING RULES
+
+The attached baseline is mandatory.
+
+It is forbidden to:
+
+simplify requirements;
+omit capabilities;
+remove modules;
+redesign the architecture;
+merge unrelated domains;
+create duplicated services;
+invent alternative implementations;
+replace canonical entities;
+ignore traceability;
+ignore dependencies;
+generate mock implementations;
+create fake dashboards;
+use placeholder data in production;
+bypass Quality Gates.
+DEVELOPMENT METHODOLOGY
+
+The platform shall be developed using Vertical Slice Engineering.
+
+Each completed capability shall include:
+
+canonical SQL model;
+migrations;
+indexes;
+constraints;
+Row Level Security;
+backend services;
+APIs;
+frontend;
+business rules;
+authorization;
+audit;
+observability;
+AI integration;
+automated tests;
+documentation;
+traceability.
+
+A feature is complete only when every layer is operational.
+
+CANONICAL DEVELOPMENT ORDER
+
+The AI Agent shall follow the engineering order defined in the baseline.
+
+Recommended execution sequence:
+
+Platform Foundation
+Identity
+Multi-Tenant Architecture
+Canonical Database
+Backend Services
+Integration Layer
+Event Bus
+AI Gateway
+Functional Domains
+Enterprise AI Engines
+Frontend Workspaces
+Dashboards
+Reports
+APIs
+Security
+Testing
+Validation
+Production Readiness
+
+No phase may violate dependency relationships defined in the baseline.
+
+FRONTEND REQUIREMENTS
+
+Every screen shall:
+
+consume real backend data;
+use canonical APIs;
+respect RBAC and ABAC;
+support tenant isolation;
+display real operational status;
+expose audit metadata where applicable.
+
+No page shall display hardcoded values or fictitious metrics.
+
+BACKEND REQUIREMENTS
+
+Every service shall:
+
+own a clear bounded context;
+expose documented APIs;
+emit canonical events;
+integrate with observability;
+support rollback;
+implement authorization;
+maintain immutable audit trails.
+DATABASE REQUIREMENTS
+
+The platform shall implement the canonical data model.
+
+Requirements include:
+
+PostgreSQL;
+canonical schema;
+migrations;
+foreign keys;
+constraints;
+indexes;
+Row Level Security;
+audit metadata;
+lineage;
+tenant isolation.
+
+No duplicate source of truth shall exist.
+
+ARTIFICIAL INTELLIGENCE REQUIREMENTS
+
+Every AI capability shall operate exclusively through the Enterprise AI Gateway.
+
+Direct communication between functional domains and AI models is forbidden.
+
+All AI operations shall support:
+
+Explainability;
+Confidence scoring;
+Human approval where required;
+Context Engineering;
+Private RAG;
+Knowledge Graph;
+Cyber Asset Graph;
+Model versioning;
+Audit logging;
+Secure fallback.
+FUNCTIONAL DOMAINS
+
+The implementation shall include every Functional Domain defined in the baseline, including:
+
+Foundation
+Identity
+Risk
+SOC
+SIEM
+SOAR
+UEBA
+Threat Intelligence
+CTEM
+BAS
+Digital Twin
+DSPM
+Executive Decision Center
+Cyber Mission Control
+Cyber Resilience Index
+Marketplace
+Academy
+Threat Research Labs
+Open Integration SDK
+Cyber Intelligence Exchange
+MSSP Edition
+Cyber Command Center
+Compliance Intelligence
+Autonomous Validation Lab
+Sector Packs
+OT/ICS & IoT Security Fabric
+Cyber Economic Risk Engine
+Third-Party & Supply Chain Cyber Hub
+Cyber Executive Board Portal
+Enterprise Security Awareness & Human Risk Management
+
+No domain shall be omitted.
+
+SECURITY REQUIREMENTS
+
+The implementation shall enforce:
+
+Zero Trust
+Least Privilege
+Multi-Factor Authentication
+RBAC
+ABAC
+Row Level Security
+Immutable Audit
+Secure Secrets Management
+API Security
+Supply Chain Security
+DevSecOps
+Continuous Validation
+Human Approval for Critical Actions
+QUALITY GATES
+
+The AI Agent shall validate every engineering delivery against all Quality Gates defined in the baseline, including:
+
+QG-01 through QG-34.
+
+Implementation shall not proceed to the next phase while any mandatory Quality Gate remains unsatisfied.
+
+TRACEABILITY
+
+Every implemented component shall maintain bidirectional traceability between:
+
+Requirement
+Domain
+SQL
+Backend
+API
+Event
+Frontend
+AI Engine
+Tests
+Documentation
+ENGINEERING CONSTRAINTS
+
+The platform shall:
+
+be cloud-native;
+support on-premises deployment;
+support Kubernetes;
+support Linux and Windows Server;
+support horizontal scaling;
+support disaster recovery;
+support high availability;
+support multi-region deployment;
+support enterprise observability.
+IMPLEMENTATION PRINCIPLES
+
+The AI Agent shall:
+
+maximize reuse;
+avoid duplicated logic;
+maintain modular architecture;
+preserve canonical ownership;
+preserve service boundaries;
+preserve data ownership;
+preserve engineering consistency.
+COMPLETION CRITERIA
+
+The implementation shall be considered complete only when:
+
+every requirement in the attached baseline has been implemented;
+every Functional Domain is operational;
+every API is functional;
+every AI Engine is integrated;
+every SQL entity exists;
+every frontend workspace consumes real data;
+every Quality Gate has passed;
+the platform is deployable without engineering blockers.
+PROHIBITED ACTIONS
+
+The AI Agent shall never:
+
+remove requirements;
+ignore dependencies;
+redesign canonical architecture;
+replace official terminology;
+fabricate integrations;
+simulate production data;
+skip testing;
+declare completion without satisfying the Definition of Done.
+FINAL DEVELOPMENT DIRECTIVE
+
+The attached ACS-MASTER-ENGINEERING-SPECIFICATION — BASELINE ENTERPRISE v5.3 — FINAL CONSOLIDATED ENGINEERING EDITION shall be treated as the exclusive engineering constitution of the ACS platform.
+
+Every software artifact, database schema, API, AI capability, security control, integration, workflow, user interface, report and deployment package shall conform strictly to this baseline.
+
+The implementation objective is to deliver a production-ready, enterprise-grade, AI-driven cyber defense platform that is architecturally consistent, functionally complete, fully integrated, 
+traceable, secure, scalable and commercially deployable, with no omitted capabilities, no placeholder implementations and no deviations from the approved engineering specification.
