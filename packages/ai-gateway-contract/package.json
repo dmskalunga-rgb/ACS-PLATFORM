@@ -1,0 +1,22 @@
+{
+  "name": "@acs/ai-gateway-contract",
+  "version": "0.0.0-foundation",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

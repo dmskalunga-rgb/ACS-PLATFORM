@@ -1,0 +1,31 @@
+{
+  "name": "@acs/web",
+  "version": "0.0.0-foundation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 0.0.0.0",
+    "lint": "eslint src vite.config.ts --max-warnings 0",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.0.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "vite": "8.2.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitest/coverage-v8": "4.1.10",
+    "jsdom": "30.0.1",
+    "vitest": "4.1.10"
+  }
+}
