@@ -65,7 +65,7 @@ These rows supplement, rather than erase, the initial assessment snapshot.
 | VOL-II-2.7; VOL-III-3.2 | ADR-0007 | authz/audit ports; tenant context | fail-closed context tests | `VERIFIED` locally |
 | VOL-IV-4.2-4.10 | ADR-0008 | `packages/ai-gateway-contract/` | compile/build boundary | `VERIFIED`; engines not implemented |
 | VOL-VII-7.10 | ADR-0009 | logs, metrics, traces, probes | redaction/metrics/endpoint tests | `VERIFIED` locally |
-| VOL-III-3.2; VOL-VIII-8.3 | ADR-0010 | pinned CI, containers, Kustomize, SBOM | local checks plus remote CI | Remote execution pending |
+| VOL-III-3.2; VOL-VIII-8.3 | ADR-0010 | pinned CI, containers, Kustomize, SBOM | local checks plus remote CI | `FAILED`: run 31283387146, Trivy filesystem scan |
 | ANX-A/B/C; VOL-VIII-8.4 | N/A | catalogs; gate/evidence process | documentary review | `PENDING_GOVERNANCE_APPROVAL` |
 
 ## Coverage statement
