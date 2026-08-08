@@ -1,6 +1,7 @@
 # ACS Engineering Gap Register
 
-Status: Initial Phase C register  
+Status: Initial Phase C register
+
 Scope: Baseline-to-repository gaps observed before functional implementation
 
 Gap IDs are local assessment identifiers. They are not normative requirements and do not

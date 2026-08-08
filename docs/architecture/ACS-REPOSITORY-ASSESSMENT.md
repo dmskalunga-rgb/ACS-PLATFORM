@@ -1,8 +1,11 @@
 # ACS Repository Assessment
 
-Status: Initial factual assessment  
-Assessment scope: Phase B — Repository Assessment  
-Assessment branch: `docs/bootstrap-assessment`  
+Status: Initial factual assessment
+
+Assessment scope: Phase B — Repository Assessment
+
+Assessment branch: `docs/bootstrap-assessment`
+
 Normative source: ACS Enterprise Baseline v5.3
 
 ## Executive finding

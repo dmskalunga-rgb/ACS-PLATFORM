@@ -1,6 +1,7 @@
 # ACS Initial Implementation Readiness
 
-Status: Phase B/C readiness decision  
+Status: Phase B/C readiness decision
+
 Decision: `READY_FOR_PHASE_0_IMPLEMENTATION`
 
 This decision means that the repository has enough normative authority to begin a

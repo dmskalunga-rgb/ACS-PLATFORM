@@ -1,7 +1,9 @@
 # ACS Baseline Governance Gaps
 
-Status: Open governance register  
-Authority: Non-normative assessment artifact  
+Status: Open governance register
+
+Authority: Non-normative assessment artifact
+
 Normative source: ACS Enterprise Baseline v5.3
 
 This register records documentary conditions exactly as observed. It does not amend,

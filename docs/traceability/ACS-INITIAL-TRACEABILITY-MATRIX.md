@@ -1,7 +1,9 @@
 # ACS Initial Traceability Matrix
 
-Status: Initial, area-level traceability  
-Authority: Non-normative assessment artifact  
+Status: Initial, area-level traceability
+
+Authority: Non-normative assessment artifact
+
 Implementation baseline: Repository state on `docs/bootstrap-assessment`
 
 Stable volume/section references are used because the baseline does not provide individual
