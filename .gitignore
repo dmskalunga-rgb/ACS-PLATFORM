@@ -17,6 +17,7 @@ node_modules/
 dist/
 build/
 coverage/
+.turbo/
 .next/
 .nuxt/
 
@@ -53,3 +54,7 @@ temp/
 *.user
 .DS_Store
 Thumbs.db
+
+# Generated local evidence artifacts (CI publishes immutable copies)
+artifacts/*
+!artifacts/.gitkeep

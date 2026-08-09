@@ -1,0 +1,15 @@
+.git
+artifacts
+coverage
+dist
+node_modules
+pnpm-lock.yaml
+docs/baseline/*.txt
+docs/governance/*.txt
+docs/governance/legacy/*.txt
+docs/README.md
+docs/architecture/ACS-INITIAL-IMPLEMENTATION-READINESS.md
+docs/architecture/ACS-REPOSITORY-ASSESSMENT.md
+docs/governance/ACS-BASELINE-GOVERNANCE-GAPS.md
+docs/traceability/ACS-ENGINEERING-GAP-REGISTER.md
+docs/traceability/ACS-INITIAL-TRACEABILITY-MATRIX.md

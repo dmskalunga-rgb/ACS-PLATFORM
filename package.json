@@ -1,0 +1,43 @@
+{
+  "name": "@acs/root",
+  "version": "0.0.0-foundation",
+  "private": true,
+  "type": "module",
+  "description": "ACS Phase 0 engineering foundation",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.16.0",
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "pnpm": ">=11.16.0 <12"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "db:validate": "node --experimental-strip-types tools/database/validate.ts",
+    "dev": "turbo run dev --parallel",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "turbo run lint",
+    "sbom:generate": "pnpm sbom --sbom-format cyclonedx --lockfile-only --out artifacts/sbom.cdx.json",
+    "test": "turbo run test --concurrency=2",
+    "test:coverage": "turbo run test:coverage",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "@types/pg": "8.21.0",
+    "@typescript-eslint/eslint-plugin": "8.66.0",
+    "@typescript-eslint/parser": "8.66.0",
+    "eslint": "10.8.1",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.3",
+    "pg": "8.23.0",
+    "prettier": "3.9.6",
+    "tsx": "4.23.11",
+    "turbo": "2.10.9",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0",
+    "vitest": "4.1.10"
+  }
+}

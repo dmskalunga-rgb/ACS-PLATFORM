@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-api-config
+  namespace: acs-foundation
+data:
+  ACS_ENV: development
+  ACS_HOST: 0.0.0.0
+  ACS_LOG_LEVEL: info
+  ACS_PORT: '3000'
+  ACS_WEB_ORIGIN: http://web

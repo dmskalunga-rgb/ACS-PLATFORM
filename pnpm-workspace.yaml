@@ -1,0 +1,20 @@
+packages:
+  - apps/*
+  - services/*
+  - packages/*
+
+catalogMode: strict
+
+injectWorkspacePackages: true
+
+syncInjectedDepsAfterScripts:
+  - build
+
+minimumReleaseAgeExclude:
+  - fastify@5.11.3
+  - pg-protocol@1.16.0
+  - pg@8.23.0
+
+allowBuilds:
+  esbuild: true
+  protobufjs: true

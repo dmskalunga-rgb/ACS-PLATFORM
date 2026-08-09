@@ -1,0 +1,57 @@
+name: acs-foundation
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    environment:
+      POSTGRES_DB: acs_foundation
+      POSTGRES_PASSWORD: acs_local_only
+      POSTGRES_USER: acs_local
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U acs_local -d acs_foundation']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    ports:
+      - '5432:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  platform-api:
+    build:
+      context: .
+      dockerfile: services/platform-api/Dockerfile
+    environment:
+      ACS_ENV: development
+      ACS_HOST: 0.0.0.0
+      ACS_LOG_LEVEL: info
+      ACS_PORT: 3000
+      ACS_WEB_ORIGIN: http://localhost:8080
+      DATABASE_URL: postgresql://acs_local:acs_local_only@postgres:5432/acs_foundation
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/health']
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    ports:
+      - '3000:3000'
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    ports:
+      - '8080:8080'
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=0750
+      - /var/run:uid=101,gid=101,mode=0750
