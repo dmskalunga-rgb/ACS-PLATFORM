@@ -33,6 +33,10 @@ spec:
             httpGet:
               path: /
               port: http
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
           resources:
             requests:
               cpu: 50m

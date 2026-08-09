@@ -53,5 +53,5 @@ services:
       - '8080:8080'
     read_only: true
     tmpfs:
-      - /var/cache/nginx
-      - /var/run
+      - /var/cache/nginx:uid=101,gid=101,mode=0750
+      - /var/run:uid=101,gid=101,mode=0750
