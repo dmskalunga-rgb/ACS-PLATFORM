@@ -14,6 +14,7 @@ execution and governance material.
 | ACS Initial Implementation Readiness | `architecture/ACS-INITIAL-IMPLEMENTATION-READINESS.md` | Initial | Determines the first incomplete Roadmap phase and entry constraints | Engineering assessment | ASSESSMENT / NON-NORMATIVE | Evidence only |
 | ACS Initial Traceability Matrix | `traceability/ACS-INITIAL-TRACEABILITY-MATRIX.md` | Initial | Maps baseline areas to observed repository evidence and gaps | Engineering traceability | ASSESSMENT / NON-NORMATIVE | Subordinate to baseline |
 | ACS Engineering Gap Register | `traceability/ACS-ENGINEERING-GAP-REGISTER.md` | Initial | Records temporary assessment gaps and recommended actions | Engineering assessment | ASSESSMENT / NON-NORMATIVE | Subordinate to baseline |
+| ACS Phase 0 Engineering Foundation Final Report | `evidence/phase-0/ACS-PHASE-0-ENGINEERING-FOUNDATION-FINAL-REPORT.md` | Phase 0 | Records verified Phase 0 engineering results and explicit scope boundaries | Engineering evidence | VERIFIED TECHNICAL RECORD / NON-NORMATIVE | Subordinate to baseline and formal governance |
 | ACS Baseline Governance Gaps | `governance/ACS-BASELINE-GOVERNANCE-GAPS.md` | Initial | Records unresolved documentary and custody conditions without interpreting them away | Baseline governance assessment | OPEN GOVERNANCE GAPS / NON-NORMATIVE | Requires formal resolution |
 
 Documents under `architecture/`, `requirements/`, `decisions/`, `traceability/`,
@@ -29,3 +30,5 @@ only to the extent explicitly approved under the baseline's governance process.
   `UNDEFINED_IN_BASELINE`.
 - `governance/catalogs/` — non-normative ECOM, EDIM, and EDOLM working catalogs.
 - `evidence/` — evidence schema and phase records.
+- `evidence/phase-0/QG-01/FINAL-ENGINEERING-VALIDATION.md` — immutable identifiers and
+  results for the successful Phase 0 technical validation cycle.

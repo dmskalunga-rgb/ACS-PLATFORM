@@ -65,13 +65,16 @@ These rows supplement, rather than erase, the initial assessment snapshot.
 | VOL-II-2.7; VOL-III-3.2 | ADR-0007 | authz/audit ports; tenant context | fail-closed context tests | `VERIFIED` locally |
 | VOL-IV-4.2-4.10 | ADR-0008 | `packages/ai-gateway-contract/` | compile/build boundary | `VERIFIED`; engines not implemented |
 | VOL-VII-7.10 | ADR-0009 | logs, metrics, traces, probes | redaction/metrics/endpoint tests | `VERIFIED` locally |
-| VOL-III-3.2; VOL-VIII-8.3 | ADR-0010 | pinned CI, containers, Kustomize, SBOM | local checks plus remote CI | `FAILED`: run 31283387146, Trivy filesystem scan |
+| VOL-III-3.2; VOL-VIII-8.3 | ADR-0010 | pinned CI, containers, Kustomize, SBOM | formatting, lint, types, tests, build, CodeQL, Gitleaks, SCA, SBOM, Trivy filesystem/IaC/images | `VERIFIED`: run `31288548847`; all six jobs succeeded |
 | ANX-A/B/C; VOL-VIII-8.4 | N/A | catalogs; gate/evidence process | documentary review | `PENDING_GOVERNANCE_APPROVAL` |
+
+Final Phase 0 evidence: `docs/evidence/phase-0/QG-01/FINAL-ENGINEERING-VALIDATION.md`.
 
 ## Coverage statement
 
 - Normative and governance documents: present, with open governance gaps.
 - Functional implementation coverage: 0 of 75 domains has repository implementation evidence.
-- Roadmap implementation coverage: no phase has evidence satisfying its full exit criteria.
-- First incomplete phase: Phase 0.
+- Roadmap implementation coverage: Phase 0 engineering foundation has technical validation;
+  no functional domain phase has implementation evidence satisfying its full exit criteria.
+- First incomplete functional phase: Phase 1, which remains not authorized.
 - QG-18–QG-22: `UNDEFINED_IN_BASELINE`.

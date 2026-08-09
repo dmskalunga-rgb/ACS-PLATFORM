@@ -61,10 +61,22 @@ earlier foundation work.
 
 ## Phase 0 disposition
 
-The initial observations remain historical evidence. Phase 0 adds implementation for
-ACS-GAP-0010, 0011, 0014, 0015, and 0018-0022, subject to local/CI verification and review.
-It provides partial boundaries for 0008, 0009, 0016, 0017, and 0023-0025. It does not close
-functional gaps 0012/0013 or authorize domains 5.x.
+The initial observations remain historical evidence. Phase 0 adds verified foundation
+implementation for ACS-GAP-0010, 0011, 0014, 0015, and 0018-0022. It provides partial
+boundaries for 0008, 0009, 0016, 0017, and 0023-0025. It does not close functional gaps
+0012/0013 or authorize domains 5.x.
+
+### Phase 0 technical closure ledger
+
+These closure entries are implementation findings, not new normative requirement IDs.
+
+| Finding | Initial condition | Final evidence | Status |
+| --- | --- | --- | --- |
+| DS-0002 | Web image lacked an explicit non-root runtime user | UID/GID `101:101`, healthy runtime, run `31288548847`, job `93181671612` | `RESOLVED` |
+| API runtime image vulnerabilities | 1 CRITICAL and 6 HIGH findings in unnecessary runtime tooling | Tooling removed; local image scan 0 HIGH/CRITICAL; job `93181671612` | `RESOLVED` |
+| Web non-root runtime | Nginx could not write required temporary paths | Minimal ownership/tmpfs correction; health `healthy`; HTTP and API proxy 200 | `RESOLVED` |
+| Phase 0 mandatory CI | Container/IaC job failed in earlier runs | Run `31288548847`: all six jobs succeeded | `RESOLVED` |
+| `.env.example` repository validation | Safe example file was rejected by the filename rule | Exact example exemption verified locally; remote PR workflow still required | `PENDING_REMOTE_VALIDATION` |
 
 These conditions remain explicitly open:
 
@@ -74,3 +86,7 @@ These conditions remain explicitly open:
 - ACS-GAP-0007: individual `ACS-REQ` identifiers remain absent;
 - signing/provenance, production secrets, broker selection, IAM, AI engines, production
   infrastructure, SLOs, and full performance/resilience/E2E suites remain pending.
+
+Formal closure evidence is recorded in
+`docs/evidence/phase-0/QG-01/FINAL-ENGINEERING-VALIDATION.md`. No governance gap is closed by
+the technical ledger above.
