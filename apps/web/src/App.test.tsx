@@ -1,10 +1,19 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { App } from './App.js';
+import { App, resolveContextClientConfiguration } from './App.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('FOUNDATION application shell', () => {
+  it('removes development identity configuration from production', () => {
+    expect(
+      resolveContextClientConfiguration({
+        developmentIdentitySubject: 'oidc|must-not-ship',
+        isDevelopment: false,
+        tenantId: '00000000-0000-4000-8000-000000000011',
+      }),
+    ).toEqual({});
+  });
   it('renders a verified technical API response', async () => {
     vi.stubGlobal(
       'fetch',

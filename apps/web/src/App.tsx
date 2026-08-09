@@ -1,39 +1,5 @@
+import { platformContextSchema, type PlatformContextResponse } from '@acs/contracts';
 import { useEffect, useState } from 'react';
-
-interface PlatformContextResponse {
-  readonly data: {
-    readonly user_id: string;
-    readonly tenant: { readonly id: string; readonly slug: string; readonly display_name: string };
-    readonly membership: { readonly status: 'ACTIVE' };
-    readonly permissions: readonly ['platform.context.read'];
-  };
-  readonly meta: { readonly request_id: string; readonly correlation_id: string };
-}
-
-function parsePlatformContext(value: unknown): PlatformContextResponse {
-  if (typeof value !== 'object' || value === null) throw new Error('Invalid platform context.');
-  const candidate = value as Record<string, unknown>;
-  const data = candidate.data as Record<string, unknown> | undefined;
-  const meta = candidate.meta as Record<string, unknown> | undefined;
-  const tenant = data?.tenant as Record<string, unknown> | undefined;
-  const membership = data?.membership as Record<string, unknown> | undefined;
-  const permissions = data?.permissions;
-  if (
-    typeof data?.user_id !== 'string' ||
-    typeof tenant?.id !== 'string' ||
-    typeof tenant.slug !== 'string' ||
-    typeof tenant.display_name !== 'string' ||
-    membership?.status !== 'ACTIVE' ||
-    !Array.isArray(permissions) ||
-    permissions.length !== 1 ||
-    permissions[0] !== 'platform.context.read' ||
-    typeof meta?.request_id !== 'string' ||
-    typeof meta.correlation_id !== 'string'
-  ) {
-    throw new Error('Invalid platform context.');
-  }
-  return value as PlatformContextResponse;
-}
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -60,14 +26,29 @@ export interface ContextClientConfiguration {
 }
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api';
-const defaultContextConfiguration: ContextClientConfiguration = {
+export function resolveContextClientConfiguration(input: {
+  readonly developmentIdentitySubject?: string;
+  readonly isDevelopment: boolean;
+  readonly tenantId?: string;
+}): ContextClientConfiguration {
+  if (!input.isDevelopment) return {};
+  return {
+    ...(input.developmentIdentitySubject === undefined
+      ? {}
+      : { developmentIdentitySubject: input.developmentIdentitySubject }),
+    ...(input.tenantId === undefined ? {} : { tenantId: input.tenantId }),
+  };
+}
+
+const defaultContextConfiguration = resolveContextClientConfiguration({
+  isDevelopment: import.meta.env.DEV,
   ...(import.meta.env.VITE_DEV_IDENTITY_SUBJECT === undefined
     ? {}
     : { developmentIdentitySubject: import.meta.env.VITE_DEV_IDENTITY_SUBJECT }),
   ...(import.meta.env.VITE_TENANT_ID === undefined
     ? {}
     : { tenantId: import.meta.env.VITE_TENANT_ID }),
-};
+});
 
 export function App({
   contextConfiguration = defaultContextConfiguration,
@@ -127,7 +108,7 @@ export function App({
         if (!response.ok) throw new Error('Tenant context endpoint is unavailable.');
         setContext({
           kind: 'available',
-          response: parsePlatformContext(await response.json()),
+          response: platformContextSchema.parse(await response.json()),
         });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return;
