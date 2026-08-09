@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { errorEnvelopeSchema } from '@acs/contracts';
+import { errorEnvelopeSchema, platformContextSchema } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import { createMetricsRegistry, createStructuredLogger } from '@acs/observability';
 import cors from '@fastify/cors';
@@ -9,6 +9,13 @@ import swaggerUi from '@fastify/swagger-ui';
 import Fastify from 'fastify';
 import { z } from 'zod';
 import type { PlatformConfiguration } from './config.js';
+import { DevelopmentHeaderIdentityAdapter, NotConfiguredIdentityAdapter } from './identity.js';
+import {
+  PlatformContextFailure,
+  PlatformContextService,
+  type TenantContextRepository,
+} from './platform-context.js';
+import { PostgresTenantContextRepository } from './postgres-platform-context.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -20,7 +27,10 @@ const uuidSchema = z.uuid();
 
 export async function buildApp(
   configuration: PlatformConfiguration,
-  options: { readonly logger?: boolean } = {},
+  options: {
+    readonly logger?: boolean;
+    readonly platformContextService?: PlatformContextService;
+  } = {},
 ) {
   const logger = createStructuredLogger({
     level: configuration.logLevel,
@@ -31,6 +41,26 @@ export async function buildApp(
     ...(options.logger === false ? { logger: false } : { loggerInstance: logger }),
   });
   const { registry, requests } = createMetricsRegistry('acs-platform-api');
+  let postgresRepository: (TenantContextRepository & { close(): Promise<void> }) | undefined;
+  let platformContextService = options.platformContextService;
+  if (
+    platformContextService === undefined &&
+    configuration.resolverDatabaseUrl !== undefined &&
+    configuration.tenantDatabaseUrl !== undefined
+  ) {
+    postgresRepository = new PostgresTenantContextRepository(
+      configuration.resolverDatabaseUrl,
+      configuration.tenantDatabaseUrl,
+    );
+    const identity =
+      configuration.identityMode === 'development-header'
+        ? new DevelopmentHeaderIdentityAdapter()
+        : new NotConfiguredIdentityAdapter();
+    platformContextService = new PlatformContextService(identity, postgresRepository);
+  }
+  if (postgresRepository !== undefined) {
+    app.addHook('onClose', async () => postgresRepository?.close());
+  }
 
   await app.register(cors, { credentials: false, origin: configuration.webOrigin });
   await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' });
@@ -100,6 +130,159 @@ export async function buildApp(
     return registry.metrics();
   });
   app.get('/openapi.json', () => app.swagger());
+
+  const contextResponseJsonSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['data', 'meta'],
+    properties: {
+      data: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['user_id', 'tenant', 'membership', 'permissions'],
+        properties: {
+          user_id: { type: 'string', format: 'uuid' },
+          tenant: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'slug', 'display_name'],
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              slug: { type: 'string' },
+              display_name: { type: 'string' },
+            },
+          },
+          membership: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['status'],
+            properties: { status: { type: 'string', const: 'ACTIVE' } },
+          },
+          permissions: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 1,
+            items: { type: 'string', const: 'platform.context.read' },
+          },
+        },
+      },
+      meta: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['request_id', 'correlation_id'],
+        properties: {
+          request_id: { type: 'string', format: 'uuid' },
+          correlation_id: { type: 'string', format: 'uuid' },
+        },
+      },
+    },
+  } as const;
+  const errorResponseJsonSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['error'],
+    properties: {
+      error: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'message', 'request_id', 'correlation_id'],
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+          request_id: { type: 'string', format: 'uuid' },
+          correlation_id: { type: 'string', format: 'uuid' },
+        },
+      },
+    },
+  } as const;
+
+  app.get(
+    '/api/v1/platform/context',
+    {
+      schema: {
+        headers: {
+          type: 'object',
+          properties: {
+            authorization: { type: 'string' },
+            'x-acs-tenant-id': { type: 'string' },
+          },
+        },
+        response: {
+          200: contextResponseJsonSchema,
+          400: errorResponseJsonSchema,
+          401: errorResponseJsonSchema,
+          403: errorResponseJsonSchema,
+          503: errorResponseJsonSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      if (platformContextService === undefined) {
+        return reply.status(503).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'PLATFORM_CONTEXT_NOT_CONFIGURED',
+              message: 'Tenant context dependencies are not configured.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      }
+      const tenantHeader = request.headers['x-acs-tenant-id'];
+      const parsedTenant =
+        typeof tenantHeader === 'string' ? uuidSchema.safeParse(tenantHeader) : undefined;
+      if (parsedTenant?.success !== true) {
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_TENANT_SELECTOR',
+              message: 'A valid tenant selector is required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      }
+      try {
+        const response = await platformContextService.read(
+          request.headers.authorization,
+          parsedTenant.data,
+          { correlationId: request.correlationId, requestId: request.id },
+        );
+        return platformContextSchema.parse(response);
+      } catch (error) {
+        if (error instanceof PlatformContextFailure) {
+          const status =
+            error.code === 'UNAUTHENTICATED'
+              ? 401
+              : error.code === 'TENANT_CONTEXT_DENIED'
+                ? 403
+                : 503;
+          request.log.warn(
+            {
+              action: 'platform.context.read',
+              correlation_id: request.correlationId,
+              outcome: 'DENIED',
+              reason: error.code,
+            },
+            'tenant context access denied',
+          );
+          return reply.status(status).send(
+            errorEnvelopeSchema.parse({
+              error: {
+                code: error.code,
+                message: error.message,
+                request_id: request.id,
+                correlation_id: request.correlationId,
+              },
+            }),
+          );
+        }
+        throw error;
+      }
+    },
+  );
 
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({
