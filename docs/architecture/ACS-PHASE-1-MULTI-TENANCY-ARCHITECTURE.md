@@ -21,11 +21,13 @@ setting database context.
 | `tenants`     | UUID, name, slug, status, created/updated timestamps                   | Canonical tenant root   | `ACTIVE`, `INACTIVE` |
 | `users`       | UUID, external subject, status, created/updated timestamps             | Global identity mapping | `ACTIVE`, `INACTIVE` |
 | `memberships` | UUID, tenant UUID, user UUID, status, created/updated timestamps       | Tenant-owned            | `ACTIVE`, `INACTIVE` |
-| `audit_logs`  | UUID, tenant, actor, action, resource, outcome, correlation, timestamp | Tenant-owned            | Append-only          |
+| `audit_logs`  | UUID, tenant, actor, action, resource, outcome, classification, correlation, bounded auxiliary metadata, timestamp | Tenant-owned | Append-only |
 
 UUID is the canonical identifier. Display name is mutable and never used for authorization.
-Slug is a globally unique operator key, not the security boundary. No metadata JSONB is added
-because the first slice has no justified metadata requirement.
+Slug is a globally unique operator key, not the security boundary. Audit `metadata` is bounded to
+2 KiB and may contain auxiliary security context such as producer name. It cannot replace actor,
+tenant, action, resource, outcome, classification, or other relational fields and is not indexed
+in this slice.
 
 ## Lifecycle
 
@@ -43,15 +45,16 @@ slice.
 ## Authorization boundary
 
 The action is `platform.context.read`. Resolution of active membership is necessary but not
-sufficient: the authorization port must also allow the action. Frontend state is never an
-authorization source.
+sufficient: the Phase 0 `AuthorizationPort` checks an explicit `membership_permissions` grant.
+Frontend state is never an authorization source.
 
 ## Database roles and RLS
 
-- `acs_phase1_context_resolver`: NOLOGIN; execute-only access to the resolver function.
+- `acs_phase1_context_issuer`: NOLOGIN; execute-only membership, authorization, and context grant functions.
 - `acs_phase1_tenant_app`: NOLOGIN; least-privileged RLS-governed reads and append-only audit.
+- `acs_phase1_security_auditor`: NOLOGIN; execute-only durable denial audit.
 - all tenant-owned tables enable and force RLS;
-- tenant and user context use transaction-local PostgreSQL settings;
+- an opaque one-use grant is bound to backend PID and transaction; a freely set GUC is never proof;
 - missing or malformed context fails closed.
 
 ## API and errors
@@ -63,7 +66,7 @@ configuration returns 503. No response confirms another tenant's existence.
 
 ## Audit, events, and observability
 
-Successful context access creates an append-only audit record. Denied attempts are emitted as
-redacted security logs because no authorized tenant scope exists for a tenant audit row.
+Successful context access creates an append-only tenant audit record. Denied attempts create a
+separate durable, redacted security audit record because no authorized tenant scope exists.
 Request/correlation IDs propagate. Tenant/user identifiers are not metric labels. The slice is
 read-only, so no domain event or outbox is created.

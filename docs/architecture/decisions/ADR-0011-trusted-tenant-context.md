@@ -1,6 +1,6 @@
 # ADR-0011: Trusted identity and tenant-context resolution
 
-Status: `ACCEPTED_ON_PHASE_1_BRANCH`
+Status: `PROPOSED`
 
 Decision class: `IMPLEMENTATION_DECISION`
 
@@ -32,10 +32,12 @@ by a client remains untrusted input. A restricted context-resolver role may exec
 and active tenant. The function has a fixed search path, no dynamic SQL, no write access, and
 is unavailable to `PUBLIC`.
 
-After resolution, the repository starts a transaction, switches to the least-privileged tenant
-application role, sets transaction-local `app.tenant_id` and `app.user_id`, and queries FORCE
-RLS tables. Authorization is evaluated server-side before the service returns data. Audit
-records are append-only to the application role.
+After membership resolution, the accepted Phase 0 `AuthorizationPort` evaluates the requested
+action against an explicit membership permission. The resolver then issues the opaque trusted
+context grant defined by proposed ADR-0012. A separately credentialed tenant connection activates
+that grant in its transaction and queries FORCE RLS tables. Runtime role switching is not used;
+deployment login identities inherit exactly one NOLOGIN capability role. Audit records are
+append-only to the application role.
 
 A header identity adapter exists only for development and test. Staging/production reject
 that mode and report identity as not configured until an approved OIDC adapter exists.
@@ -44,15 +46,16 @@ that mode and report identity as not configured until an approved OIDC adapter e
 
 - tenant spoofing, BOLA, missing context, inactive membership, and cross-tenant access fail
   closed;
-- pooled connections cannot retain context because settings are transaction-local;
+- pooled connections cannot retain or replay context because activation is bound to the backend
+  PID and transaction;
 - superuser/service-role access is not the normal request model;
 - the minimized resolver function is a privileged surface and receives direct negative tests;
 - errors do not reveal whether another tenant or membership exists.
 
 ## Operational implications
 
-Database provisioning must grant the connection identity permission to assume the resolver
-and tenant application roles without making either role login-capable. An approved OIDC
+Database provisioning creates external LOGIN identities as members of exactly one repository
+NOLOGIN capability role; no credentials are stored in Git. An approved OIDC
 adapter is required before staging or production. Health remains independent of identity
 provider availability, while the functional endpoint returns an explicit unavailable state.
 
@@ -61,3 +64,5 @@ provider availability, while the functional endpoint returns an explicit unavail
 The first slice proves the complete security path with a small API surface. Additional
 permissions, lifecycle transitions, tenant administration, and enterprise IAM require later
 traced decisions and are not implied by this ADR.
+
+This proposal does not become approved architecture until the required governance decision.
