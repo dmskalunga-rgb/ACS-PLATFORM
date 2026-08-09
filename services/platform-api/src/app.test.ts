@@ -4,7 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { buildApp } from './app.js';
 import type { PlatformConfiguration } from './config.js';
-import { PlatformContextService, type TenantContextRepository } from './platform-context.js';
+import {
+  PlatformContextService,
+  RepositoryAuthorizationPort,
+  type TenantContextRepository,
+} from './platform-context.js';
 import { DevelopmentHeaderIdentityAdapter } from './identity.js';
 
 const configuration: PlatformConfiguration = {
@@ -64,9 +68,20 @@ describe('FOUNDATION platform API', () => {
     const tenantId = randomUUID();
     const userId = randomUUID();
     const repository: TenantContextRepository = {
-      resolve: async (subject, requestedTenantId) =>
+      resolveMembership: async (subject, requestedTenantId) =>
         subject === 'oidc|alice' && requestedTenantId === tenantId
           ? {
+              tenantDisplayName: 'Tenant A',
+              tenantId,
+              tenantSlug: 'tenant-a',
+              userId,
+            }
+          : null,
+      isActionAuthorized: async () => true,
+      issueContext: async (subject, requestedTenantId) =>
+        subject === 'oidc|alice' && requestedTenantId === tenantId
+          ? {
+              contextToken: randomUUID(),
               tenantDisplayName: 'Tenant A',
               tenantId,
               tenantSlug: 'tenant-a',
@@ -79,7 +94,9 @@ describe('FOUNDATION platform API', () => {
       logger: false,
       platformContextService: new PlatformContextService(
         new DevelopmentHeaderIdentityAdapter(),
+        new RepositoryAuthorizationPort(repository),
         repository,
+        { recordDenied: async () => undefined },
       ),
     });
     try {

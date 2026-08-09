@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { trace } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
@@ -36,6 +38,23 @@ export function createMetricsRegistry(serviceName: string) {
     registers: [registry],
   });
   return { registry, requests };
+}
+
+export function setActiveTenantTraceContext(tenantId: string, action: string): void {
+  trace.getActiveSpan()?.setAttributes({
+    'acs.authorization.action': action,
+    'acs.tenant.context_verified': true,
+    'acs.tenant.fingerprint': createHash('sha256').update(tenantId).digest('hex'),
+  });
+}
+
+export function sanitizeErrorForLog(error: unknown): Readonly<Record<string, unknown>> {
+  if (!(error instanceof Error)) return { error_type: 'unknown' };
+  const code = (error as Error & { code?: unknown }).code;
+  return {
+    error_name: error.name,
+    ...(typeof code === 'string' ? { error_code: code } : {}),
+  };
 }
 
 export function startTelemetry(configuration: {

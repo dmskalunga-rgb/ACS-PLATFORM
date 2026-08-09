@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { errorEnvelopeSchema, platformContextSchema } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
-import { createMetricsRegistry, createStructuredLogger } from '@acs/observability';
+import {
+  createMetricsRegistry,
+  createStructuredLogger,
+  sanitizeErrorForLog,
+} from '@acs/observability';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
@@ -13,9 +17,13 @@ import { DevelopmentHeaderIdentityAdapter, NotConfiguredIdentityAdapter } from '
 import {
   PlatformContextFailure,
   PlatformContextService,
+  RepositoryAuthorizationPort,
   type TenantContextRepository,
 } from './platform-context.js';
-import { PostgresTenantContextRepository } from './postgres-platform-context.js';
+import {
+  PostgresSecurityAuditRepository,
+  PostgresTenantContextRepository,
+} from './postgres-platform-context.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -42,10 +50,12 @@ export async function buildApp(
   });
   const { registry, requests } = createMetricsRegistry('acs-platform-api');
   let postgresRepository: (TenantContextRepository & { close(): Promise<void> }) | undefined;
+  let securityAuditRepository: PostgresSecurityAuditRepository | undefined;
   let platformContextService = options.platformContextService;
   if (
     platformContextService === undefined &&
     configuration.resolverDatabaseUrl !== undefined &&
+    configuration.securityAuditDatabaseUrl !== undefined &&
     configuration.tenantDatabaseUrl !== undefined
   ) {
     postgresRepository = new PostgresTenantContextRepository(
@@ -56,10 +66,20 @@ export async function buildApp(
       configuration.identityMode === 'development-header'
         ? new DevelopmentHeaderIdentityAdapter()
         : new NotConfiguredIdentityAdapter();
-    platformContextService = new PlatformContextService(identity, postgresRepository);
+    securityAuditRepository = new PostgresSecurityAuditRepository(
+      configuration.securityAuditDatabaseUrl,
+    );
+    platformContextService = new PlatformContextService(
+      identity,
+      new RepositoryAuthorizationPort(postgresRepository),
+      postgresRepository,
+      securityAuditRepository,
+    );
   }
-  if (postgresRepository !== undefined) {
-    app.addHook('onClose', async () => postgresRepository?.close());
+  if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
+    app.addHook('onClose', async () => {
+      await Promise.all([postgresRepository?.close(), securityAuditRepository?.close()]);
+    });
   }
 
   await app.register(cors, { credentials: false, origin: configuration.webOrigin });
@@ -70,6 +90,16 @@ export async function buildApp(
         title: 'ACS Platform Foundation API',
         version: '0.0.0-foundation',
         description: 'Technical FOUNDATION endpoints only; no ACS 5.x domain API.',
+      },
+      components: {
+        securitySchemes: {
+          developmentBearer: {
+            type: 'http',
+            scheme: 'bearer',
+            description:
+              'Development/test identity only. Prohibited in staging and production; not OIDC.',
+          },
+        },
       },
     },
   });
@@ -200,6 +230,7 @@ export async function buildApp(
     '/api/v1/platform/context',
     {
       schema: {
+        security: [{ developmentBearer: [] }],
         headers: {
           type: 'object',
           properties: {
@@ -233,6 +264,11 @@ export async function buildApp(
       const parsedTenant =
         typeof tenantHeader === 'string' ? uuidSchema.safeParse(tenantHeader) : undefined;
       if (parsedTenant?.success !== true) {
+        await platformContextService.recordRequestDenial(
+          'INVALID_TENANT_SELECTOR',
+          typeof tenantHeader === 'string' ? tenantHeader : undefined,
+          { correlationId: request.correlationId, requestId: request.id },
+        );
         return reply.status(400).send(
           errorEnvelopeSchema.parse({
             error: {
@@ -256,7 +292,7 @@ export async function buildApp(
           const status =
             error.code === 'UNAUTHENTICATED'
               ? 401
-              : error.code === 'TENANT_CONTEXT_DENIED'
+              : error.code === 'TENANT_CONTEXT_DENIED' || error.code === 'PERMISSION_DENIED'
                 ? 403
                 : 503;
           request.log.warn(
@@ -297,7 +333,10 @@ export async function buildApp(
   });
 
   app.setErrorHandler(async (error, request, reply) => {
-    request.log.error({ err: error, correlation_id: request.correlationId }, 'request failed');
+    request.log.error(
+      { error: sanitizeErrorForLog(error), correlation_id: request.correlationId },
+      'request failed',
+    );
     const envelope = errorEnvelopeSchema.parse({
       error: {
         code: 'FOUNDATION_INTERNAL_ERROR',

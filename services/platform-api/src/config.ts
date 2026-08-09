@@ -9,6 +9,7 @@ const configurationSchema = z.object({
   ACS_WEB_ORIGIN: z.url().default('http://localhost:5173'),
   DATABASE_URL: z.url().optional(),
   ACS_CONTEXT_RESOLVER_DATABASE_URL: z.url().optional(),
+  ACS_SECURITY_AUDIT_DATABASE_URL: z.url().optional(),
   ACS_TENANT_DATABASE_URL: z.url().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
@@ -22,6 +23,7 @@ export interface PlatformConfiguration {
   readonly otlpEndpoint?: string;
   readonly port: number;
   readonly resolverDatabaseUrl?: string;
+  readonly securityAuditDatabaseUrl?: string;
   readonly tenantDatabaseUrl?: string;
   readonly webOrigin: string;
 }
@@ -55,6 +57,9 @@ export function loadConfiguration(
     ...(parsed.ACS_CONTEXT_RESOLVER_DATABASE_URL === undefined
       ? {}
       : { resolverDatabaseUrl: parsed.ACS_CONTEXT_RESOLVER_DATABASE_URL }),
+    ...(parsed.ACS_SECURITY_AUDIT_DATABASE_URL === undefined
+      ? {}
+      : { securityAuditDatabaseUrl: parsed.ACS_SECURITY_AUDIT_DATABASE_URL }),
     ...(parsed.ACS_TENANT_DATABASE_URL === undefined
       ? {}
       : { tenantDatabaseUrl: parsed.ACS_TENANT_DATABASE_URL }),
