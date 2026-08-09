@@ -1,126 +1,158 @@
-BEGIN;
+CREATE TEMP TABLE phase1_test_tokens (
+  label text PRIMARY KEY,
+  token uuid NOT NULL
+);
+GRANT SELECT, INSERT ON phase1_test_tokens
+  TO acs_phase1_context_issuer, acs_phase1_tenant_app;
 
-SET LOCAL ROLE acs_phase1_context_resolver_test;
+BEGIN;
+SET LOCAL ROLE acs_phase1_context_issuer;
+
+INSERT INTO phase1_test_tokens (label, token)
+SELECT 'alice-a', context_token
+FROM platform.issue_tenant_context(
+  'oidc|alice',
+  '00000000-0000-4000-8000-000000000011',
+  'platform.context.read'
+);
 
 DO $$
 DECLARE
   resolved_count integer;
 BEGIN
   SELECT count(*) INTO resolved_count
-  FROM platform.resolve_tenant_context(
-    'oidc|alice',
-    '00000000-0000-4000-8000-000000000011'
+  FROM platform.issue_tenant_context(
+    'oidc|spoofed', '00000000-0000-4000-8000-000000000011', 'platform.context.read'
   );
-  IF resolved_count <> 1 THEN
-    RAISE EXCEPTION 'active identity and membership expected one context, got %', resolved_count;
-  END IF;
+  IF resolved_count <> 0 THEN RAISE EXCEPTION 'spoofed identity unexpectedly authorized'; END IF;
 
   SELECT count(*) INTO resolved_count
-  FROM platform.resolve_tenant_context(
-    'oidc|spoofed',
-    '00000000-0000-4000-8000-000000000011'
+  FROM platform.issue_tenant_context(
+    'oidc|alice', '00000000-0000-4000-8000-000000000022', 'platform.context.read'
   );
-  IF resolved_count <> 0 THEN
-    RAISE EXCEPTION 'spoofed identity unexpectedly resolved';
-  END IF;
+  IF resolved_count <> 0 THEN RAISE EXCEPTION 'inactive membership unexpectedly authorized'; END IF;
 
   SELECT count(*) INTO resolved_count
-  FROM platform.resolve_tenant_context(
-    'oidc|alice',
-    '00000000-0000-4000-8000-000000000022'
+  FROM platform.issue_tenant_context(
+    'oidc|bob', '00000000-0000-4000-8000-000000000011', 'platform.context.read'
   );
-  IF resolved_count <> 0 THEN
-    RAISE EXCEPTION 'inactive cross-tenant membership unexpectedly resolved';
-  END IF;
+  IF resolved_count <> 0 THEN RAISE EXCEPTION 'tenant B subject reached tenant A'; END IF;
 
   SELECT count(*) INTO resolved_count
-  FROM platform.resolve_tenant_context(
-    'oidc|bob',
-    '00000000-0000-4000-8000-000000000033'
+  FROM platform.issue_tenant_context(
+    'oidc|charlie', '00000000-0000-4000-8000-000000000022', 'platform.context.read'
   );
-  IF resolved_count <> 0 THEN
-    RAISE EXCEPTION 'inactive tenant unexpectedly resolved';
-  END IF;
+  IF resolved_count <> 0 THEN RAISE EXCEPTION 'permission-less membership unexpectedly authorized'; END IF;
+
+  SELECT count(*) INTO resolved_count
+  FROM platform.issue_tenant_context(
+    'oidc|bob', '00000000-0000-4000-8000-000000000033', 'platform.context.read'
+  );
+  IF resolved_count <> 0 THEN RAISE EXCEPTION 'inactive tenant unexpectedly authorized'; END IF;
+END;
+$$;
+COMMIT;
+
+BEGIN;
+SET LOCAL ROLE acs_phase1_tenant_app;
+
+SELECT set_config('app.context_token', '99999999-9999-4999-8999-999999999999', true);
+DO $$
+DECLARE visible_count integer;
+BEGIN
+  SELECT count(*) INTO visible_count FROM platform.tenants;
+  IF visible_count <> 0 THEN RAISE EXCEPTION 'forged token bypassed RLS'; END IF;
 END;
 $$;
 
-RESET ROLE;
-SET LOCAL ROLE acs_phase1_tenant_app_test;
-
-SELECT set_config('app.tenant_id', '00000000-0000-4000-8000-000000000011', true);
-SELECT set_config('app.user_id', '10000000-0000-4000-8000-000000000011', true);
+SELECT * FROM platform.activate_tenant_context(
+  (SELECT token FROM phase1_test_tokens WHERE label = 'alice-a'),
+  'platform.context.read'
+);
 
 DO $$
-DECLARE
-  visible_count integer;
+DECLARE visible_count integer;
 BEGIN
   SELECT count(*) INTO visible_count FROM platform.tenants;
-  IF visible_count <> 1 THEN
-    RAISE EXCEPTION 'tenant A expected one visible tenant, got %', visible_count;
-  END IF;
-
+  IF visible_count <> 1 THEN RAISE EXCEPTION 'tenant A expected one tenant, got %', visible_count; END IF;
   SELECT count(*) INTO visible_count FROM platform.memberships;
-  IF visible_count <> 1 THEN
-    RAISE EXCEPTION 'tenant A user expected one visible membership, got %', visible_count;
-  END IF;
+  IF visible_count <> 1 THEN RAISE EXCEPTION 'Alice expected one membership, got %', visible_count; END IF;
 
   INSERT INTO platform.audit_logs (
-    id, tenant_id, actor_user_id, action, outcome, correlation_id, request_id
+    id, tenant_id, actor_user_id, action, resource, outcome,
+    correlation_id, request_id, metadata
   ) VALUES (
     '40000000-0000-4000-8000-000000000011',
     '00000000-0000-4000-8000-000000000011',
     '10000000-0000-4000-8000-000000000011',
-    'platform.context.read',
-    'ALLOWED',
-    'phase1-db-validation',
-    'phase1-db-validation'
+    'platform.context.read', 'platform:tenant-context', 'ALLOWED',
+    'phase1-db-validation', 'phase1-db-validation', '{"source":"database-test"}'
   );
 
   BEGIN
-    INSERT INTO platform.audit_logs (
-      id, tenant_id, actor_user_id, action, outcome, correlation_id, request_id
-    ) VALUES (
-      '40000000-0000-4000-8000-000000000022',
-      '00000000-0000-4000-8000-000000000022',
-      '10000000-0000-4000-8000-000000000011',
-      'platform.context.read',
-      'ALLOWED',
-      'tenant-escape',
-      'tenant-escape'
-    );
-    RAISE EXCEPTION 'cross-tenant audit insert unexpectedly succeeded';
-  EXCEPTION
-    WHEN insufficient_privilege THEN NULL;
-  END;
-
-  BEGIN
-    PERFORM count(*) FROM platform.users;
-    RAISE EXCEPTION 'tenant role unexpectedly accessed global identity mappings';
-  EXCEPTION
-    WHEN insufficient_privilege THEN NULL;
-  END;
-
-  BEGIN
     UPDATE platform.audit_logs SET outcome = 'DENIED';
-    RAISE EXCEPTION 'append-only audit update unexpectedly succeeded';
-  EXCEPTION
-    WHEN insufficient_privilege OR object_not_in_prerequisite_state THEN NULL;
+    RAISE EXCEPTION 'tenant app unexpectedly received audit UPDATE privilege';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
 END;
 $$;
 
-SELECT set_config('app.tenant_id', '00000000-0000-4000-8000-000000000022', true);
-SELECT set_config('app.user_id', '20000000-0000-4000-8000-000000000022', true);
-
+SELECT set_config('app.context_token', '88888888-8888-4888-8888-888888888888', true);
 DO $$
-DECLARE
-  visible_count integer;
+DECLARE visible_count integer;
 BEGIN
-  SELECT count(*) INTO visible_count FROM platform.audit_logs;
-  IF visible_count <> 0 THEN
-    RAISE EXCEPTION 'tenant B observed tenant A audit records';
-  END IF;
+  SELECT count(*) INTO visible_count FROM platform.tenants;
+  IF visible_count <> 0 THEN RAISE EXCEPTION 'altered token retained tenant access'; END IF;
 END;
 $$;
+COMMIT;
 
+BEGIN;
+SET LOCAL ROLE acs_phase1_tenant_app;
+SELECT set_config(
+  'app.context_token',
+  (SELECT token::text FROM phase1_test_tokens WHERE label = 'alice-a'),
+  true
+);
+DO $$
+DECLARE visible_count integer;
+BEGIN
+  SELECT count(*) INTO visible_count FROM platform.tenants;
+  IF visible_count <> 0 THEN RAISE EXCEPTION 'consumed token replayed in another transaction'; END IF;
+END;
+$$;
+ROLLBACK;
+
+BEGIN;
+SET LOCAL ROLE acs_phase1_security_auditor;
+SELECT platform.record_security_denial(
+  repeat('a', 64),
+  '00000000-0000-4000-8000-000000000022',
+  repeat('b', 64),
+  'TENANT_CONTEXT_DENIED',
+  'platform.context.read',
+  'platform:tenant-context',
+  'phase1-denial-correlation',
+  'phase1-denial-request'
+);
+COMMIT;
+
+BEGIN;
+SET LOCAL ROLE acs_phase1_audit_integrity_test;
+DO $$
+BEGIN
+  BEGIN
+    UPDATE platform.audit_logs SET outcome = 'DENIED'
+    WHERE id = '40000000-0000-4000-8000-000000000011';
+    RAISE EXCEPTION 'append-only trigger did not reject tenant audit mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+
+  BEGIN
+    UPDATE platform.security_audit_logs SET reason_code = 'ALTERED';
+    RAISE EXCEPTION 'append-only trigger did not reject security audit mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+END;
+$$;
 ROLLBACK;

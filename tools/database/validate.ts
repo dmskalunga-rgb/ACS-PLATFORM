@@ -28,10 +28,17 @@ const phase1TestPath = resolve('database/tests/rls/phase1_platform_isolation.sql
 const phase1RollbackPath = resolve(
   'database/rollbacks/20260809000000_phase1_platform_multitenancy.sql',
 );
+const phase1RolesPath = resolve('database/roles/phase1_platform_roles.sql');
+const phase1SeedPath = resolve('database/tests/fixtures/phase1_seed.sql');
 
 const testRoles = [
-  'acs_phase1_tenant_app_test',
-  'acs_phase1_context_resolver_test',
+  'acs_phase1_auditor_login_test',
+  'acs_phase1_tenant_login_test',
+  'acs_phase1_issuer_login_test',
+  'acs_phase1_audit_integrity_test',
+  'acs_phase1_security_auditor',
+  'acs_phase1_tenant_app',
+  'acs_phase1_context_issuer',
   'acs_phase0_tenant_test',
 ];
 
@@ -51,6 +58,7 @@ try {
   await client.query(await readFile(phase1RollbackPath, 'utf8'));
   await client.query(await readFile(rollbackPath, 'utf8'));
   await client.query(await readFile(migrationPath, 'utf8'));
+  await client.query(await readFile(phase1RolesPath, 'utf8'));
   await client.query(await readFile(phase1MigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
@@ -65,42 +73,33 @@ try {
   await client.query(await readFile(testPath, 'utf8'));
 
   await client.query(
-    'CREATE ROLE acs_phase1_context_resolver_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS',
+    'CREATE ROLE acs_phase1_audit_integrity_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS',
   );
   await client.query(
-    'CREATE ROLE acs_phase1_tenant_app_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS',
+    'GRANT USAGE ON SCHEMA platform TO acs_phase1_audit_integrity_test',
   );
-  await client.query('GRANT USAGE ON SCHEMA platform TO acs_phase1_context_resolver_test');
   await client.query(
-    'GRANT EXECUTE ON FUNCTION platform.resolve_tenant_context(text, uuid) TO acs_phase1_context_resolver_test',
+    'GRANT SELECT, UPDATE, DELETE ON platform.audit_logs, platform.security_audit_logs TO acs_phase1_audit_integrity_test',
   );
-  await client.query('GRANT USAGE ON SCHEMA platform TO acs_phase1_tenant_app_test');
-  await client.query(
-    'GRANT SELECT ON platform.tenants, platform.memberships, platform.audit_logs TO acs_phase1_tenant_app_test',
-  );
-  await client.query('GRANT INSERT ON platform.audit_logs TO acs_phase1_tenant_app_test');
-  await client.query(
-    'GRANT EXECUTE ON FUNCTION platform.current_tenant_id(), platform.current_user_id() TO acs_phase1_tenant_app_test',
-  );
-
-  await client.query(`
-    INSERT INTO platform.tenants (id, slug, display_name, status) VALUES
-      ('00000000-0000-4000-8000-000000000011', 'tenant-a', 'Tenant A', 'ACTIVE'),
-      ('00000000-0000-4000-8000-000000000022', 'tenant-b', 'Tenant B', 'ACTIVE'),
-      ('00000000-0000-4000-8000-000000000033', 'tenant-c', 'Tenant C', 'INACTIVE');
-    INSERT INTO platform.users (id, external_subject, status) VALUES
-      ('10000000-0000-4000-8000-000000000011', 'oidc|alice', 'ACTIVE'),
-      ('20000000-0000-4000-8000-000000000022', 'oidc|bob', 'ACTIVE');
-    INSERT INTO platform.memberships (id, tenant_id, user_id, status) VALUES
-      ('30000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000011', '10000000-0000-4000-8000-000000000011', 'ACTIVE'),
-      ('30000000-0000-4000-8000-000000000022', '00000000-0000-4000-8000-000000000022', '10000000-0000-4000-8000-000000000011', 'INACTIVE'),
-      ('30000000-0000-4000-8000-000000000033', '00000000-0000-4000-8000-000000000033', '20000000-0000-4000-8000-000000000022', 'ACTIVE');
-  `);
+  await client.query(await readFile(phase1SeedPath, 'utf8'));
   await client.query(await readFile(phase1TestPath, 'utf8'));
+  const durableDenials = await client.query(
+    "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
+  );
+  if (durableDenials.rows[0]?.count !== 1) {
+    throw new Error('Durable denial audit validation failed.');
+  }
+  await client.query(`
+    CREATE ROLE acs_phase1_issuer_login_test LOGIN INHERIT PASSWORD 'acs_phase1_test_only';
+    CREATE ROLE acs_phase1_tenant_login_test LOGIN INHERIT PASSWORD 'acs_phase1_test_only';
+    CREATE ROLE acs_phase1_auditor_login_test LOGIN INHERIT PASSWORD 'acs_phase1_test_only';
+    GRANT acs_phase1_context_issuer TO acs_phase1_issuer_login_test;
+    GRANT acs_phase1_tenant_app TO acs_phase1_tenant_login_test;
+    GRANT acs_phase1_security_auditor TO acs_phase1_auditor_login_test;
+  `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_AND_PLATFORM', migration: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', identity_spoofing: 'VERIFIED', audit_append_only: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_AND_PLATFORM', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED' })}\n`,
   );
 } finally {
-  await dropTestRoles();
   await client.end();
 }
