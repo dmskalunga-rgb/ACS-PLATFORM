@@ -4,6 +4,8 @@ import { buildApp } from './app.js';
 import type { PlatformConfiguration } from './config.js';
 
 const { Client } = pg;
+const connectionTimeoutMillis = 5_000;
+const statementTimeout = 5_000;
 const requiredEnvironment = {
   admin: process.env.DATABASE_URL,
   auditor: process.env.ACS_SECURITY_AUDIT_DATABASE_URL,
@@ -33,7 +35,11 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 let admin: pg.Client;
 
 beforeAll(async () => {
-  admin = new Client({ connectionString: requiredEnvironment.admin });
+  admin = new Client({
+    connectionString: requiredEnvironment.admin,
+    connectionTimeoutMillis,
+    statement_timeout: statementTimeout,
+  });
   await admin.connect();
   app = await buildApp(configuration, { logger: false });
 });
@@ -112,9 +118,21 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
   });
 
   it('rejects grant replay, another connection, expiry, malformed tokens, and tenant escape', async () => {
-    const issuer = new Client({ connectionString: requiredEnvironment.issuer });
-    const tenantConnectionA = new Client({ connectionString: requiredEnvironment.tenant });
-    const tenantConnectionB = new Client({ connectionString: requiredEnvironment.tenant });
+    const issuer = new Client({
+      connectionString: requiredEnvironment.issuer,
+      connectionTimeoutMillis,
+      statement_timeout: statementTimeout,
+    });
+    const tenantConnectionA = new Client({
+      connectionString: requiredEnvironment.tenant,
+      connectionTimeoutMillis,
+      statement_timeout: statementTimeout,
+    });
+    const tenantConnectionB = new Client({
+      connectionString: requiredEnvironment.tenant,
+      connectionTimeoutMillis,
+      statement_timeout: statementTimeout,
+    });
     await Promise.all([issuer.connect(), tenantConnectionA.connect(), tenantConnectionB.connect()]);
     try {
       const issued = await issuer.query<{ context_token: string }>(
