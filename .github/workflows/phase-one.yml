@@ -93,4 +93,5 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:validate
+      - run: pnpm --filter @acs/platform-api... build
       - run: pnpm test:phase1:e2e
