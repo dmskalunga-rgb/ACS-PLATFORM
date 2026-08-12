@@ -25,15 +25,17 @@ type ContextState =
   | { readonly kind: 'unavailable' };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api';
-const defaultContextConfiguration = resolveContextClientConfiguration({
-  isDevelopment: import.meta.env.DEV,
-  ...(import.meta.env.VITE_DEV_IDENTITY_SUBJECT === undefined
-    ? {}
-    : { developmentIdentitySubject: import.meta.env.VITE_DEV_IDENTITY_SUBJECT }),
-  ...(import.meta.env.VITE_TENANT_ID === undefined
-    ? {}
-    : { tenantId: import.meta.env.VITE_TENANT_ID }),
-});
+const defaultContextConfiguration: ContextClientConfiguration = import.meta.env.DEV
+  ? resolveContextClientConfiguration({
+      isDevelopment: true,
+      ...(import.meta.env.VITE_DEV_IDENTITY_SUBJECT === undefined
+        ? {}
+        : { developmentIdentitySubject: import.meta.env.VITE_DEV_IDENTITY_SUBJECT }),
+      ...(import.meta.env.VITE_TENANT_ID === undefined
+        ? {}
+        : { tenantId: import.meta.env.VITE_TENANT_ID }),
+    })
+  : {};
 
 export function App({
   contextConfiguration = defaultContextConfiguration,

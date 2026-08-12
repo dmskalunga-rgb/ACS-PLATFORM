@@ -32,7 +32,7 @@ describe('FOUNDATION application shell', () => {
         ),
       ),
     );
-    render(<App />);
+    render(<App contextConfiguration={{}} />);
     expect(screen.getByRole('heading', { name: 'Platform Foundation' })).toBeVisible();
     expect(await screen.findByText('acs-platform-api')).toBeVisible();
     expect(screen.getByText('PHASE 1')).toBeVisible();
@@ -44,7 +44,7 @@ describe('FOUNDATION application shell', () => {
       'fetch',
       vi.fn(() => Promise.reject(new Error('offline'))),
     );
-    render(<App />);
+    render(<App contextConfiguration={{}} />);
     expect(await screen.findByText(/Technical service disconnected/)).toBeVisible();
   });
 
