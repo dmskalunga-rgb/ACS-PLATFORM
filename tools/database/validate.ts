@@ -21,18 +21,45 @@ const client = new Client({ connectionString: databaseUrl });
 const migrationPath = resolve('database/migrations/20260808000000_phase0_tenancy_foundation.sql');
 const testPath = resolve('database/tests/rls/tenant_isolation.sql');
 const rollbackPath = resolve('database/rollbacks/20260808000000_phase0_tenancy_foundation.sql');
+const phase1MigrationPath = resolve(
+  'database/migrations/20260809000000_phase1_platform_multitenancy.sql',
+);
+const phase1TestPath = resolve('database/tests/rls/phase1_platform_isolation.sql');
+const phase1RollbackPath = resolve(
+  'database/rollbacks/20260809000000_phase1_platform_multitenancy.sql',
+);
+const phase1RolesPath = resolve('database/roles/phase1_platform_roles.sql');
+const phase1SeedPath = resolve('database/tests/fixtures/phase1_seed.sql');
+
+const testRoles = [
+  'acs_phase1_auditor_login_test',
+  'acs_phase1_tenant_login_test',
+  'acs_phase1_issuer_login_test',
+  'acs_phase1_audit_integrity_test',
+  'acs_phase1_security_auditor',
+  'acs_phase1_tenant_app',
+  'acs_phase1_context_issuer',
+  'acs_phase0_tenant_test',
+];
+
+async function dropTestRoles(): Promise<void> {
+  for (const role of testRoles) {
+    const existingRole = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role]);
+    if (existingRole.rowCount === 1) {
+      await client.query(`DROP OWNED BY ${role}`);
+      await client.query(`DROP ROLE ${role}`);
+    }
+  }
+}
 
 await client.connect();
 try {
+  await dropTestRoles();
+  await client.query(await readFile(phase1RollbackPath, 'utf8'));
   await client.query(await readFile(rollbackPath, 'utf8'));
   await client.query(await readFile(migrationPath, 'utf8'));
-  const existingRole = await client.query(
-    "SELECT 1 FROM pg_roles WHERE rolname = 'acs_phase0_tenant_test'",
-  );
-  if (existingRole.rowCount === 1) {
-    await client.query('DROP OWNED BY acs_phase0_tenant_test');
-    await client.query('DROP ROLE acs_phase0_tenant_test');
-  }
+  await client.query(await readFile(phase1RolesPath, 'utf8'));
+  await client.query(await readFile(phase1MigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
   );
@@ -44,16 +71,33 @@ try {
     'GRANT EXECUTE ON FUNCTION foundation.current_tenant_id() TO acs_phase0_tenant_test',
   );
   await client.query(await readFile(testPath, 'utf8'));
+
+  await client.query(
+    'CREATE ROLE acs_phase1_audit_integrity_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS',
+  );
+  await client.query('GRANT USAGE ON SCHEMA platform TO acs_phase1_audit_integrity_test');
+  await client.query(
+    'GRANT SELECT, UPDATE, DELETE ON platform.audit_logs, platform.security_audit_logs TO acs_phase1_audit_integrity_test',
+  );
+  await client.query(await readFile(phase1SeedPath, 'utf8'));
+  await client.query(await readFile(phase1TestPath, 'utf8'));
+  const durableDenials = await client.query(
+    "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
+  );
+  if (durableDenials.rows[0]?.count !== 1) {
+    throw new Error('Durable denial audit validation failed.');
+  }
+  await client.query(`
+    CREATE ROLE acs_phase1_issuer_login_test LOGIN INHERIT PASSWORD 'acs_phase1_test_only';
+    CREATE ROLE acs_phase1_tenant_login_test LOGIN INHERIT PASSWORD 'acs_phase1_test_only';
+    CREATE ROLE acs_phase1_auditor_login_test LOGIN INHERIT PASSWORD 'acs_phase1_test_only';
+    GRANT acs_phase1_context_issuer TO acs_phase1_issuer_login_test;
+    GRANT acs_phase1_tenant_app TO acs_phase1_tenant_login_test;
+    GRANT acs_phase1_security_auditor TO acs_phase1_auditor_login_test;
+  `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION', migration: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_AND_PLATFORM', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED' })}\n`,
   );
 } finally {
-  const existingRole = await client.query(
-    "SELECT 1 FROM pg_roles WHERE rolname = 'acs_phase0_tenant_test'",
-  );
-  if (existingRole.rowCount === 1) {
-    await client.query('DROP OWNED BY acs_phase0_tenant_test');
-    await client.query('DROP ROLE acs_phase0_tenant_test');
-  }
   await client.end();
 }

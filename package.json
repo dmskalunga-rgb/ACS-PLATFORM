@@ -14,6 +14,7 @@
     "build": "turbo run build",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "db:validate": "node --experimental-strip-types tools/database/validate.ts",
+    "test:phase1:e2e": "pnpm --filter @acs/platform-api test:e2e",
     "dev": "turbo run dev --parallel",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

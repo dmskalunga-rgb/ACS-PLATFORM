@@ -57,6 +57,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@acs/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@vitejs/plugin-react':
         specifier: 6.0.5
         version: 6.0.5(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.11)(yaml@2.9.0))
@@ -171,6 +174,9 @@ importers:
       fastify:
         specifier: 5.11.3
         version: 5.11.3
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
       zod:
         specifier: 4.4.3
         version: 4.4.3

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { LOG_REDACTION_PATHS, createMetricsRegistry, startTelemetry } from './index.js';
+import {
+  LOG_REDACTION_PATHS,
+  createMetricsRegistry,
+  sanitizeErrorForLog,
+  startTelemetry,
+} from './index.js';
 
 describe('FOUNDATION observability', () => {
   it('redacts authorization and secret-bearing fields', () => {
@@ -15,5 +20,13 @@ describe('FOUNDATION observability', () => {
 
   it('stays explicitly disabled without an OTLP endpoint', () => {
     expect(startTelemetry({ serviceName: 'test', serviceVersion: '0.0.0' }).enabled).toBe(false);
+  });
+
+  it('sanitizes database errors before structured logging', () => {
+    const error = Object.assign(
+      new Error('password=secret SELECT * FROM users postgresql://user:pass@host/db'),
+      { code: '42501' },
+    );
+    expect(sanitizeErrorForLog(error)).toEqual({ error_name: 'Error', error_code: '42501' });
   });
 });

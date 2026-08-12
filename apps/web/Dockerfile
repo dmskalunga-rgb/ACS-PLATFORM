@@ -2,9 +2,10 @@ FROM node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06
 WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@11.16.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY packages/contracts ./packages/contracts
 COPY apps/web ./apps/web
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @acs/web build
+RUN pnpm --filter @acs/web... build
 
 FROM nginx:stable-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46 AS runtime
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
