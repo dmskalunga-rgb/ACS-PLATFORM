@@ -289,14 +289,14 @@ AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION platform.record_security_denial(
-  actor_fingerprint text,
-  requested_tenant_id uuid,
-  selector_fingerprint text,
-  reason_code text,
-  action text,
-  resource text,
-  correlation_id text,
-  request_id text
+  p_actor_fingerprint text,
+  p_requested_tenant_id uuid,
+  p_selector_fingerprint text,
+  p_reason_code text,
+  p_action text,
+  p_resource text,
+  p_correlation_id text,
+  p_request_id text
 )
 RETURNS void
 LANGUAGE sql
@@ -308,8 +308,8 @@ AS $$
     (actor_fingerprint, requested_tenant_id, selector_fingerprint, reason_code,
      action, resource, correlation_id, request_id)
   VALUES
-    (actor_fingerprint, requested_tenant_id, selector_fingerprint, reason_code,
-     action, resource, correlation_id, request_id);
+    (p_actor_fingerprint, p_requested_tenant_id, p_selector_fingerprint, p_reason_code,
+     p_action, p_resource, p_correlation_id, p_request_id);
 $$;
 
 CREATE OR REPLACE FUNCTION platform.reject_audit_mutation()

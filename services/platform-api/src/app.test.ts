@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { errorEnvelopeSchema } from '@acs/contracts';
+import { errorEnvelopeSchema, platformContextSchema } from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { buildApp } from './app.js';
@@ -50,6 +50,8 @@ describe('FOUNDATION platform API', () => {
     const document = z.object({ paths: z.record(z.string(), z.unknown()) }).parse(response.json());
     expect(document.paths['/health']).toBeDefined();
     expect(document.paths['/api/v1/platform/context']).toBeDefined();
+    expect(response.body).toContain('developmentBearer');
+    expect(response.body).toContain('Development/test identity only');
   });
 
   it('reports tenant context as not configured without database boundaries', async () => {
@@ -109,6 +111,7 @@ describe('FOUNDATION platform API', () => {
         },
       });
       expect(response.statusCode).toBe(200);
+      expect(() => platformContextSchema.parse(response.json())).not.toThrow();
       expect(response.json()).toMatchObject({
         data: {
           user_id: userId,

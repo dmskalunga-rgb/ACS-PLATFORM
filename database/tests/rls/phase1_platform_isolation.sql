@@ -56,6 +56,30 @@ COMMIT;
 BEGIN;
 SET LOCAL ROLE acs_phase1_tenant_app;
 
+DO $$
+BEGIN
+  BEGIN
+    PERFORM * FROM platform.issue_tenant_context(
+      'oidc|alice',
+      '00000000-0000-4000-8000-000000000011',
+      'platform.context.read'
+    );
+    RAISE EXCEPTION 'normal app role unexpectedly issued trusted context';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END;
+$$;
+
+SELECT set_config('app.tenant_id', '00000000-0000-4000-8000-000000000011', true);
+SELECT set_config('app.user_id', '10000000-0000-4000-8000-000000000011', true);
+DO $$
+DECLARE visible_count integer;
+BEGIN
+  SELECT count(*) INTO visible_count FROM platform.tenants;
+  IF visible_count <> 0 THEN RAISE EXCEPTION 'legacy GUCs bypassed trusted context'; END IF;
+END;
+$$;
+
 SELECT set_config('app.context_token', '99999999-9999-4999-8999-999999999999', true);
 DO $$
 DECLARE visible_count integer;
