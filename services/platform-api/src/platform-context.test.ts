@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { DevelopmentHeaderIdentityAdapter, NotConfiguredIdentityAdapter } from './identity.js';
 import {
-  PlatformContextFailure,
   PlatformContextService,
   RepositoryAuthorizationPort,
+  type PlatformContextFailure,
   type SecurityAuditPort,
   type TenantContextRepository,
 } from './platform-context.js';
@@ -15,29 +15,35 @@ const metadata = { correlationId: randomUUID(), requestId: randomUUID() };
 
 function repository(resolved = true, allowed = true): TenantContextRepository {
   return {
-    resolveMembership: vi.fn(async () =>
-      resolved ? { tenantDisplayName: 'Tenant A', tenantId, tenantSlug: 'tenant-a', userId } : null,
+    resolveMembership: vi.fn(() =>
+      Promise.resolve(
+        resolved
+          ? { tenantDisplayName: 'Tenant A', tenantId, tenantSlug: 'tenant-a', userId }
+          : null,
+      ),
     ),
-    isActionAuthorized: vi.fn(async () => allowed),
-    issueContext: vi.fn(async () =>
-      resolved && allowed
-        ? {
-            contextToken: randomUUID(),
-            tenantDisplayName: 'Tenant A',
-            tenantId,
-            tenantSlug: 'tenant-a',
-            userId,
-          }
-        : null,
+    isActionAuthorized: vi.fn(() => Promise.resolve(allowed)),
+    issueContext: vi.fn(() =>
+      Promise.resolve(
+        resolved && allowed
+          ? {
+              contextToken: randomUUID(),
+              tenantDisplayName: 'Tenant A',
+              tenantId,
+              tenantSlug: 'tenant-a',
+              userId,
+            }
+          : null,
+      ),
     ),
-    readAndAudit: vi.fn(async (context) => context),
+    readAndAudit: vi.fn((context) => Promise.resolve(context)),
   };
 }
 
 function service(
   identity: DevelopmentHeaderIdentityAdapter | NotConfiguredIdentityAdapter,
   store = repository(),
-  securityAudit: SecurityAuditPort = { recordDenied: vi.fn(async () => undefined) },
+  securityAudit: SecurityAuditPort = { recordDenied: vi.fn(() => Promise.resolve()) },
 ) {
   return new PlatformContextService(
     identity,
@@ -61,7 +67,8 @@ describe('Phase 1 platform context service', () => {
     await expect(contextService.read(undefined, tenantId, metadata)).rejects.toMatchObject({
       code: 'UNAUTHENTICATED',
     } satisfies Partial<PlatformContextFailure>);
-    expect(store.resolveMembership).not.toHaveBeenCalled();
+    const resolveMembership = vi.mocked(store.resolveMembership);
+    expect(resolveMembership).not.toHaveBeenCalled();
   });
 
   it('denies a subject without an independently verified active membership', async () => {
@@ -77,14 +84,17 @@ describe('Phase 1 platform context service', () => {
     const contextService = service(new DevelopmentHeaderIdentityAdapter(), repository(true, false));
     await expect(
       contextService.read('Bearer dev:oidc|alice', tenantId, metadata),
-    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' } satisfies Partial<PlatformContextFailure>);
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+    } satisfies Partial<PlatformContextFailure>);
   });
 
   it('returns only the server-authorized action after the required audit write', async () => {
     const store = repository();
     const contextService = service(new DevelopmentHeaderIdentityAdapter(), store);
     const response = await contextService.read('Bearer dev:oidc|alice', tenantId, metadata);
-    expect(store.readAndAudit).toHaveBeenCalledOnce();
+    const readAndAudit = vi.mocked(store.readAndAudit);
+    expect(readAndAudit).toHaveBeenCalledOnce();
     expect(response.data.permissions).toEqual(['platform.context.read']);
     expect(response.data.tenant.id).toBe(tenantId);
   });

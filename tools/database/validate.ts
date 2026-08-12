@@ -75,9 +75,7 @@ try {
   await client.query(
     'CREATE ROLE acs_phase1_audit_integrity_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS',
   );
-  await client.query(
-    'GRANT USAGE ON SCHEMA platform TO acs_phase1_audit_integrity_test',
-  );
+  await client.query('GRANT USAGE ON SCHEMA platform TO acs_phase1_audit_integrity_test');
   await client.query(
     'GRANT SELECT, UPDATE, DELETE ON platform.audit_logs, platform.security_audit_logs TO acs_phase1_audit_integrity_test',
   );

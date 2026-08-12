@@ -16,12 +16,12 @@ setting database context.
 
 ## Canonical model
 
-| Entity        | Justified fields                                                       | Tenant scope            | Lifecycle            |
-| ------------- | ---------------------------------------------------------------------- | ----------------------- | -------------------- |
-| `tenants`     | UUID, name, slug, status, created/updated timestamps                   | Canonical tenant root   | `ACTIVE`, `INACTIVE` |
-| `users`       | UUID, external subject, status, created/updated timestamps             | Global identity mapping | `ACTIVE`, `INACTIVE` |
-| `memberships` | UUID, tenant UUID, user UUID, status, created/updated timestamps       | Tenant-owned            | `ACTIVE`, `INACTIVE` |
-| `audit_logs`  | UUID, tenant, actor, action, resource, outcome, classification, correlation, bounded auxiliary metadata, timestamp | Tenant-owned | Append-only |
+| Entity        | Justified fields                                                                                                   | Tenant scope            | Lifecycle            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------- | -------------------- |
+| `tenants`     | UUID, name, slug, status, created/updated timestamps                                                               | Canonical tenant root   | `ACTIVE`, `INACTIVE` |
+| `users`       | UUID, external subject, status, created/updated timestamps                                                         | Global identity mapping | `ACTIVE`, `INACTIVE` |
+| `memberships` | UUID, tenant UUID, user UUID, status, created/updated timestamps                                                   | Tenant-owned            | `ACTIVE`, `INACTIVE` |
+| `audit_logs`  | UUID, tenant, actor, action, resource, outcome, classification, correlation, bounded auxiliary metadata, timestamp | Tenant-owned            | Append-only          |
 
 UUID is the canonical identifier. Display name is mutable and never used for authorization.
 Slug is a globally unique operator key, not the security boundary. Audit `metadata` is bounded to

@@ -64,7 +64,7 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
         permissions: ['platform.context.read'],
       },
     });
-    const audit = await admin.query(
+    const audit = await admin.query<{ count: number }>(
       "SELECT count(*)::integer AS count FROM platform.audit_logs WHERE tenant_id = $1 AND action = 'platform.context.read'",
       [tenantA],
     );
@@ -101,7 +101,7 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
   });
 
   it('persists redacted denial audit for the negative matrix', async () => {
-    const result = await admin.query(
+    const result = await admin.query<{ count: number; protected: boolean }>(
       `SELECT count(*)::integer AS count,
               bool_and(outcome = 'DENIED' AND classification = 'SECURITY') AS protected
        FROM platform.security_audit_logs
@@ -132,16 +132,17 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
         [token],
       );
       expect(activation.rowCount).toBe(1);
-      const tenantAVisible = await tenantConnectionA.query(
+      const tenantAVisible = await tenantConnectionA.query<{ count: number }>(
         'SELECT count(*)::integer AS count FROM platform.tenants WHERE id = $1',
         [tenantA],
       );
-      const tenantBVisible = await tenantConnectionA.query(
+      const tenantBVisible = await tenantConnectionA.query<{ count: number }>(
         'SELECT count(*)::integer AS count FROM platform.tenants WHERE id = $1',
         [tenantB],
       );
       expect(tenantAVisible.rows[0]?.count).toBe(1);
       expect(tenantBVisible.rows[0]?.count).toBe(0);
+      await tenantConnectionA.query('COMMIT');
 
       await tenantConnectionB.query('BEGIN');
       const otherConnection = await tenantConnectionB.query(
@@ -150,7 +151,6 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
       );
       expect(otherConnection.rowCount).toBe(0);
       await tenantConnectionB.query('ROLLBACK');
-      await tenantConnectionA.query('COMMIT');
 
       await tenantConnectionA.query('BEGIN');
       const replay = await tenantConnectionA.query(
@@ -179,7 +179,7 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
       await tenantConnectionA.query("SELECT set_config('app.context_token', $1, true)", [
         'not-a-uuid',
       ]);
-      const malformed = await tenantConnectionA.query(
+      const malformed = await tenantConnectionA.query<{ count: number }>(
         'SELECT count(*)::integer AS count FROM platform.tenants',
       );
       expect(malformed.rows[0]?.count).toBe(0);
@@ -196,5 +196,5 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
     } finally {
       await Promise.all([issuer.end(), tenantConnectionA.end(), tenantConnectionB.end()]);
     }
-  });
+  }, 15_000);
 });

@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string;
+  readonly VITE_DEV_IDENTITY_SUBJECT?: string;
+  readonly VITE_TENANT_ID?: string;
 }
 
 interface ImportMeta {

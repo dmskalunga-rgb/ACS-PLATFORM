@@ -197,11 +197,11 @@ BEGIN
       AND t.id = requested_tenant_id
       AND mp.permission_key = required_permission
   ), issued AS (
-    INSERT INTO platform.tenant_context_grants
+    INSERT INTO platform.tenant_context_grants AS issued_grant
       (tenant_id, user_id, membership_id, permission_key)
     SELECT resolved_tenant_id, resolved_user_id, resolved_membership_id, required_permission
     FROM authorized_context
-    RETURNING token, user_id, tenant_id
+    RETURNING issued_grant.token, issued_grant.user_id, issued_grant.tenant_id
   )
   SELECT i.token, i.user_id, i.tenant_id,
          a.resolved_tenant_slug, a.resolved_tenant_name

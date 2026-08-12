@@ -70,27 +70,31 @@ describe('FOUNDATION platform API', () => {
     const tenantId = randomUUID();
     const userId = randomUUID();
     const repository: TenantContextRepository = {
-      resolveMembership: async (subject, requestedTenantId) =>
-        subject === 'oidc|alice' && requestedTenantId === tenantId
-          ? {
-              tenantDisplayName: 'Tenant A',
-              tenantId,
-              tenantSlug: 'tenant-a',
-              userId,
-            }
-          : null,
-      isActionAuthorized: async () => true,
-      issueContext: async (subject, requestedTenantId) =>
-        subject === 'oidc|alice' && requestedTenantId === tenantId
-          ? {
-              contextToken: randomUUID(),
-              tenantDisplayName: 'Tenant A',
-              tenantId,
-              tenantSlug: 'tenant-a',
-              userId,
-            }
-          : null,
-      readAndAudit: async (context) => context,
+      resolveMembership: (subject, requestedTenantId) =>
+        Promise.resolve(
+          subject === 'oidc|alice' && requestedTenantId === tenantId
+            ? {
+                tenantDisplayName: 'Tenant A',
+                tenantId,
+                tenantSlug: 'tenant-a',
+                userId,
+              }
+            : null,
+        ),
+      isActionAuthorized: () => Promise.resolve(true),
+      issueContext: (subject, requestedTenantId) =>
+        Promise.resolve(
+          subject === 'oidc|alice' && requestedTenantId === tenantId
+            ? {
+                contextToken: randomUUID(),
+                tenantDisplayName: 'Tenant A',
+                tenantId,
+                tenantSlug: 'tenant-a',
+                userId,
+              }
+            : null,
+        ),
+      readAndAudit: (context) => Promise.resolve(context),
     };
     const contextApp = await buildApp(configuration, {
       logger: false,
@@ -98,7 +102,7 @@ describe('FOUNDATION platform API', () => {
         new DevelopmentHeaderIdentityAdapter(),
         new RepositoryAuthorizationPort(repository),
         repository,
-        { recordDenied: async () => undefined },
+        { recordDenied: () => Promise.resolve() },
       ),
     });
     try {

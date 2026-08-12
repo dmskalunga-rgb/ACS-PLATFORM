@@ -1,5 +1,9 @@
 import { platformContextSchema, type PlatformContextResponse } from '@acs/contracts';
 import { useEffect, useState } from 'react';
+import {
+  resolveContextClientConfiguration,
+  type ContextClientConfiguration,
+} from './context-client-configuration.js';
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -20,26 +24,7 @@ type ContextState =
   | { readonly kind: 'not-configured' }
   | { readonly kind: 'unavailable' };
 
-export interface ContextClientConfiguration {
-  readonly developmentIdentitySubject?: string;
-  readonly tenantId?: string;
-}
-
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api';
-export function resolveContextClientConfiguration(input: {
-  readonly developmentIdentitySubject?: string;
-  readonly isDevelopment: boolean;
-  readonly tenantId?: string;
-}): ContextClientConfiguration {
-  if (!input.isDevelopment) return {};
-  return {
-    ...(input.developmentIdentitySubject === undefined
-      ? {}
-      : { developmentIdentitySubject: input.developmentIdentitySubject }),
-    ...(input.tenantId === undefined ? {} : { tenantId: input.tenantId }),
-  };
-}
-
 const defaultContextConfiguration = resolveContextClientConfiguration({
   isDevelopment: import.meta.env.DEV,
   ...(import.meta.env.VITE_DEV_IDENTITY_SUBJECT === undefined

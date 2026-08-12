@@ -10,7 +10,9 @@ export interface TrustedIdentity {
 }
 
 export interface IdentityAdapter {
-  authenticate(authorizationHeader: string | undefined): Promise<TrustedIdentity | null>;
+  readonly authenticate: (
+    authorizationHeader: string | undefined,
+  ) => Promise<TrustedIdentity | null>;
   readonly configured: boolean;
 }
 
@@ -31,20 +33,24 @@ export interface ContextReadMetadata {
 }
 
 export interface TenantContextRepository {
-  resolveMembership(
+  readonly resolveMembership: (
     subject: string,
     requestedTenantId: string,
-  ): Promise<ResolvedTenantMembership | null>;
-  isActionAuthorized(userId: string, tenantId: string, action: string): Promise<boolean>;
-  issueContext(
+  ) => Promise<ResolvedTenantMembership | null>;
+  readonly isActionAuthorized: (
+    userId: string,
+    tenantId: string,
+    action: string,
+  ) => Promise<boolean>;
+  readonly issueContext: (
     subject: string,
     requestedTenantId: string,
     action: string,
-  ): Promise<IssuedTenantContext | null>;
-  readAndAudit(
+  ) => Promise<IssuedTenantContext | null>;
+  readonly readAndAudit: (
     context: IssuedTenantContext,
     metadata: ContextReadMetadata,
-  ): Promise<ResolvedTenantMembership>;
+  ) => Promise<ResolvedTenantMembership>;
 }
 
 export interface SecurityDenialRecord {
@@ -58,7 +64,7 @@ export interface SecurityDenialRecord {
 }
 
 export interface SecurityAuditPort {
-  recordDenied(record: SecurityDenialRecord): Promise<void>;
+  readonly recordDenied: (record: SecurityDenialRecord) => Promise<void>;
 }
 
 export class RepositoryAuthorizationPort implements AuthorizationPort {
@@ -85,10 +91,7 @@ export class RepositoryAuthorizationPort implements AuthorizationPort {
 }
 
 export type PlatformContextFailureCode =
-  | 'IDENTITY_NOT_CONFIGURED'
-  | 'PERMISSION_DENIED'
-  | 'TENANT_CONTEXT_DENIED'
-  | 'UNAUTHENTICATED';
+  'IDENTITY_NOT_CONFIGURED' | 'PERMISSION_DENIED' | 'TENANT_CONTEXT_DENIED' | 'UNAUTHENTICATED';
 
 export class PlatformContextFailure extends Error {
   constructor(
@@ -144,10 +147,7 @@ export class PlatformContextService {
       throw new PlatformContextFailure('UNAUTHENTICATED', 'Authentication is required.');
     }
 
-    const membership = await this.repository.resolveMembership(
-      identity.subject,
-      requestedTenantId,
-    );
+    const membership = await this.repository.resolveMembership(identity.subject, requestedTenantId);
     if (membership === null) {
       await this.securityAudit.recordDenied({
         action: PLATFORM_CONTEXT_READ,
