@@ -1,6 +1,6 @@
 # ACS Phase 1 Selective Adoption Remediation Report
 
-Status: `REMOTE_CI_PENDING`
+Status: `PHASE_1_PARTIAL`
 
 ## Authorized lineage
 
@@ -32,8 +32,12 @@ removed a false E2E lock wait while retaining replay and cross-connection assert
 
 ## Open items
 
-- Remote Phase 0, Phase 1, repository validation, SCA/SBOM, CodeQL, secret, container and IaC
-  results must be captured for the final decision.
+- Phase 1 run `31583867299` and Phase 0 regression run `31583867292` passed on HEAD
+  `63baae67d0d2d707ee5824f6e8817d4e86c5faf1`, including quality, PostgreSQL/RLS/E2E,
+  CodeQL, secrets, SCA/SBOM, container and IaC checks.
+- `Repository validation` was not executed on the feature HEAD: its push trigger is limited to
+  `main`/`develop`, no PR is authorized, and the installed GitHub CLI reports its active token as
+  invalid, blocking the added manual dispatch. It is not reported as successful.
 - ADR-0011 and ADR-0012 remain proposed until the designated architecture authority acts.
 - Production OIDC/JWT verification remains outside this selectively adopted development slice.
 - ECOM, EDIM and EDOLM remain working catalogs pending owners and governance approval.
@@ -42,3 +46,9 @@ removed a false E2E lock wait while retaining replay and cross-connection assert
   browser-safe contract exports before a web path executes cryptographic helpers.
 
 This report does not authorize Phase 2, a PR, a merge, or production deployment.
+
+## Final decision
+
+`PHASE_1_PARTIAL`: the selectively adopted technical scope and its regression/security gates are
+verified, but the explicitly required Repository validation run remains blocked by GitHub CLI
+authentication. No technical CI failure remains open on the verified implementation HEAD.
