@@ -20,8 +20,11 @@ type HealthState =
 type ContextState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'available'; readonly response: PlatformContextResponse }
-  | { readonly kind: 'denied' }
+  | { readonly kind: 'expired' }
+  | { readonly kind: 'forbidden' }
+  | { readonly kind: 'signed-out' }
   | { readonly kind: 'not-configured' }
+  | { readonly kind: 'identity-unavailable' }
   | { readonly kind: 'unavailable' };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -43,16 +46,19 @@ export function App({
   readonly contextConfiguration?: ContextClientConfiguration;
 }) {
   const [health, setHealth] = useState<HealthState>({ kind: 'loading' });
+  const [sessionActive, setSessionActive] = useState(true);
+  const hasCredential =
+    contextConfiguration.accessToken !== undefined ||
+    contextConfiguration.developmentIdentitySubject !== undefined;
   const [context, setContext] = useState<ContextState>(
-    contextConfiguration.developmentIdentitySubject === undefined ||
-      contextConfiguration.tenantId === undefined
+    !hasCredential || contextConfiguration.tenantId === undefined
       ? { kind: 'not-configured' }
       : { kind: 'loading' },
   );
 
   useEffect(() => {
     const controller = new AbortController();
-    const loadHealth = async () => {
+    void (async () => {
       try {
         const response = await fetch(`${apiBaseUrl}/health`, {
           headers: { accept: 'application/json' },
@@ -64,34 +70,32 @@ export function App({
         if (error instanceof DOMException && error.name === 'AbortError') return;
         setHealth({ kind: 'unavailable' });
       }
-    };
-    void loadHealth();
+    })();
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
+    const accessToken = contextConfiguration.accessToken;
     const subject = contextConfiguration.developmentIdentitySubject;
     const tenantId = contextConfiguration.tenantId;
-    if (subject === undefined || tenantId === undefined) return;
+    if (!sessionActive || tenantId === undefined) return;
+    const authorization =
+      accessToken === undefined
+        ? subject === undefined
+          ? undefined
+          : `Bearer dev:${subject}`
+        : `Bearer ${accessToken}`;
+    if (authorization === undefined) return;
     const controller = new AbortController();
-    const loadContext = async () => {
+    void (async () => {
       try {
         const response = await fetch(`${apiBaseUrl}/api/v1/platform/context`, {
-          headers: {
-            accept: 'application/json',
-            authorization: `Bearer dev:${subject}`,
-            'x-acs-tenant-id': tenantId,
-          },
+          headers: { accept: 'application/json', authorization, 'x-acs-tenant-id': tenantId },
           signal: controller.signal,
         });
-        if (response.status === 401 || response.status === 403) {
-          setContext({ kind: 'denied' });
-          return;
-        }
-        if (response.status === 503) {
-          setContext({ kind: 'not-configured' });
-          return;
-        }
+        if (response.status === 401) return setContext({ kind: 'expired' });
+        if (response.status === 403) return setContext({ kind: 'forbidden' });
+        if (response.status === 503) return setContext({ kind: 'identity-unavailable' });
         if (!response.ok) throw new Error('Tenant context endpoint is unavailable.');
         setContext({
           kind: 'available',
@@ -101,10 +105,20 @@ export function App({
         if (error instanceof DOMException && error.name === 'AbortError') return;
         setContext({ kind: 'unavailable' });
       }
-    };
-    void loadContext();
+    })();
     return () => controller.abort();
-  }, [contextConfiguration.developmentIdentitySubject, contextConfiguration.tenantId]);
+  }, [
+    contextConfiguration.accessToken,
+    contextConfiguration.developmentIdentitySubject,
+    contextConfiguration.tenantId,
+    sessionActive,
+  ]);
+
+  const signOut = async () => {
+    setSessionActive(false);
+    setContext({ kind: 'signed-out' });
+    await contextConfiguration.onSignOut?.();
+  };
 
   return (
     <main className="shell">
@@ -143,31 +157,52 @@ export function App({
         </section>
         <section className="status-card" aria-live="polite" aria-busy={context.kind === 'loading'}>
           <h2>Tenant context</h2>
-          {context.kind === 'loading' && <p>Resolving authenticated tenant membership…</p>}
+          {context.kind === 'loading' && <p>Authenticating and resolving tenant membership…</p>}
           {context.kind === 'not-configured' && (
-            <p className="warning">NOT_CONFIGURED — identity or tenant context is unavailable.</p>
+            <>
+              <p className="warning">NOT_CONFIGURED — no authenticated session is available.</p>
+              {contextConfiguration.onSignIn !== undefined && (
+                <button type="button" onClick={contextConfiguration.onSignIn}>
+                  Sign in
+                </button>
+              )}
+            </>
           )}
-          {context.kind === 'denied' && (
-            <p className="warning">Access denied. No tenant information was disclosed.</p>
+          {context.kind === 'expired' && <p className="warning">Session expired. Sign in again.</p>}
+          {context.kind === 'forbidden' && (
+            <p className="warning">Access forbidden. No tenant information was disclosed.</p>
+          )}
+          {context.kind === 'signed-out' && (
+            <p className="warning">Signed out. The in-memory session is no longer usable.</p>
+          )}
+          {context.kind === 'identity-unavailable' && (
+            <p className="warning">Identity service unavailable. Access remains closed.</p>
           )}
           {context.kind === 'unavailable' && (
             <p className="warning">Tenant context disconnected. No data was fabricated.</p>
           )}
           {context.kind === 'available' && (
-            <dl>
-              <div>
-                <dt>Tenant</dt>
-                <dd>{context.response.data.tenant.display_name}</dd>
-              </div>
-              <div>
-                <dt>Membership</dt>
-                <dd>{context.response.data.membership.status}</dd>
-              </div>
-              <div>
-                <dt>Authorized action</dt>
-                <dd>{context.response.data.permissions[0]}</dd>
-              </div>
-            </dl>
+            <>
+              <dl>
+                <div>
+                  <dt>Tenant</dt>
+                  <dd>{context.response.data.tenant.display_name}</dd>
+                </div>
+                <div>
+                  <dt>Membership</dt>
+                  <dd>{context.response.data.membership.status}</dd>
+                </div>
+                <div>
+                  <dt>Authorized action</dt>
+                  <dd>{context.response.data.permissions[0]}</dd>
+                </div>
+              </dl>
+              {contextConfiguration.accessToken !== undefined && (
+                <button type="button" onClick={() => void signOut()}>
+                  Sign out
+                </button>
+              )}
+            </>
           )}
         </section>
       </div>

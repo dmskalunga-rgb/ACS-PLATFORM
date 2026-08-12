@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.js';
 import { resolveContextClientConfiguration } from './context-client-configuration.js';
@@ -103,5 +104,93 @@ describe('FOUNDATION application shell', () => {
     const headers = new Headers(contextCall?.[1]?.headers);
     expect(headers.get('authorization')).toBe('Bearer dev:oidc|alice');
     expect(headers.get('x-acs-tenant-id')).toBe(tenantId);
+  });
+
+  it('uses a production bearer token only in memory and closes the session on logout', async () => {
+    const tenantId = '00000000-0000-4000-8000-000000000011';
+    const onSignOut = vi.fn();
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      (input) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              url.endsWith('/health')
+                ? {
+                    component: 'FOUNDATION',
+                    service: 'acs-platform-api',
+                    status: 'ok',
+                    version: '0.0.0-foundation',
+                  }
+                : {
+                    data: {
+                      user_id: '10000000-0000-4000-8000-000000000011',
+                      tenant: { id: tenantId, slug: 'tenant-a', display_name: 'Tenant A' },
+                      membership: { status: 'ACTIVE' },
+                      permissions: ['platform.context.read'],
+                    },
+                    meta: {
+                      request_id: '50000000-0000-4000-8000-000000000011',
+                      correlation_id: '60000000-0000-4000-8000-000000000011',
+                    },
+                  },
+            ),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const storageSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+    render(<App contextConfiguration={{ accessToken: 'signed.jwt.value', onSignOut, tenantId }} />);
+    expect(await screen.findByText('Tenant A')).toBeVisible();
+    const contextCall = fetchMock.mock.calls.find(([input]) =>
+      (typeof input === 'string' ? input : input instanceof URL ? input.href : input.url).endsWith(
+        '/api/v1/platform/context',
+      ),
+    );
+    expect(new Headers(contextCall?.[1]?.headers).get('authorization')).toBe(
+      'Bearer signed.jwt.value',
+    );
+    expect(storageSpy).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByText(/in-memory session is no longer usable/)).toBeVisible();
+    expect(onSignOut).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [401, /Session expired/],
+    [403, /Access forbidden/],
+    [503, /Identity service unavailable/],
+  ])('renders the safe authentication state for HTTP %s', async (status, message) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(
+          new Response(
+            typeof input === 'string' && input.endsWith('/health')
+              ? JSON.stringify({
+                  component: 'FOUNDATION',
+                  service: 'acs-platform-api',
+                  status: 'ok',
+                  version: '0.0.0-foundation',
+                })
+              : undefined,
+            { status: typeof input === 'string' && input.endsWith('/health') ? 200 : status },
+          ),
+        ),
+      ),
+    );
+    render(
+      <App
+        contextConfiguration={{
+          accessToken: 'signed.jwt.value',
+          tenantId: '00000000-0000-4000-8000-000000000011',
+        }}
+      />,
+    );
+    expect(await screen.findByText(message)).toBeVisible();
   });
 });

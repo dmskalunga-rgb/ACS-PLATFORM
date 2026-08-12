@@ -1,5 +1,8 @@
 export interface ContextClientConfiguration {
+  readonly accessToken?: string;
   readonly developmentIdentitySubject?: string;
+  readonly onSignIn?: () => void;
+  readonly onSignOut?: () => void | Promise<void>;
   readonly tenantId?: string;
 }
 
