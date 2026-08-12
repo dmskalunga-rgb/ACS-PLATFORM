@@ -22,19 +22,21 @@ Status: `LOCAL_IMPLEMENTATION_VALIDATED_REMOTE_CI_PENDING`
 
 ## Validation evidence
 
-| Gate                                  | Result              | Evidence                                                       |
-| ------------------------------------- | ------------------- | -------------------------------------------------------------- |
-| Phase 1 entry regression              | `VERIFIED`          | `CI=true pnpm check` on base: 25 tests and build passed        |
-| API unit/config tests                 | `VERIFIED`          | 22 tests; JWT/JWKS matrix and concurrency included             |
-| Web integration tests                 | `VERIFIED`          | 8 tests passed locally, including bearer/logout/storage states |
-| Type checks                           | `VERIFIED`          | platform API and web type checks passed                        |
-| Full local repository check           | `VERIFIED`          | format, lint, typecheck, 39 tests, and builds passed           |
-| Database static validation            | `VERIFIED`          | migration, FORCE RLS, isolation, spoofing, permission, audit   |
-| Signed JWT + PostgreSQL/RLS E2E       | `VERIFIED`          | 18/18 tests passed against disposable PostgreSQL               |
-| CycloneDX SBOM                        | `VERIFIED`          | generated from the final lockfile                              |
-| Container build/scans                 | `BLOCKED_LOCAL_ENV` | Docker build stalled; Trivy unavailable                        |
-| Local SCA audit                       | `BLOCKED_POLICY`    | registry metadata submission denied; assigned to remote CI     |
-| Remote Phase 1 and security workflows | `PENDING`           | Must validate final published SHA                              |
+| Gate                             | Result              | Evidence                                                       |
+| -------------------------------- | ------------------- | -------------------------------------------------------------- |
+| Phase 1 entry regression         | `VERIFIED`          | `CI=true pnpm check` on base: 25 tests and build passed        |
+| API unit/config tests            | `VERIFIED`          | 22 tests; JWT/JWKS matrix and concurrency included             |
+| Web integration tests            | `VERIFIED`          | 8 tests passed locally, including bearer/logout/storage states |
+| Type checks                      | `VERIFIED`          | platform API and web type checks passed                        |
+| Full local repository check      | `VERIFIED`          | format, lint, typecheck, 39 tests, and builds passed           |
+| Database static validation       | `VERIFIED`          | migration, FORCE RLS, isolation, spoofing, permission, audit   |
+| Signed JWT + PostgreSQL/RLS E2E  | `VERIFIED`          | 18/18 tests passed against disposable PostgreSQL               |
+| CycloneDX SBOM                   | `VERIFIED`          | generated from the final lockfile                              |
+| Container build/scans            | `BLOCKED_LOCAL_ENV` | Docker build stalled; Trivy unavailable                        |
+| Local SCA audit                  | `BLOCKED_POLICY`    | registry metadata submission denied; assigned to remote CI     |
+| Remote Phase 1 workflow          | `VERIFIED`          | Run `31595802447`, success on implementation HEAD `91b53c5`    |
+| Remote Phase 0/security workflow | `VERIFIED`          | Run `31595802497`, success on implementation HEAD `91b53c5`    |
+| Repository validation            | `PENDING_MANUAL`    | sandbox `gh` auth invalid; dispatch final documentation SHA    |
 
 ## Test matrix
 
