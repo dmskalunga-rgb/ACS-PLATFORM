@@ -3,6 +3,7 @@ name: Phase 1 platform multi-tenancy validation
 on:
   pull_request:
   push:
+  workflow_dispatch:
 
 permissions:
   contents: read

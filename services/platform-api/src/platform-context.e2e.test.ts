@@ -32,7 +32,11 @@ const configuration: PlatformConfiguration = {
 const tenantA = '00000000-0000-4000-8000-000000000011';
 const tenantB = '00000000-0000-4000-8000-000000000022';
 let app: Awaited<ReturnType<typeof buildApp>>;
+let oidcApp: Awaited<ReturnType<typeof buildApp>>;
 let admin: pg.Client;
+let jwksServer: Server;
+let oidcToken: string;
+let oidcSigningKey: Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
 
 beforeAll(async () => {
   admin = new Client({
@@ -42,10 +46,64 @@ beforeAll(async () => {
   });
   await admin.connect();
   app = await buildApp(configuration, { logger: false });
+  const keys = await generateKeyPair('RS256');
+  oidcSigningKey = keys.privateKey;
+  const publicJwk = { ...(await exportJWK(keys.publicKey)), alg: 'RS256', kid: 'e2e', use: 'sig' };
+  jwksServer = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ keys: [publicJwk] }));
+  });
+  await new Promise<void>((resolve) => jwksServer.listen(0, '127.0.0.1', resolve));
+  const address = jwksServer.address();
+  if (address === null || typeof address === 'string') throw new Error('JWKS server unavailable');
+  oidcApp = await buildApp(
+    {
+      ...configuration,
+      identityMode: 'oidc',
+      oidc: {
+        allowedAlgorithms: ['RS256'],
+        audience: 'acs-platform-api',
+        clockToleranceSeconds: 0,
+        issuer: 'https://issuer.acs.test',
+        jwksCacheMs: 60_000,
+        jwksCooldownMs: 1_000,
+        jwksTimeoutMs: 1_000,
+        jwksUri: `http://127.0.0.1:${address.port}/jwks`,
+      },
+    },
+    { logger: false },
+  );
+  oidcToken = await new SignJWT({ amr: ['pwd', 'otp'] })
+    .setProtectedHeader({ alg: 'RS256', kid: 'e2e' })
+    .setIssuer('https://issuer.acs.test')
+    .setAudience('acs-platform-api')
+    .setSubject('alice')
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .sign(keys.privateKey);
 });
+
+async function signedOidcToken(subject: string, claims: Record<string, unknown> = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({
+    amr: ['pwd', 'otp'],
+    aud: 'acs-platform-api',
+    exp: now + 300,
+    iat: now,
+    iss: 'https://issuer.acs.test',
+    sub: subject,
+    ...claims,
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: 'e2e' })
+    .sign(oidcSigningKey);
+}
 
 afterAll(async () => {
   await app.close();
+  await oidcApp.close();
+  await new Promise<void>((resolve, reject) =>
+    jwksServer.close((error) => (error === undefined ? resolve() : reject(error))),
+  );
   await admin.end();
 });
 
@@ -61,6 +119,71 @@ async function context(subject: string | undefined, tenant: string | undefined) 
 }
 
 describe('Phase 1 API to PostgreSQL tenant isolation', () => {
+  it('resolves a real signed OIDC JWT through PostgreSQL membership and RLS', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/platform/context',
+      headers: { authorization: `Bearer ${oidcToken}`, 'x-acs-tenant-id': tenantA },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: { tenant: { id: tenantA }, permissions: ['platform.context.read'] },
+    });
+  });
+
+  it.each([
+    ['User A / inactive Tenant B', 'alice', tenantB],
+    ['User B / Tenant A', 'bob', tenantA],
+    ['permission absent', 'charlie', tenantB],
+    ['unknown identity', 'unknown', tenantA],
+    ['manipulated tenant', 'alice', '77777777-7777-4777-8777-777777777777'],
+  ])('denies a valid signed OIDC token for %s', async (_label, subject, tenant) => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/platform/context',
+      headers: {
+        authorization: `Bearer ${await signedOidcToken(subject)}`,
+        'x-acs-tenant-id': tenant,
+      },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      error: { message: 'The requested tenant context is not available.' },
+    });
+  });
+
+  it('durably audits OIDC signature, expiry, issuer, and audience failures without raw tokens', async () => {
+    const wrongKey = await generateKeyPair('RS256');
+    const invalidSignature = await new SignJWT({})
+      .setProtectedHeader({ alg: 'RS256', kid: 'e2e' })
+      .setIssuer('https://issuer.acs.test')
+      .setAudience('acs-platform-api')
+      .setSubject('alice')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(wrongKey.privateKey);
+    const tokens = [
+      invalidSignature,
+      await signedOidcToken('alice', { exp: 1 }),
+      await signedOidcToken('alice', { iss: 'https://wrong-issuer.example' }),
+      await signedOidcToken('alice', { aud: 'wrong-audience' }),
+    ];
+    for (const token of tokens) {
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/platform/context',
+        headers: { authorization: `Bearer ${token}`, 'x-acs-tenant-id': tenantA },
+      });
+      expect(response.statusCode).toBe(401);
+    }
+    const result = await admin.query<Record<string, unknown>>(
+      `SELECT * FROM platform.security_audit_logs
+       WHERE reason_code IN ('JWT_SIGNATURE_INVALID', 'JWT_EXPIRED', 'JWT_CLAIM_INVALID')`,
+    );
+    expect(result.rowCount).toBeGreaterThanOrEqual(4);
+    const durableEvidence = JSON.stringify(result.rows);
+    for (const token of tokens) expect(durableEvidence).not.toContain(token);
+  });
   it('allows Tenant A subject to read Tenant A with durable allowed audit', async () => {
     const response = await context('oidc|alice', tenantA);
     expect(response.statusCode).toBe(200);
@@ -216,3 +339,5 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
     }
   }, 15_000);
 });
+import { createServer, type Server } from 'node:http';
+import { exportJWK, generateKeyPair, SignJWT } from 'jose';
