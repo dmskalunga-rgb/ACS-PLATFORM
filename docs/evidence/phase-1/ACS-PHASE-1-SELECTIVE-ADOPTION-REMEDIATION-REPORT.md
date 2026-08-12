@@ -1,6 +1,6 @@
 # ACS Phase 1 Selective Adoption Remediation Report
 
-Status: `PHASE_1_PARTIAL`
+Status: `PHASE_1_SELECTIVE_ADOPTION_VERIFIED_ON_E3F8D09`
 
 ## Authorized lineage
 
@@ -30,14 +30,21 @@ durable redacted denial audit, shared API contracts, and production exclusion of
 identity configuration. Runtime validation also corrected a PL/pgSQL output-column ambiguity and
 removed a false E2E lock wait while retaining replay and cross-connection assertions.
 
+## Original commit adoption decisions
+
+| Original commit                            | Scope                                       | Decision                                  |
+| ------------------------------------------ | ------------------------------------------- | ----------------------------------------- |
+| `043619e3712f15f1dd0e2b38085c63fcb5a48035` | Phase 1 requirements and design             | `ADOPTED_WITH_DOCUMENTARY_RECONCILIATION` |
+| `ac13953715134c1e37f862a1af9b5205f58083a7` | PostgreSQL model, migration and RLS         | `ADOPTED_WITH_SECURITY_REMEDIATION`       |
+| `683bccbaf09ea10a89399691449475e9916dfc79` | Authenticated tenant-context vertical slice | `ADOPTED_WITH_RUNTIME_AND_CI_REMEDIATION` |
+
 ## Open items
 
-- Phase 1 run `31583867299` and Phase 0 regression run `31583867292` passed on HEAD
-  `63baae67d0d2d707ee5824f6e8817d4e86c5faf1`, including quality, PostgreSQL/RLS/E2E,
+- Phase 1 run `31584126240` and Phase 0 regression run `31584126302` passed on HEAD
+  `e3f8d0910c6c52c77e8ea2945eb9755b1a797f47`, including quality, PostgreSQL/RLS/E2E,
   CodeQL, secrets, SCA/SBOM, container and IaC checks.
-- `Repository validation` was not executed on the feature HEAD: its push trigger is limited to
-  `main`/`develop`, no PR is authorized, and the installed GitHub CLI reports its active token as
-  invalid, blocking the added manual dispatch. It is not reported as successful.
+- Repository validation run `31586095633`, job `94080163232`, completed successfully through
+  `workflow_dispatch` on the same branch and SHA.
 - ADR-0011 and ADR-0012 remain proposed until the designated architecture authority acts.
 - Production OIDC/JWT verification remains outside this selectively adopted development slice.
 - ECOM, EDIM and EDOLM remain working catalogs pending owners and governance approval.
@@ -49,6 +56,7 @@ This report does not authorize Phase 2, a PR, a merge, or production deployment.
 
 ## Final decision
 
-`PHASE_1_PARTIAL`: the selectively adopted technical scope and its regression/security gates are
-verified, but the explicitly required Repository validation run remains blocked by GitHub CLI
-authentication. No technical CI failure remains open on the verified implementation HEAD.
+`PHASE_1_SELECTIVE_ADOPTION_VERIFIED_ON_E3F8D09`: all mandatory selective-adoption technical,
+regression/security, and repository-safety gates completed successfully on the recorded
+implementation/evidence HEAD. Governance gaps remain open and this decision does not authorize a
+PR, merge, production deployment, or Phase 2.

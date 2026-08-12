@@ -1,18 +1,18 @@
 # ACS Phase 1 Traceability Matrix
 
-Status: `LOCAL_VERIFICATION_COMPLETE_REMOTE_CI_PENDING`
+Status: `SELECTIVE_ADOPTION_VERIFIED_ON_E3F8D09`
 
 No row creates a normative `ACS-REQ` identifier.
 
-| Baseline         | Requirement                                   | Architecture/ADR   | Data                            | API/implementation                | Test/security validation         | Evidence                 | Status           |
-| ---------------- | --------------------------------------------- | ------------------ | ------------------------------- | --------------------------------- | -------------------------------- | ------------------------ | ---------------- |
-| VOL-I-1.4/1.6    | Complete multi-tenant security path           | ADR-0007, ADR-0011 | tenants/users/memberships/audit | current context slice             | unit, API, DB, E2E, cross-tenant | `docs/evidence/phase-1/` | `VERIFIED_LOCAL` |
-| VOL-II-2.3/2.7   | Canonical tenant and transverse boundaries    | ADR-0011           | tenant UUID and membership      | service ports and adapters        | identity/authorization negatives | Phase 1 evidence         | `VERIFIED_LOCAL` |
-| VOL-VI-6.1-6.5   | Migration, constraints, RLS, least privilege  | ADR-0004, ADR-0011 | `platform` schema               | PostgreSQL repository             | migration/RLS/role tests         | DB validation record     | `VERIFIED_LOCAL` |
-| VOL-VII-7.3/7.4  | Validated `/api/v1` vertical slice            | ADR-0003, ADR-0005 | authorized context read         | `GET /api/v1/platform/context`    | contract, authn/z, error tests   | OpenAPI and CI           | `VERIFIED_LOCAL` |
-| VOL-VII-7.7      | Governed events only for state changes        | ADR-0006, ADR-0011 | no mutation                     | no event in read slice            | no-event assertion               | Explicit N/A evidence    | `DESIGNED`       |
-| VOL-VII-7.10     | Correlation, audit, safe tenant observability | ADR-0009, ADR-0011 | audit_logs                      | structured logs and audit adapter | redaction/correlation tests      | Observability evidence   | `VERIFIED_LOCAL` |
-| VOL-VIII-8.3/8.4 | DoD and applicable quality gates              | ADR-0010           | migration/RLS artifacts         | full slice                        | QG-01–QG-08 as applicable        | CI/SBOM/scans            | `IN_PROGRESS`    |
+| Baseline         | Requirement                                   | Architecture/ADR   | Data                            | API/implementation                | Test/security validation         | Evidence                                         | Status     |
+| ---------------- | --------------------------------------------- | ------------------ | ------------------------------- | --------------------------------- | -------------------------------- | ------------------------------------------------ | ---------- |
+| VOL-I-1.4/1.6    | Complete multi-tenant security path           | ADR-0007, ADR-0011 | tenants/users/memberships/audit | current context slice             | unit, API, DB, E2E, cross-tenant | `docs/evidence/phase-1/`                         | `VERIFIED` |
+| VOL-II-2.3/2.7   | Canonical tenant and transverse boundaries    | ADR-0011           | tenant UUID and membership      | service ports and adapters        | identity/authorization negatives | Phase 1 evidence                                 | `VERIFIED` |
+| VOL-VI-6.1-6.5   | Migration, constraints, RLS, least privilege  | ADR-0004, ADR-0011 | `platform` schema               | PostgreSQL repository             | migration/RLS/role tests         | DB validation record                             | `VERIFIED` |
+| VOL-VII-7.3/7.4  | Validated `/api/v1` vertical slice            | ADR-0003, ADR-0005 | authorized context read         | `GET /api/v1/platform/context`    | contract, authn/z, error tests   | OpenAPI and CI                                   | `VERIFIED` |
+| VOL-VII-7.7      | Governed events only for state changes        | ADR-0006, ADR-0011 | no mutation                     | no event in read slice            | no-event assertion               | Explicit N/A evidence                            | `DESIGNED` |
+| VOL-VII-7.10     | Correlation, audit, safe tenant observability | ADR-0009, ADR-0011 | audit_logs                      | structured logs and audit adapter | redaction/correlation tests      | Observability evidence                           | `VERIFIED` |
+| VOL-VIII-8.3/8.4 | DoD and applicable quality gates              | ADR-0010           | migration/RLS artifacts         | full slice                        | QG-01–QG-08 as applicable        | Runs `31584126240`, `31584126302`, `31586095633` | `VERIFIED` |
 
 QG-18 through QG-22 remain `UNDEFINED_IN_BASELINE` and are not used as invented Phase 1
 acceptance criteria.

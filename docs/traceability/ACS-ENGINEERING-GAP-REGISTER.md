@@ -76,7 +76,7 @@ These closure entries are implementation findings, not new normative requirement
 | API runtime image vulnerabilities | 1 CRITICAL and 6 HIGH findings in unnecessary runtime tooling | Tooling removed; local image scan 0 HIGH/CRITICAL; job `93181671612` | `RESOLVED` |
 | Web non-root runtime | Nginx could not write required temporary paths | Minimal ownership/tmpfs correction; health `healthy`; HTTP and API proxy 200 | `RESOLVED` |
 | Phase 0 mandatory CI | Container/IaC job failed in earlier runs | Run `31288548847`: all six jobs succeeded | `RESOLVED` |
-| `.env.example` repository validation | Safe example file was rejected by the filename rule | Exact example exemption verified locally; remote PR workflow still required | `PENDING_REMOTE_VALIDATION` |
+| `.env.example` repository validation | Safe example file was rejected by the filename rule | Exact example exemption verified by Repository validation run `31586095633`, job `94080163232` | `RESOLVED` |
 
 These conditions remain explicitly open:
 
