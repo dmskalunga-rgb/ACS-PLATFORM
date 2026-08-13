@@ -1,0 +1,13 @@
+BEGIN;
+DROP POLICY IF EXISTS memberships_admin_read ON platform.memberships;
+DROP POLICY IF EXISTS memberships_admin_scope ON platform.memberships;
+DROP POLICY IF EXISTS audit_logs_admin_insert ON platform.audit_logs;
+DROP TABLE IF EXISTS platform.domain_events;
+DROP FUNCTION IF EXISTS platform.reject_event_mutation();
+DROP TABLE IF EXISTS platform.administrative_operations;
+DROP TABLE IF EXISTS platform.membership_roles;
+DROP TABLE IF EXISTS platform.role_permissions;
+DROP TABLE IF EXISTS platform.roles;
+ALTER TABLE platform.memberships DROP COLUMN IF EXISTS version;
+DELETE FROM platform.permissions WHERE permission_key IN ('platform.memberships.read','platform.memberships.manage','platform.roles.read','platform.roles.manage');
+COMMIT;

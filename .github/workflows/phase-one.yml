@@ -82,6 +82,7 @@ jobs:
       DATABASE_URL: postgresql://acs:acs_ci_ephemeral@localhost:5432/acs_foundation
       ACS_CONTEXT_RESOLVER_DATABASE_URL: postgresql://acs_phase1_issuer_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_TENANT_DATABASE_URL: postgresql://acs_phase1_tenant_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_TENANT_ADMIN_DATABASE_URL: postgresql://acs_phase1_admin_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_SECURITY_AUDIT_DATABASE_URL: postgresql://acs_phase1_auditor_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
