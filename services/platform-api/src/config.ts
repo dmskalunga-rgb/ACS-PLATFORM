@@ -19,6 +19,7 @@ const configurationSchema = z.object({
   ACS_CONTEXT_RESOLVER_DATABASE_URL: z.url().optional(),
   ACS_SECURITY_AUDIT_DATABASE_URL: z.url().optional(),
   ACS_TENANT_DATABASE_URL: z.url().optional(),
+  ACS_TENANT_ADMIN_DATABASE_URL: z.url().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -34,6 +35,7 @@ export interface PlatformConfiguration {
   readonly resolverDatabaseUrl?: string;
   readonly securityAuditDatabaseUrl?: string;
   readonly tenantDatabaseUrl?: string;
+  readonly tenantAdminDatabaseUrl?: string;
   readonly webOrigin: string;
 }
 
@@ -117,6 +119,9 @@ export function loadConfiguration(
     ...(parsed.ACS_TENANT_DATABASE_URL === undefined
       ? {}
       : { tenantDatabaseUrl: parsed.ACS_TENANT_DATABASE_URL }),
+    ...(parsed.ACS_TENANT_ADMIN_DATABASE_URL === undefined
+      ? {}
+      : { tenantAdminDatabaseUrl: parsed.ACS_TENANT_ADMIN_DATABASE_URL }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

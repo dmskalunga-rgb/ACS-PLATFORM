@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { tenantAdministrationSchema } from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
 import type { PlatformConfiguration } from './config.js';
@@ -11,6 +12,7 @@ const requiredEnvironment = {
   auditor: process.env.ACS_SECURITY_AUDIT_DATABASE_URL,
   issuer: process.env.ACS_CONTEXT_RESOLVER_DATABASE_URL,
   tenant: process.env.ACS_TENANT_DATABASE_URL,
+  tenantAdmin: process.env.ACS_TENANT_ADMIN_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -26,6 +28,7 @@ const configuration: PlatformConfiguration = {
   resolverDatabaseUrl: requiredEnvironment.issuer as string,
   securityAuditDatabaseUrl: requiredEnvironment.auditor as string,
   tenantDatabaseUrl: requiredEnvironment.tenant as string,
+  tenantAdminDatabaseUrl: requiredEnvironment.tenantAdmin as string,
   webOrigin: 'http://localhost:5173',
 };
 
@@ -119,6 +122,79 @@ async function context(subject: string | undefined, tenant: string | undefined) 
 }
 
 describe('Phase 1 API to PostgreSQL tenant isolation', () => {
+  it('lists tenant administration through role authorization and denies cross-tenant access', async () => {
+    const allowed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${tenantA}/administration`,
+      headers: { authorization: 'Bearer dev:oidc|alice' },
+    });
+    expect(allowed.statusCode).toBe(200);
+    const administration = tenantAdministrationSchema.parse(allowed.json());
+    expect(administration.data.roles.some((role) => role.role_key === 'tenant-administrator')).toBe(
+      true,
+    );
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${tenantB}/administration`,
+      headers: { authorization: 'Bearer dev:oidc|alice' },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+
+  it('enforces self-administration, optimistic concurrency, idempotency, audit, and events', async () => {
+    const self = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/30000000-0000-4000-8000-000000000011/status`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000011',
+      },
+      payload: { status: 'INACTIVE', expected_version: 1 },
+    });
+    expect(self.statusCode).toBe(403);
+    const target = '30000000-0000-4000-8000-000000000055';
+    const first = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/${target}/roles/70000000-0000-4000-8000-000000000022`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000022',
+      },
+      payload: { expected_version: 1 },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      data: { changed: true, version: 2 },
+      meta: { idempotent_replay: false },
+    });
+    const replay = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/${target}/roles/70000000-0000-4000-8000-000000000022`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000022',
+      },
+      payload: { expected_version: 1 },
+    });
+    expect(replay.json()).toMatchObject({
+      data: { changed: true, version: 2 },
+      meta: { idempotent_replay: true },
+    });
+    const stale = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/${target}/roles/70000000-0000-4000-8000-000000000022`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000033',
+      },
+      payload: { expected_version: 1 },
+    });
+    expect(stale.statusCode).toBe(409);
+    const evidence = await admin.query<{ audits: number; events: number }>(
+      `SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE action='platform.roles.manage') audits,(SELECT count(*)::int FROM platform.domain_events WHERE event_type='platform.membership.role_assigned') events`,
+    );
+    expect(evidence.rows[0]).toMatchObject({ audits: 1, events: 1 });
+  });
   it('resolves a real signed OIDC JWT through PostgreSQL membership and RLS', async () => {
     const response = await oidcApp.inject({
       method: 'GET',

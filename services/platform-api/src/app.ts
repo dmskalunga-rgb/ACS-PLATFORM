@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { errorEnvelopeSchema, platformContextSchema } from '@acs/contracts';
+import {
+  administrationMutationResultSchema,
+  errorEnvelopeSchema,
+  membershipStatusMutationSchema,
+  platformContextSchema,
+  roleMutationSchema,
+  tenantAdministrationSchema,
+} from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import {
   createMetricsRegistry,
@@ -23,11 +30,17 @@ import {
   PlatformContextService,
   RepositoryAuthorizationPort,
   type TenantContextRepository,
+  type IdentityAdapter,
 } from './platform-context.js';
 import {
   PostgresSecurityAuditRepository,
   PostgresTenantContextRepository,
 } from './postgres-platform-context.js';
+import { PostgresTenantAdminRepository } from './postgres-tenant-administration.js';
+import {
+  TenantAdministrationFailure,
+  TenantAdministrationService,
+} from './tenant-administration.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -42,6 +55,7 @@ export async function buildApp(
   options: {
     readonly logger?: boolean;
     readonly platformContextService?: PlatformContextService;
+    readonly tenantAdministrationService?: TenantAdministrationService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -57,6 +71,8 @@ export async function buildApp(
   let postgresRepository: (TenantContextRepository & { close(): Promise<void> }) | undefined;
   let securityAuditRepository: PostgresSecurityAuditRepository | undefined;
   let platformContextService = options.platformContextService;
+  let tenantAdministrationService = options.tenantAdministrationService;
+  let tenantAdminRepository: PostgresTenantAdminRepository | undefined;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -69,7 +85,7 @@ export async function buildApp(
       configuration.resolverDatabaseUrl,
       configuration.tenantDatabaseUrl,
     );
-    const identity =
+    const identity: IdentityAdapter =
       configuration.identityMode === 'development-header'
         ? new DevelopmentHeaderIdentityAdapter()
         : configuration.identityMode === 'oidc' && configuration.oidc !== undefined
@@ -91,10 +107,26 @@ export async function buildApp(
       postgresRepository,
       securityAuditRepository,
     );
+    if (configuration.tenantAdminDatabaseUrl !== undefined) {
+      tenantAdminRepository = new PostgresTenantAdminRepository(
+        configuration.tenantAdminDatabaseUrl,
+      );
+      tenantAdministrationService = new TenantAdministrationService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        tenantAdminRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
-      await Promise.all([postgresRepository?.close(), securityAuditRepository?.close()]);
+      await Promise.all([
+        postgresRepository?.close(),
+        securityAuditRepository?.close(),
+        tenantAdminRepository?.close(),
+      ]);
     });
   }
 
@@ -348,6 +380,213 @@ export async function buildApp(
       }
     },
   );
+
+  const adminRouteSchema = {
+    security: [
+      configuration.identityMode === 'oidc' ? { oidcBearer: [] } : { developmentBearer: [] },
+    ],
+    params: {
+      type: 'object',
+      required: ['tenantId'],
+      properties: {
+        tenantId: { type: 'string', format: 'uuid' },
+        membershipId: { type: 'string', format: 'uuid' },
+        roleId: { type: 'string', format: 'uuid' },
+      },
+    },
+    headers: {
+      type: 'object',
+      properties: {
+        authorization: { type: 'string' },
+        'idempotency-key': { type: 'string', format: 'uuid' },
+      },
+    },
+  } as const;
+  const metadata = (request: { id: string; correlationId: string }) => ({
+    correlationId: request.correlationId,
+    requestId: request.id,
+  });
+  const adminError = (
+    error: TenantAdministrationFailure,
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'STALE_VERSION' || error.code === 'IDEMPOTENCY_CONFLICT'
+          ? 409
+          : error.code === 'INVALID_TARGET'
+            ? 404
+            : 403;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  app.get(
+    '/api/v1/platform/tenants/:tenantId/administration',
+    { schema: adminRouteSchema },
+    async (request, reply) => {
+      if (!tenantAdministrationService)
+        return reply.status(503).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'TENANT_ADMIN_NOT_CONFIGURED',
+              message: 'Tenant administration dependencies are not configured.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      const { tenantId } = request.params as { tenantId: string };
+      try {
+        return tenantAdministrationSchema.parse(
+          await tenantAdministrationService.list(
+            request.headers.authorization,
+            tenantId,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof TenantAdministrationFailure) return adminError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.put(
+    '/api/v1/platform/tenants/:tenantId/memberships/:membershipId/status',
+    { schema: adminRouteSchema },
+    async (request, reply) => {
+      if (!tenantAdministrationService)
+        return reply.status(503).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'TENANT_ADMIN_NOT_CONFIGURED',
+              message: 'Tenant administration dependencies are not configured.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      const { tenantId, membershipId } = request.params as {
+        tenantId: string;
+        membershipId: string;
+      };
+      const key = request.headers['idempotency-key'];
+      if (typeof key !== 'string' || !uuidSchema.safeParse(key).success)
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_IDEMPOTENCY_KEY',
+              message: 'A UUID idempotency key is required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      const body = membershipStatusMutationSchema.safeParse(request.body);
+      if (!body.success)
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'The membership mutation is invalid.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return administrationMutationResultSchema.parse(
+          await tenantAdministrationService.status(
+            request.headers.authorization,
+            tenantId,
+            membershipId,
+            body.data.status,
+            body.data.expected_version,
+            key,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof TenantAdministrationFailure) return adminError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  for (const method of ['PUT', 'DELETE'] as const)
+    app.route({
+      method,
+      url: '/api/v1/platform/tenants/:tenantId/memberships/:membershipId/roles/:roleId',
+      schema: adminRouteSchema,
+      handler: async (request, reply) => {
+        if (!tenantAdministrationService)
+          return reply.status(503).send(
+            errorEnvelopeSchema.parse({
+              error: {
+                code: 'TENANT_ADMIN_NOT_CONFIGURED',
+                message: 'Tenant administration dependencies are not configured.',
+                request_id: request.id,
+                correlation_id: request.correlationId,
+              },
+            }),
+          );
+        const { tenantId, membershipId, roleId } = request.params as {
+          tenantId: string;
+          membershipId: string;
+          roleId: string;
+        };
+        const key = request.headers['idempotency-key'];
+        if (typeof key !== 'string' || !uuidSchema.safeParse(key).success)
+          return reply.status(400).send(
+            errorEnvelopeSchema.parse({
+              error: {
+                code: 'INVALID_IDEMPOTENCY_KEY',
+                message: 'A UUID idempotency key is required.',
+                request_id: request.id,
+                correlation_id: request.correlationId,
+              },
+            }),
+          );
+        const body = roleMutationSchema.safeParse(request.body);
+        if (!body.success)
+          return reply.status(400).send(
+            errorEnvelopeSchema.parse({
+              error: {
+                code: 'INVALID_REQUEST',
+                message: 'The role mutation is invalid.',
+                request_id: request.id,
+                correlation_id: request.correlationId,
+              },
+            }),
+          );
+        try {
+          return administrationMutationResultSchema.parse(
+            await tenantAdministrationService.role(
+              request.headers.authorization,
+              tenantId,
+              membershipId,
+              roleId,
+              method === 'PUT',
+              body.data.expected_version,
+              key,
+              metadata(request),
+            ),
+          );
+        } catch (error) {
+          if (error instanceof TenantAdministrationFailure)
+            return adminError(error, request, reply);
+          throw error;
+        }
+      },
+    });
 
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({
