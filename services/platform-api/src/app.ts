@@ -13,7 +13,11 @@ import swaggerUi from '@fastify/swagger-ui';
 import Fastify from 'fastify';
 import { z } from 'zod';
 import type { PlatformConfiguration } from './config.js';
-import { DevelopmentHeaderIdentityAdapter, NotConfiguredIdentityAdapter } from './identity.js';
+import {
+  DevelopmentHeaderIdentityAdapter,
+  NotConfiguredIdentityAdapter,
+  OidcJwtIdentityAdapter,
+} from './identity.js';
 import {
   PlatformContextFailure,
   PlatformContextService,
@@ -48,10 +52,13 @@ export async function buildApp(
     genReqId: () => randomUUID(),
     ...(options.logger === false ? { logger: false } : { loggerInstance: logger }),
   });
-  const { registry, requests } = createMetricsRegistry('acs-platform-api');
+  const { authenticationDuration, authentications, registry, requests } =
+    createMetricsRegistry('acs-platform-api');
   let postgresRepository: (TenantContextRepository & { close(): Promise<void> }) | undefined;
   let securityAuditRepository: PostgresSecurityAuditRepository | undefined;
   let platformContextService = options.platformContextService;
+  let identityStatus: () => string = () =>
+    configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
     platformContextService === undefined &&
     configuration.resolverDatabaseUrl !== undefined &&
@@ -65,10 +72,19 @@ export async function buildApp(
     const identity =
       configuration.identityMode === 'development-header'
         ? new DevelopmentHeaderIdentityAdapter()
-        : new NotConfiguredIdentityAdapter();
+        : configuration.identityMode === 'oidc' && configuration.oidc !== undefined
+          ? new OidcJwtIdentityAdapter(configuration.oidc, (observation) => {
+              authentications.inc({ outcome: observation.outcome, reason: observation.reason });
+              authenticationDuration.observe(
+                { outcome: observation.outcome },
+                observation.durationSeconds,
+              );
+            })
+          : new NotConfiguredIdentityAdapter();
     securityAuditRepository = new PostgresSecurityAuditRepository(
       configuration.securityAuditDatabaseUrl,
     );
+    identityStatus = () => identity.status ?? 'unknown';
     platformContextService = new PlatformContextService(
       identity,
       new RepositoryAuthorizationPort(postgresRepository),
@@ -93,6 +109,12 @@ export async function buildApp(
       },
       components: {
         securitySchemes: {
+          oidcBearer: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+            description: 'Production OIDC access token, validated against configured JWKS.',
+          },
           developmentBearer: {
             type: 'http',
             scheme: 'bearer',
@@ -154,6 +176,11 @@ export async function buildApp(
     service: 'acs-platform-api',
     status: 'ready',
     version: '0.0.0-foundation',
+  }));
+  app.get('/health/identity', () => ({
+    configured: configuration.identityMode !== 'not-configured',
+    mode: configuration.identityMode,
+    status: identityStatus(),
   }));
   app.get('/metrics', async (_request, reply) => {
     void reply.header('content-type', registry.contentType);
@@ -230,7 +257,9 @@ export async function buildApp(
     '/api/v1/platform/context',
     {
       schema: {
-        security: [{ developmentBearer: [] }],
+        security: [
+          configuration.identityMode === 'oidc' ? { oidcBearer: [] } : { developmentBearer: [] },
+        ],
         headers: {
           type: 'object',
           properties: {

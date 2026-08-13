@@ -30,5 +30,8 @@ section references are used because individual requirement identifiers are absen
   identity remains the UUID.
 - The first endpoint is read-only. No domain event or transactional outbox is justified.
 - A development/test identity adapter may accept a subject header only outside staging and
-  production. Production identity remains `not_configured` until an approved OIDC adapter is
-  configured; no successful production authentication is fabricated.
+  production. Production uses the explicit provider-neutral `oidc` mode and fails startup when
+  issuer, audience, HTTPS JWKS URI, or algorithm policy is missing or invalid.
+- The accepted browser boundary receives an access token from an external Authorization Code +
+  PKCE/BFF broker in memory. This slice does not implement an IdP login client or persist bearer
+  tokens; provider session revocation remains deployment-specific.

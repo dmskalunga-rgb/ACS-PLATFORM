@@ -6,7 +6,17 @@ export const PLATFORM_CONTEXT_READ = 'platform.context.read' as const;
 export const PLATFORM_CONTEXT_RESOURCE = 'platform:tenant-context' as const;
 
 export interface TrustedIdentity {
+  readonly authentication?: {
+    readonly acr?: string;
+    readonly amr: readonly string[];
+  };
   readonly subject: string;
+}
+
+export class IdentityAuthenticationError extends Error {
+  constructor(readonly reasonCode: string) {
+    super('Identity authentication failed.');
+  }
 }
 
 export interface IdentityAdapter {
@@ -14,6 +24,7 @@ export interface IdentityAdapter {
     authorizationHeader: string | undefined,
   ) => Promise<TrustedIdentity | null>;
   readonly configured: boolean;
+  readonly status?: 'available' | 'degraded' | 'development-only' | 'not-configured' | 'unknown';
 }
 
 export interface ResolvedTenantMembership {
@@ -135,7 +146,21 @@ export class PlatformContextService {
         'The identity provider is not configured for this environment.',
       );
     }
-    const identity = await this.identity.authenticate(authorizationHeader);
+    let identity: TrustedIdentity | null;
+    try {
+      identity = await this.identity.authenticate(authorizationHeader);
+    } catch (error) {
+      const reasonCode =
+        error instanceof IdentityAuthenticationError ? error.reasonCode : 'IDENTITY_PROVIDER_ERROR';
+      await this.securityAudit.recordDenied({
+        action: PLATFORM_CONTEXT_READ,
+        correlationId: metadata.correlationId,
+        reasonCode,
+        requestId: metadata.requestId,
+        requestedTenantId,
+      });
+      throw new PlatformContextFailure('UNAUTHENTICATED', 'Authentication is required.');
+    }
     if (identity === null) {
       await this.securityAudit.recordDenied({
         action: PLATFORM_CONTEXT_READ,

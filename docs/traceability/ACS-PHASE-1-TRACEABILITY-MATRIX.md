@@ -16,3 +16,10 @@ No row creates a normative `ACS-REQ` identifier.
 
 QG-18 through QG-22 remain `UNDEFINED_IN_BASELINE` and are not used as invented Phase 1
 acceptance criteria.
+
+## Production OIDC/JWT vertical slice
+
+| Baseline         | Requirement                               | Architecture       | Implementation                                                     | Validation                                 | Evidence                          | Status                   |
+| ---------------- | ----------------------------------------- | ------------------ | ------------------------------------------------------------------ | ------------------------------------------ | --------------------------------- | ------------------------ |
+| VOL-I-1.4/1.6    | Production authentication boundary        | ADR-0007, ADR-0013 | OIDC JWT adapter; immutable issuer + subject mapping               | Crypto/JWKS matrix and signed-token DB E2E | `PRODUCTION-OIDC-JWT-EVIDENCE.md` | `IMPLEMENTED_PENDING_CI` |
+| VOL-VII-7.4/7.10 | Safe API and authentication observability | ADR-0009, ADR-0013 | Bearer OpenAPI, safe audit/metrics, in-memory web session boundary | API/UI/redaction tests                     | Production OIDC/JWT evidence      | `IMPLEMENTED_PENDING_CI` |

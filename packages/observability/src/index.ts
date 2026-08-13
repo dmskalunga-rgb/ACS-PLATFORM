@@ -4,8 +4,8 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import pino, { type Logger, type LoggerOptions } from 'pino';
-import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
+import pino, { type DestinationStream, type Logger, type LoggerOptions } from 'pino';
+import { Counter, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 export const LOG_REDACTION_PATHS = [
   'req.headers.authorization',
@@ -13,9 +13,16 @@ export const LOG_REDACTION_PATHS = [
   'password',
   'secret',
   'token',
+  'accessToken',
+  'bearerToken',
+  'jwt',
+  'jwtPayload',
+  'signingKey',
+  'clientSecret',
 ] as const;
 
 export function createStructuredLogger(configuration: {
+  readonly destination?: DestinationStream;
   readonly level: string;
   readonly serviceName: string;
 }): Logger {
@@ -24,7 +31,7 @@ export function createStructuredLogger(configuration: {
     level: configuration.level,
     redact: { paths: [...LOG_REDACTION_PATHS], censor: '[REDACTED]' },
   };
-  return pino(options);
+  return pino(options, configuration.destination);
 }
 
 export function createMetricsRegistry(serviceName: string) {
@@ -37,7 +44,20 @@ export function createMetricsRegistry(serviceName: string) {
     labelNames: ['method', 'route', 'status_code'] as const,
     registers: [registry],
   });
-  return { registry, requests };
+  const authentications = new Counter({
+    name: 'acs_authentication_attempts_total',
+    help: 'Authentication attempts classified by safe outcome and reason code.',
+    labelNames: ['outcome', 'reason'] as const,
+    registers: [registry],
+  });
+  const authenticationDuration = new Histogram({
+    name: 'acs_authentication_duration_seconds',
+    help: 'OIDC authentication validation latency in seconds.',
+    labelNames: ['outcome'] as const,
+    registers: [registry],
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  });
+  return { authenticationDuration, authentications, registry, requests };
 }
 
 export function setActiveTenantTraceContext(tenantId: string, action: string): void {

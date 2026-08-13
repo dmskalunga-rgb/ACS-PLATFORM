@@ -40,3 +40,6 @@ Known non-blocking observation: the production web build succeeds but Vite repor
 `node:crypto`, referenced by the compiled contracts package, is externalized for browser
 compatibility. No runtime failure was observed in the implemented read-only slice; the dependency
 boundary should be separated before browser code consumes a contract path that executes crypto.
+
+The production authentication vertical-slice evidence is maintained separately in
+`PRODUCTION-OIDC-JWT-EVIDENCE.md`. It does not supersede the accepted selective-adoption record.

@@ -14,5 +14,9 @@ Status: `PENDING_GOVERNANCE_APPROVAL`. This does not replace normative ANX-B.
 | Context issuer         | PostgreSQL        | Opaque one-use grant bound to backend PID and transaction            | Expire/reject replay and fail closed                        | `IMPLEMENTATION_DEFINED` |
 | Tenant context service | PostgreSQL        | Activated grant plus FORCE RLS                                       | Rollback and fail closed                                    | `IMPLEMENTATION_DEFINED` |
 | Tenant context service | Audit store       | Append-only access and redacted denial records                       | Request fails if required audit write fails                 | `IMPLEMENTATION_DEFINED` |
+| OIDC Provider          | Platform API      | OIDC bearer JWT; configured issuer/audience/JWKS; HTTPS; 2s timeout  | Cached keys, bounded refresh, fail closed, safe metrics     | `IMPLEMENTATION_DEFINED` |
+
+OIDC owner, SLA, provider product and confidential endpoint values remain
+`PENDING_GOVERNANCE_APPROVAL`. The API never follows token-supplied `jku` or issuer locations.
 
 SLA/SLO, owners, products, and functional integrations need approval per slice.

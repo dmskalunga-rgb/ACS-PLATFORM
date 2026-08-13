@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LOG_REDACTION_PATHS,
   createMetricsRegistry,
+  createStructuredLogger,
   sanitizeErrorForLog,
   startTelemetry,
 } from './index.js';
@@ -10,6 +11,28 @@ describe('FOUNDATION observability', () => {
   it('redacts authorization and secret-bearing fields', () => {
     expect(LOG_REDACTION_PATHS).toContain('req.headers.authorization');
     expect(LOG_REDACTION_PATHS).toContain('secret');
+  });
+
+  it('does not emit bearer tokens, JWT payloads, signing keys, or client secrets', () => {
+    let output = '';
+    const destination = {
+      write(chunk: string) {
+        output += chunk;
+      },
+    };
+    const logger = createStructuredLogger({ destination, level: 'info', serviceName: 'test' });
+    logger.info({
+      accessToken: 'header.payload.signature',
+      clientSecret: 'client-secret-value',
+      jwtPayload: { email: 'alice@example.test', sub: 'alice' },
+      req: { headers: { authorization: 'Bearer header.payload.signature' } },
+      signingKey: 'private-key-value',
+    });
+    expect(output).not.toContain('header.payload.signature');
+    expect(output).not.toContain('alice@example.test');
+    expect(output).not.toContain('private-key-value');
+    expect(output).not.toContain('client-secret-value');
+    expect(output).toContain('[REDACTED]');
   });
 
   it('registers foundation HTTP metrics', async () => {
