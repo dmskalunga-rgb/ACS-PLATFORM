@@ -46,3 +46,9 @@ The production authentication vertical-slice evidence is maintained separately i
 
 Tenant administration implementation and its current validation boundary are recorded in
 `TENANT-ADMINISTRATION-EVIDENCE.md`.
+
+The Tenant Administration & Authorization Lifecycle slice was integrated through PR #4 at merge
+SHA `8b2eb5b705088427479b85cecdca8ee161ce883b`. Post-merge Repository, Phase 1, and Phase 0
+validation runs `31935367613`, `31935367596`, and `31935367655` completed successfully on that
+exact SHA. This verifies only that Phase 1 slice; it does not authorize Phase 2 or promote
+ADR-0014 beyond `PROPOSED`.
