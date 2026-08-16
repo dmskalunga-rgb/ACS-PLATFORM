@@ -1,6 +1,6 @@
 # ACS Phase 1 Production OIDC/JWT Evidence
 
-Status: `LOCAL_IMPLEMENTATION_VALIDATED_REMOTE_CI_PENDING`
+Status: `VERIFIED_AND_INTEGRATED`
 
 - Branch: `feat/phase-1-production-oidc`
 - Base: `develop@2bb84b3ac65d5af0b2f8279d86a1297f947c810b`
@@ -36,7 +36,9 @@ Status: `LOCAL_IMPLEMENTATION_VALIDATED_REMOTE_CI_PENDING`
 | Local SCA audit                  | `BLOCKED_POLICY`    | registry metadata submission denied; assigned to remote CI     |
 | Remote Phase 1 workflow          | `VERIFIED`          | Run `31595802447`, success on implementation HEAD `91b53c5`    |
 | Remote Phase 0/security workflow | `VERIFIED`          | Run `31595802497`, success on implementation HEAD `91b53c5`    |
-| Repository validation            | `PENDING_MANUAL`    | sandbox `gh` auth invalid; dispatch final documentation SHA    |
+| Repository validation            | `VERIFIED`          | Run `31936812725`, success on integrated HEAD `8698fe4`        |
+| Integrated Phase 1 validation    | `VERIFIED`          | Run `31936812713`, success on integrated HEAD `8698fe4`        |
+| Integrated Phase 0 regression    | `VERIFIED`          | Run `31936812776`, success on integrated HEAD `8698fe4`        |
 
 ## Test matrix
 
@@ -51,6 +53,18 @@ permission enforcement, AuthorizationPort, opaque tenant grants, FORCE RLS, resp
 durable audit. User A/Tenant A was allowed; all cross-tenant, missing-permission, unknown-identity,
 and manipulated-tenant cases were denied. Cryptographic failures were durably classified without
 storing the tested JWTs.
+
+## Integrated-state closure
+
+The production OIDC/JWT implementation was integrated before the final Phase 1 documentation
+closure. The post-merge `push` run set `31936812725`, `31936812713`, and `31936812776` validated
+the final integrated documentation-closure HEAD
+`8698fe43ae7c4a1f2e3d2d86ae5f1e9dda60d7a2`. These runs cover Repository validation, the Phase 1
+platform multi-tenancy suite, and the Phase 0 engineering/security regression respectively.
+
+This promotion closes only the stale remote-CI status for the implemented Phase 1 slice. It does
+not approve ADR-0013, authorize production deployment, or resolve the operational and governance
+gaps below.
 
 ## Residual and governance gaps
 
