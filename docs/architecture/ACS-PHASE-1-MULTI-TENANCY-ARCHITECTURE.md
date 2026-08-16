@@ -31,16 +31,18 @@ in this slice.
 
 ## Lifecycle
 
-Phase 1 implements no lifecycle mutation endpoint. `INACTIVE` is an administrative deny state
-used by context resolution. Any future transition requires an actor, authorization rule,
-audit event, recovery behavior, API contract, and separate traceability.
+The initial context slice implemented no lifecycle mutation endpoint. The tenant-administration
+extension now governs `ACTIVE`/`INACTIVE` membership transitions with an authenticated actor,
+`AuthorizationPort`, a permission-bound trusted grant, optimistic version, idempotency record,
+durable audit, domain event, and explicit API contract.
 
 ## Identity and membership
 
 An authentication adapter returns an immutable external subject. `users` maps that subject to
 an internal UUID. `memberships` proves association with a tenant. Full enterprise IAM,
-RBAC/ABAC catalogs, invitations, MFA orchestration, and user administration are outside this
-slice.
+invitations, MFA orchestration, and unrestricted user administration remain outside this slice.
+Tenant-scoped canonical roles and permissions are implemented only for the authorized
+administration lifecycle.
 
 ## Authorization boundary
 
@@ -53,6 +55,7 @@ Frontend state is never an authorization source.
 - `acs_phase1_context_issuer`: NOLOGIN; execute-only membership, authorization, and context grant functions.
 - `acs_phase1_tenant_app`: NOLOGIN; least-privileged RLS-governed reads and append-only audit.
 - `acs_phase1_security_auditor`: NOLOGIN; execute-only durable denial audit.
+- `acs_phase1_tenant_admin`: NOLOGIN; RLS-governed lifecycle writes after permission-bound trusted context activation.
 - all tenant-owned tables enable and force RLS;
 - an opaque one-use grant is bound to backend PID and transaction; a freely set GUC is never proof;
 - missing or malformed context fails closed.
@@ -68,5 +71,19 @@ configuration returns 503. No response confirms another tenant's existence.
 
 Successful context access creates an append-only tenant audit record. Denied attempts create a
 separate durable, redacted security audit record because no authorized tenant scope exists.
-Request/correlation IDs propagate. Tenant/user identifiers are not metric labels. The slice is
-read-only, so no domain event or outbox is created.
+Request/correlation IDs propagate. Tenant/user identifiers are not metric labels. The original
+context read remains event-free. Administrative state changes atomically append an allowed audit
+record and canonical domain event; the event table is a transactional outbox, not a fictitious
+broker.
+
+## Tenant administration extension
+
+`roles`, `role_permissions`, and `membership_roles` provide membership → role → permission
+evaluation. The legacy `membership_permissions` path remains only for compatibility with the
+integrated context-read slice. Every privileged request resolves current database state, so an
+inactive membership/role or removed permission takes effect before a new grant can be issued.
+
+Membership versions and row locks prevent lost updates. Tenant-scoped idempotency keys are bound to
+the request hash: identical retries reuse the recorded result, while divergent reuse is rejected.
+Self-administration and inactive membership role mutations fail closed. ADR-0014 remains
+`PROPOSED`.

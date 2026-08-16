@@ -30,3 +30,18 @@ Residual risks: full service-process compromise, stolen-token replay until expir
 revocation, MFA enforcement policy (although `acr`/`amr` are exposed), production IdP tenancy and
 client registration, grant cleanup, named owners, retention approvals, and comprehensive RBAC/ABAC
 remain pending governance or later scope.
+
+## Tenant administration runtime delta
+
+| Threat                                  | Control and runtime result                                                               | Status           |
+| --------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------- |
+| Self-escalation / limited administrator | Actor-target equality and current `roles.manage` evaluation deny mutation                | `VERIFIED_LOCAL` |
+| IDOR/BOLA / cross-tenant UUIDs          | Composite tenant FKs, permission-bound grants, FORCE RLS, generic denial                 | `VERIFIED_LOCAL` |
+| Stale or concurrent write               | Row lock plus membership version produces one winner and one 409 loser                   | `VERIFIED_LOCAL` |
+| Retry replay                            | Tenant/idempotency key/request hash returns one logical result; divergent payload is 409 | `VERIFIED_LOCAL` |
+| Revoked role/permission                 | Current role graph is resolved before every grant; revocation denies immediately         | `VERIFIED_LOCAL` |
+| JWT authorization-claim injection       | JWT tenant/role/permission claims are ignored; PostgreSQL remains authoritative          | `VERIFIED_LOCAL` |
+| Audit/outbox tampering or split commit  | Mutation, audit and event share one transaction; event trigger rejects mutation          | `VERIFIED_LOCAL` |
+
+Complete organizational separation of duties and global MFA/step-up policy remain
+`GOVERNANCE_PENDING`; no corporate policy is inferred from `acr`/`amr`.
