@@ -49,17 +49,64 @@ INSERT INTO platform.permissions (permission_key, description) VALUES
  ('platform.roles.read', 'Read tenant roles and permissions'),
  ('platform.roles.manage', 'Assign or remove tenant roles') ON CONFLICT (permission_key) DO NOTHING;
 
-CREATE OR REPLACE FUNCTION platform.is_tenant_action_authorized(p_user_id uuid, p_tenant_id uuid, p_permission_key text)
+CREATE OR REPLACE FUNCTION platform.is_tenant_action_authorized(requested_user_id uuid, requested_tenant_id uuid, required_permission text)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, platform AS $$
  SELECT EXISTS (
-  SELECT 1 FROM platform.memberships m JOIN platform.tenants t ON t.id=m.tenant_id
-  WHERE m.user_id=p_user_id AND m.tenant_id=p_tenant_id AND m.status='ACTIVE' AND t.status='ACTIVE' AND (
-   EXISTS (SELECT 1 FROM platform.membership_permissions mp WHERE mp.membership_id=m.id AND mp.tenant_id=m.tenant_id AND mp.permission_key=p_permission_key)
+  SELECT 1 FROM platform.users u JOIN platform.memberships m ON m.user_id=u.id JOIN platform.tenants t ON t.id=m.tenant_id
+  WHERE u.id=requested_user_id AND m.tenant_id=requested_tenant_id AND u.status='ACTIVE' AND m.status='ACTIVE' AND t.status='ACTIVE' AND (
+   EXISTS (SELECT 1 FROM platform.membership_permissions mp WHERE mp.membership_id=m.id AND mp.tenant_id=m.tenant_id AND mp.permission_key=required_permission)
    OR EXISTS (SELECT 1 FROM platform.membership_roles mr JOIN platform.roles r ON r.id=mr.role_id AND r.tenant_id=mr.tenant_id
     JOIN platform.role_permissions rp ON rp.role_id=r.id AND rp.tenant_id=r.tenant_id
-    WHERE mr.membership_id=m.id AND mr.tenant_id=m.tenant_id AND r.status='ACTIVE' AND rp.permission_key=p_permission_key)
+    WHERE mr.membership_id=m.id AND mr.tenant_id=m.tenant_id AND r.status='ACTIVE' AND rp.permission_key=required_permission)
   )
  );
+$$;
+
+CREATE OR REPLACE FUNCTION platform.issue_tenant_context(
+  trusted_external_subject text,
+  requested_tenant_id uuid,
+  required_permission text
+)
+RETURNS TABLE (
+  context_token uuid,
+  user_id uuid,
+  tenant_id uuid,
+  tenant_slug text,
+  tenant_display_name text
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH authorized_context AS (
+    SELECT u.id AS resolved_user_id, t.id AS resolved_tenant_id,
+           t.slug AS resolved_tenant_slug, t.display_name AS resolved_tenant_name,
+           m.id AS resolved_membership_id
+    FROM platform.users AS u
+    JOIN platform.memberships AS m ON m.user_id = u.id
+    JOIN platform.tenants AS t ON t.id = m.tenant_id
+    WHERE u.external_subject = trusted_external_subject
+      AND u.status = 'ACTIVE'
+      AND m.status = 'ACTIVE'
+      AND t.status = 'ACTIVE'
+      AND t.id = requested_tenant_id
+      AND platform.is_tenant_action_authorized(u.id, t.id, required_permission)
+  ), issued AS (
+    INSERT INTO platform.tenant_context_grants AS issued_grant
+      (tenant_id, user_id, membership_id, permission_key)
+    SELECT resolved_tenant_id, resolved_user_id, resolved_membership_id, required_permission
+    FROM authorized_context
+    RETURNING issued_grant.token, issued_grant.user_id, issued_grant.tenant_id
+  )
+  SELECT i.token, i.user_id, i.tenant_id,
+         a.resolved_tenant_slug, a.resolved_tenant_name
+  FROM issued AS i
+  JOIN authorized_context AS a
+    ON a.resolved_user_id = i.user_id AND a.resolved_tenant_id = i.tenant_id;
+END;
 $$;
 
 CREATE OR REPLACE FUNCTION platform.reject_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -90,8 +137,10 @@ CREATE POLICY domain_events_scope ON platform.domain_events FOR SELECT USING (
 CREATE POLICY domain_events_insert_scope ON platform.domain_events FOR INSERT WITH CHECK (
  platform.has_trusted_tenant_context(tenant_id,NULL,'platform.memberships.manage') OR platform.has_trusted_tenant_context(tenant_id,NULL,'platform.roles.manage'));
 CREATE POLICY memberships_admin_scope ON platform.memberships FOR UPDATE
- USING (platform.has_trusted_tenant_context(tenant_id,NULL,'platform.memberships.manage'))
- WITH CHECK (platform.has_trusted_tenant_context(tenant_id,NULL,'platform.memberships.manage'));
+ USING (platform.has_trusted_tenant_context(tenant_id,NULL,'platform.memberships.manage') OR
+        platform.has_trusted_tenant_context(tenant_id,NULL,'platform.roles.manage'))
+ WITH CHECK (platform.has_trusted_tenant_context(tenant_id,NULL,'platform.memberships.manage') OR
+             platform.has_trusted_tenant_context(tenant_id,NULL,'platform.roles.manage'));
 CREATE POLICY memberships_admin_read ON platform.memberships FOR SELECT USING (
  platform.has_trusted_tenant_context(tenant_id,NULL,'platform.memberships.read') OR
  platform.has_trusted_tenant_context(tenant_id,NULL,'platform.memberships.manage') OR

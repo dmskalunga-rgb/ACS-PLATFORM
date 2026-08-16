@@ -88,6 +88,12 @@ export class PostgresTenantAdminRepository implements TenantAdminRepository {
       input,
       'platform.roles.manage',
       async (client, current) => {
+        if (current.status !== 'ACTIVE') {
+          throw new TenantAdministrationFailure(
+            'INVALID_TARGET',
+            'Role lifecycle requires an active membership.',
+          );
+        }
         const role = await client.query(
           "SELECT 1 FROM platform.roles WHERE id=$1 AND tenant_id=$2 AND status='ACTIVE'",
           [input.roleId, input.tenantId],
@@ -167,7 +173,7 @@ export class PostgresTenantAdminRepository implements TenantAdminRepository {
       const result = await change(client, current);
       await client.query(
         `INSERT INTO platform.audit_logs(id,tenant_id,actor_user_id,action,resource,outcome,correlation_id,request_id,metadata)
-       VALUES(gen_random_uuid(),$1,$2,$3,$4,'ALLOWED',$5,$6,jsonb_build_object('changed',$7))`,
+       VALUES(gen_random_uuid(),$1,$2,$3,$4,'ALLOWED',$5,$6,jsonb_build_object('changed',$7::boolean))`,
         [
           input.tenantId,
           input.actorUserId,
@@ -181,7 +187,7 @@ export class PostgresTenantAdminRepository implements TenantAdminRepository {
       if (result.changed)
         await client.query(
           `INSERT INTO platform.domain_events(event_type,tenant_id,correlation_id,causation_id,payload)
-       VALUES($1,$2,$3,$4,jsonb_build_object('membership_id',$5,'version',$6))`,
+       VALUES($1,$2,$3,$4,jsonb_build_object('membership_id',$5::uuid,'version',$6::bigint))`,
           [
             eventType,
             input.tenantId,

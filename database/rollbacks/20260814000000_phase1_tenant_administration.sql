@@ -9,5 +9,6 @@ DROP TABLE IF EXISTS platform.membership_roles;
 DROP TABLE IF EXISTS platform.role_permissions;
 DROP TABLE IF EXISTS platform.roles;
 ALTER TABLE platform.memberships DROP COLUMN IF EXISTS version;
+DELETE FROM platform.tenant_context_grants WHERE permission_key IN ('platform.memberships.read','platform.memberships.manage','platform.roles.read','platform.roles.manage');
 DELETE FROM platform.permissions WHERE permission_key IN ('platform.memberships.read','platform.memberships.manage','platform.roles.read','platform.roles.manage');
 COMMIT;
