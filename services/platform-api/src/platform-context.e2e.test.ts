@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { tenantAdministrationSchema } from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
 import type { PlatformConfiguration } from './config.js';
@@ -11,6 +12,7 @@ const requiredEnvironment = {
   auditor: process.env.ACS_SECURITY_AUDIT_DATABASE_URL,
   issuer: process.env.ACS_CONTEXT_RESOLVER_DATABASE_URL,
   tenant: process.env.ACS_TENANT_DATABASE_URL,
+  tenantAdmin: process.env.ACS_TENANT_ADMIN_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -26,6 +28,7 @@ const configuration: PlatformConfiguration = {
   resolverDatabaseUrl: requiredEnvironment.issuer as string,
   securityAuditDatabaseUrl: requiredEnvironment.auditor as string,
   tenantDatabaseUrl: requiredEnvironment.tenant as string,
+  tenantAdminDatabaseUrl: requiredEnvironment.tenantAdmin as string,
   webOrigin: 'http://localhost:5173',
 };
 
@@ -119,6 +122,232 @@ async function context(subject: string | undefined, tenant: string | undefined) 
 }
 
 describe('Phase 1 API to PostgreSQL tenant isolation', () => {
+  it('lists tenant administration through role authorization and denies cross-tenant access', async () => {
+    const allowed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${tenantA}/administration`,
+      headers: { authorization: 'Bearer dev:oidc|alice' },
+    });
+    expect(allowed.statusCode).toBe(200);
+    const administration = tenantAdministrationSchema.parse(allowed.json());
+    expect(administration.data.roles.some((role) => role.role_key === 'tenant-administrator')).toBe(
+      true,
+    );
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${tenantB}/administration`,
+      headers: { authorization: 'Bearer dev:oidc|alice' },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+
+  it('enforces self-administration, optimistic concurrency, idempotency, audit, and events', async () => {
+    const self = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/30000000-0000-4000-8000-000000000011/status`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000011',
+      },
+      payload: { status: 'INACTIVE', expected_version: 1 },
+    });
+    expect(self.statusCode).toBe(403);
+    const target = '30000000-0000-4000-8000-000000000055';
+    const first = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/${target}/roles/70000000-0000-4000-8000-000000000022`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000022',
+      },
+      payload: { expected_version: 1 },
+    });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(first.json()).toMatchObject({
+      data: { changed: true, version: 2 },
+      meta: { idempotent_replay: false },
+    });
+    const replay = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/${target}/roles/70000000-0000-4000-8000-000000000022`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000022',
+      },
+      payload: { expected_version: 1 },
+    });
+    expect(replay.json()).toMatchObject({
+      data: { changed: true, version: 2 },
+      meta: { idempotent_replay: true },
+    });
+    const stale = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/platform/tenants/${tenantA}/memberships/${target}/roles/70000000-0000-4000-8000-000000000022`,
+      headers: {
+        authorization: 'Bearer dev:oidc|alice',
+        'idempotency-key': '81000000-0000-4000-8000-000000000033',
+      },
+      payload: { expected_version: 1 },
+    });
+    expect(stale.statusCode).toBe(409);
+    const evidence = await admin.query<{ audits: number; events: number }>(
+      `SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE action='platform.roles.manage') audits,(SELECT count(*)::int FROM platform.domain_events WHERE event_type='platform.membership.role_assigned') events`,
+    );
+    expect(evidence.rows[0]).toMatchObject({ audits: 1, events: 1 });
+  });
+
+  it('enforces lifecycle, revocation, cross-tenant targets, and concurrent winner/loser behavior', async () => {
+    const target = '30000000-0000-4000-8000-000000000055';
+    const readerRole = '70000000-0000-4000-8000-000000000022';
+    const otherTenantRole = '70000000-0000-4000-8000-000000000033';
+    const request = (method: 'PUT' | 'DELETE', path: string, key: string, payload: object) =>
+      app.inject({
+        method,
+        url: `/api/v1/platform/tenants/${tenantA}${path}`,
+        headers: { authorization: 'Bearer dev:oidc|alice', 'idempotency-key': key },
+        payload,
+      });
+
+    const divergentReplay = await request(
+      'PUT',
+      `/memberships/${target}/roles/${readerRole}`,
+      '81000000-0000-4000-8000-000000000022',
+      { expected_version: 2 },
+    );
+    expect(divergentReplay.statusCode).toBe(409);
+
+    const foreignRole = await request(
+      'PUT',
+      `/memberships/${target}/roles/${otherTenantRole}`,
+      '82000000-0000-4000-8000-000000000011',
+      { expected_version: 2 },
+    );
+    expect(foreignRole.statusCode).toBe(404);
+    const unknownRole = await request(
+      'PUT',
+      `/memberships/${target}/roles/77777777-7777-4777-8777-777777777777`,
+      '82000000-0000-4000-8000-000000000022',
+      { expected_version: 2 },
+    );
+    expect(unknownRole.statusCode).toBe(404);
+
+    const limitedAdministrator = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/platform/tenants/${tenantB}/memberships/30000000-0000-4000-8000-000000000066/roles/${otherTenantRole}`,
+      headers: {
+        authorization: 'Bearer dev:oidc|charlie',
+        'idempotency-key': '82000000-0000-4000-8000-000000000033',
+      },
+      payload: { expected_version: 1 },
+    });
+    expect(limitedAdministrator.statusCode).toBe(403);
+
+    const concurrent = await Promise.all([
+      request('PUT', `/memberships/${target}/status`, '82000000-0000-4000-8000-000000000044', {
+        status: 'INACTIVE',
+        expected_version: 2,
+      }),
+      request('PUT', `/memberships/${target}/status`, '82000000-0000-4000-8000-000000000055', {
+        status: 'INACTIVE',
+        expected_version: 2,
+      }),
+    ]);
+    expect(concurrent.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+
+    const inactiveRoleMutation = await request(
+      'DELETE',
+      `/memberships/${target}/roles/${readerRole}`,
+      '82000000-0000-4000-8000-000000000066',
+      { expected_version: 3 },
+    );
+    expect(inactiveRoleMutation.statusCode).toBe(404);
+    const reactivated = await request(
+      'PUT',
+      `/memberships/${target}/status`,
+      '82000000-0000-4000-8000-000000000077',
+      { status: 'ACTIVE', expected_version: 3 },
+    );
+    expect(reactivated.statusCode).toBe(200);
+    expect(reactivated.json()).toMatchObject({ data: { status: 'ACTIVE', version: 4 } });
+
+    await admin.query("UPDATE platform.roles SET status='INACTIVE' WHERE id=$1", [readerRole]);
+    const inactiveRole = await request(
+      'DELETE',
+      `/memberships/${target}/roles/${readerRole}`,
+      '82000000-0000-4000-8000-000000000088',
+      { expected_version: 4 },
+    );
+    expect(inactiveRole.statusCode).toBe(404);
+    await admin.query("UPDATE platform.roles SET status='ACTIVE' WHERE id=$1", [readerRole]);
+
+    const removed = await request(
+      'DELETE',
+      `/memberships/${target}/roles/${readerRole}`,
+      '82000000-0000-4000-8000-000000000099',
+      { expected_version: 4 },
+    );
+    expect(removed.json()).toMatchObject({ data: { changed: true, version: 5 } });
+    const duplicateRemoval = await request(
+      'DELETE',
+      `/memberships/${target}/roles/${readerRole}`,
+      '82000000-0000-4000-8000-000000000100',
+      { expected_version: 5 },
+    );
+    expect(duplicateRemoval.json()).toMatchObject({ data: { changed: false, version: 5 } });
+
+    await admin.query(
+      "DELETE FROM platform.role_permissions WHERE tenant_id=$1 AND role_id='70000000-0000-4000-8000-000000000011' AND permission_key='platform.roles.manage'",
+      [tenantA],
+    );
+    const revokedPermission = await request(
+      'PUT',
+      `/memberships/${target}/roles/${readerRole}`,
+      '82000000-0000-4000-8000-000000000111',
+      { expected_version: 5 },
+    );
+    expect(revokedPermission.statusCode).toBe(403);
+    await admin.query(
+      "INSERT INTO platform.role_permissions(tenant_id,role_id,permission_key,assigned_by) VALUES($1,'70000000-0000-4000-8000-000000000011','platform.roles.manage','10000000-0000-4000-8000-000000000011')",
+      [tenantA],
+    );
+
+    await admin.query(
+      "UPDATE platform.roles SET status='INACTIVE' WHERE id='70000000-0000-4000-8000-000000000011'",
+    );
+    const revokedRole = await app.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${tenantA}/administration`,
+      headers: { authorization: 'Bearer dev:oidc|alice' },
+    });
+    expect(revokedRole.statusCode).toBe(403);
+    await admin.query(
+      "UPDATE platform.roles SET status='ACTIVE' WHERE id='70000000-0000-4000-8000-000000000011'",
+    );
+
+    await expect(
+      admin.query("UPDATE platform.domain_events SET payload='{}'::jsonb"),
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('uses signed OIDC identity while ignoring authorization claims supplied by the token', async () => {
+    const allowed = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${tenantA}/administration`,
+      headers: { authorization: `Bearer ${oidcToken}` },
+    });
+    expect(allowed.statusCode).toBe(200);
+    const forgedClaims = await signedOidcToken('bob', {
+      tenant_id: tenantA,
+      permissions: ['platform.roles.manage'],
+      roles: ['tenant-administrator'],
+    });
+    const denied = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${tenantA}/administration`,
+      headers: { authorization: `Bearer ${forgedClaims}` },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
   it('resolves a real signed OIDC JWT through PostgreSQL membership and RLS', async () => {
     const response = await oidcApp.inject({
       method: 'GET',

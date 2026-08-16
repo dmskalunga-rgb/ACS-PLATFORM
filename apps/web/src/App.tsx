@@ -4,6 +4,7 @@ import {
   resolveContextClientConfiguration,
   type ContextClientConfiguration,
 } from './context-client-configuration.js';
+import { TenantAdministrationPanel } from './TenantAdministration.js';
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -205,6 +206,17 @@ export function App({
             </>
           )}
         </section>
+        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
+          <TenantAdministrationPanel
+            apiBaseUrl={apiBaseUrl}
+            tenantId={contextConfiguration.tenantId}
+            authorization={
+              contextConfiguration.accessToken === undefined
+                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
+                : `Bearer ${contextConfiguration.accessToken}`
+            }
+          />
+        )}
       </div>
     </main>
   );

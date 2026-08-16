@@ -43,3 +43,6 @@ boundary should be separated before browser code consumes a contract path that e
 
 The production authentication vertical-slice evidence is maintained separately in
 `PRODUCTION-OIDC-JWT-EVIDENCE.md`. It does not supersede the accepted selective-adoption record.
+
+Tenant administration implementation and its current validation boundary are recorded in
+`TENANT-ADMINISTRATION-EVIDENCE.md`.
