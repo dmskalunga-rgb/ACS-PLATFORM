@@ -1,7 +1,9 @@
 # Tenant Administration & Authorization Lifecycle Evidence
 
-Date: 2026-08-16  
-Starting point: `develop@f169665e068af3d842f26a21db971f116bf8c48a`  
+Date: 2026-08-16
+
+Starting point: `develop@f169665e068af3d842f26a21db971f116bf8c48a`
+
 Branch: `feat/phase-1-tenant-administration`
 
 ## Implemented scope
