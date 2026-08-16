@@ -90,3 +90,16 @@ These conditions remain explicitly open:
 Formal closure evidence is recorded in
 `docs/evidence/phase-0/QG-01/FINAL-ENGINEERING-VALIDATION.md`. No governance gap is closed by
 the technical ledger above.
+
+## Phase 1 Tenant Administration technical disposition
+
+PR #4 integrated the Tenant Administration & Authorization Lifecycle slice at
+`develop@8b2eb5b705088427479b85cecdca8ee161ce883b`. Post-merge runs `31935367613`,
+`31935367596`, and `31935367655` verified repository safety, the Phase 1 runtime/database suite,
+and Phase 0 security regression on that exact SHA. This is implementation evidence affecting the
+technical state of ACS-GAP-0012 through ACS-GAP-0016 and ACS-GAP-0024/0025; it does not close those
+broader roadmap gaps beyond this slice.
+
+ACS-GAP-0001/0002/0004/0005/0006/0007 remain open. ADR-0014 remains `PROPOSED`; QG-18 through
+QG-22 remain `UNDEFINED_IN_BASELINE`; baseline custody, ECOM/EDIM/EDOLM completeness, normative
+ACS-REQ identifiers, owners/approvers, and commit-signing enforcement remain pending.
