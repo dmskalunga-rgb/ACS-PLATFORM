@@ -22,13 +22,13 @@ Branch: `feat/phase-1-tenant-administration`
 
 ## Validation evidence
 
-| Gate                                                     | Result                                       |
-| -------------------------------------------------------- | -------------------------------------------- |
-| Starting and final `pnpm check`                          | `VERIFIED`                                   |
-| Formatting, lint, typecheck, unit/component tests, build | `VERIFIED`                                   |
-| PostgreSQL fresh/upgrade/rollback and RLS                | `VERIFIED` on disposable PostgreSQL 17       |
-| Signed OIDC/API/PostgreSQL E2E                           | `VERIFIED` — 22/22 tests passed              |
-| Repository validation / Phase 1 / Phase 0 security CI    | `VERIFIED` on integrated merge SHA           |
+| Gate                                                     | Result                                 |
+| -------------------------------------------------------- | -------------------------------------- |
+| Starting and final `pnpm check`                          | `VERIFIED`                             |
+| Formatting, lint, typecheck, unit/component tests, build | `VERIFIED`                             |
+| PostgreSQL fresh/upgrade/rollback and RLS                | `VERIFIED` on disposable PostgreSQL 17 |
+| Signed OIDC/API/PostgreSQL E2E                           | `VERIFIED` — 22/22 tests passed        |
+| Repository validation / Phase 1 / Phase 0 security CI    | `VERIFIED` on integrated merge SHA     |
 
 ## Integration closure
 
