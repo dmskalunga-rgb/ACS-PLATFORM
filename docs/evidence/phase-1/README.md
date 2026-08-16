@@ -1,6 +1,6 @@
 # ACS Phase 1 Engineering Evidence
 
-Status: `SELECTIVE_ADOPTION_VERIFIED_ON_E3F8D09`
+Status: `PHASE_1_TECHNICALLY_COMPLETE_GOVERNANCE_OR_HARDENING_PENDING`
 
 - Phase: Platform Foundation and Multi-Tenancy
 - Base branch: `develop`
@@ -52,3 +52,9 @@ SHA `8b2eb5b705088427479b85cecdca8ee161ce883b`. Post-merge Repository, Phase 1, 
 validation runs `31935367613`, `31935367596`, and `31935367655` completed successfully on that
 exact SHA. This verifies only that Phase 1 slice; it does not authorize Phase 2 or promote
 ADR-0014 beyond `PROPOSED`.
+
+The final Phase 1 documentation closure was integrated through PR #5 at merge SHA
+`8698fe43ae7c4a1f2e3d2d86ae5f1e9dda60d7a2`. Post-merge Repository, Phase 1, and Phase 0
+validation runs `31936812725`, `31936812713`, and `31936812776` completed successfully on that
+exact SHA. This is the current integrated technical checkpoint; governance approval and
+operational-hardening dispositions remain separate decisions.

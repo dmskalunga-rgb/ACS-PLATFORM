@@ -103,3 +103,17 @@ broader roadmap gaps beyond this slice.
 ACS-GAP-0001/0002/0004/0005/0006/0007 remain open. ADR-0014 remains `PROPOSED`; QG-18 through
 QG-22 remain `UNDEFINED_IN_BASELINE`; baseline custody, ECOM/EDIM/EDOLM completeness, normative
 ACS-REQ identifiers, owners/approvers, and commit-signing enforcement remain pending.
+
+## Pre-Phase-2 readiness disposition
+
+The integrated Phase 1 checkpoint is
+`develop@8698fe43ae7c4a1f2e3d2d86ae5f1e9dda60d7a2`. Runs `31936812725`, `31936812713`, and
+`31936812776` verified Repository validation, Phase 1 validation, and Phase 0 regression/security
+on that exact SHA. This closes the stale OIDC remote-CI documentary state; it does not close the
+broader initial gaps beyond the implemented Phase 1 slices.
+
+ACS-GAP-0009 and ACS-GAP-0023 remain technically blocking for any future mutation that depends on
+event delivery: the transactional outbox is implemented, but publisher, at-least-once delivery,
+retry, DLQ, controlled replay, and consumer idempotency operations are not. ACS-GAP-0004/0005/0006
+remain governance blockers for the affected Phase 2 slice; new working-catalog entries are
+non-normative candidates pending approval. No risk is recorded as accepted.

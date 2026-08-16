@@ -1,6 +1,6 @@
 # ACS Phase 1 Traceability Matrix
 
-Status: `SELECTIVE_ADOPTION_VERIFIED_ON_E3F8D09`
+Status: `PHASE_1_TECHNICALLY_COMPLETE_GOVERNANCE_OR_HARDENING_PENDING`
 
 No row creates a normative `ACS-REQ` identifier.
 
@@ -19,10 +19,10 @@ acceptance criteria.
 
 ## Production OIDC/JWT vertical slice
 
-| Baseline         | Requirement                               | Architecture       | Implementation                                                     | Validation                                 | Evidence                          | Status                   |
-| ---------------- | ----------------------------------------- | ------------------ | ------------------------------------------------------------------ | ------------------------------------------ | --------------------------------- | ------------------------ |
-| VOL-I-1.4/1.6    | Production authentication boundary        | ADR-0007, ADR-0013 | OIDC JWT adapter; immutable issuer + subject mapping               | Crypto/JWKS matrix and signed-token DB E2E | `PRODUCTION-OIDC-JWT-EVIDENCE.md` | `IMPLEMENTED_PENDING_CI` |
-| VOL-VII-7.4/7.10 | Safe API and authentication observability | ADR-0009, ADR-0013 | Bearer OpenAPI, safe audit/metrics, in-memory web session boundary | API/UI/redaction tests                     | Production OIDC/JWT evidence      | `IMPLEMENTED_PENDING_CI` |
+| Baseline         | Requirement                               | Architecture       | Implementation                                                     | Validation                                 | Evidence                          | Status                    |
+| ---------------- | ----------------------------------------- | ------------------ | ------------------------------------------------------------------ | ------------------------------------------ | --------------------------------- | ------------------------- |
+| VOL-I-1.4/1.6    | Production authentication boundary        | ADR-0007, ADR-0013 | OIDC JWT adapter; immutable issuer + subject mapping               | Crypto/JWKS matrix and signed-token DB E2E | `PRODUCTION-OIDC-JWT-EVIDENCE.md` | `VERIFIED_AND_INTEGRATED` |
+| VOL-VII-7.4/7.10 | Safe API and authentication observability | ADR-0009, ADR-0013 | Bearer OpenAPI, safe audit/metrics, in-memory web session boundary | API/UI/redaction tests                     | Production OIDC/JWT evidence      | `VERIFIED_AND_INTEGRATED` |
 
 ## Tenant administration and authorization lifecycle
 
@@ -35,3 +35,9 @@ acceptance criteria.
 These rows do not create normative `ACS-REQ` identifiers or assert undefined quality gates.
 Their integrated-state evidence is the post-merge run set `31935367613`, `31935367596`, and
 `31935367655` on `develop@8b2eb5b705088427479b85cecdca8ee161ce883b`.
+
+The current integrated Phase 1 checkpoint is
+`develop@8698fe43ae7c4a1f2e3d2d86ae5f1e9dda60d7a2`. Repository validation, Phase 1 validation,
+and Phase 0 regression/security runs `31936812725`, `31936812713`, and `31936812776` all
+completed successfully on that exact SHA. These executions close the stale remote-CI status;
+they do not create normative requirements or approve proposed ADRs.
