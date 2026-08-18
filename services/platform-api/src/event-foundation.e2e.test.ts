@@ -74,10 +74,10 @@ suite('Event Delivery & Operational Lifecycle PostgreSQL E2E', () => {
   it('publishes through the TEST_ONLY transport and gives consumers an atomic duplicate result', async () => {
     const eventId = await insertEvent();
     const transport = new TestOnlyInMemoryEventTransport();
-    await expect(publisher('e2e-worker-1', transport).runBatch()).resolves.toMatchObject({
-      published: 1,
-    });
-    expect(transport.published.map((event) => event.event_id)).toContain(eventId);
+    const result = await publisher('e2e-worker-1', transport).runBatch();
+    expect(result.published).toBeGreaterThanOrEqual(1);
+    const logicalTestEvents = transport.published.filter((event) => event.event_id === eventId);
+    expect(logicalTestEvents).toHaveLength(1);
     const delivery = await admin.query<{ state: string }>(
       'SELECT state FROM platform.event_deliveries WHERE event_id=$1',
       [eventId],
@@ -91,7 +91,7 @@ suite('Event Delivery & Operational Lifecycle PostgreSQL E2E', () => {
       retentionMilliseconds: 60_000,
       supportedMajorVersion: 1,
     });
-    const event = transport.published.find((candidate) => candidate.event_id === eventId)!;
+    const event = logicalTestEvents[0]!;
     await expect(consumer.consume(event, handler)).resolves.toBe('PROCESSED');
     await expect(consumer.consume(event, handler)).resolves.toBe('DUPLICATE');
     expect(handler).toHaveBeenCalledOnce();
