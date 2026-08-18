@@ -116,6 +116,22 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(vitest@4.1.10)
 
+  packages/event-foundation:
+    dependencies:
+      '@acs/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@acs/foundation':
+        specifier: workspace:*
+        version: link:../foundation
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
+      '@vitest/coverage-v8':
+        specifier: 4.1.10
+        version: 4.1.10(vitest@4.1.10)
+
   packages/foundation:
     dependencies:
       zod:
@@ -159,6 +175,9 @@ importers:
       '@acs/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@acs/event-foundation':
+        specifier: workspace:*
+        version: link:../../packages/event-foundation
       '@acs/foundation':
         specifier: workspace:*
         version: link:../../packages/foundation

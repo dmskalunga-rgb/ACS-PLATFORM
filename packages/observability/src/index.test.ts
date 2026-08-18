@@ -39,6 +39,8 @@ describe('FOUNDATION observability', () => {
     const { registry, requests } = createMetricsRegistry('test-service');
     requests.inc({ method: 'GET', route: '/health', status_code: '200' });
     expect(await registry.metrics()).toContain('acs_http_requests_total');
+    expect(await registry.metrics()).toContain('acs_event_delivery_outcomes_total');
+    expect(await registry.metrics()).not.toContain('tenant_id');
   });
 
   it('stays explicitly disabled without an OTLP endpoint', () => {
