@@ -34,3 +34,15 @@ is not a normal production operating procedure.
 Production capability roles are provisioned by `database/roles/phase1_platform_roles.sql` without
 credentials. Deployment-owned LOGIN identities and their secrets are created outside Git and are
 assigned to exactly one least-privileged NOLOGIN capability role.
+
+## Pre-Phase-2 Event Delivery Foundation
+
+Migration `20260818000000_event_delivery_foundation.sql` extends the existing immutable
+`platform.domain_events` outbox. Delivery state, consumer receipts, and lifecycle audit remain
+tenant scoped and are accessed through separate execute-only roles declared in
+`database/roles/event_foundation_roles.sql`. The migration introduces no broker, Commercial
+entity, or Phase 2 table.
+
+Published-event and consumer-receipt cleanup use configurable bounded batches. No regulatory
+retention duration is encoded. The rollback is test evidence for disposable environments; after
+authoritative delivery data exists, production corrections remain forward-only.

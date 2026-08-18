@@ -9,13 +9,15 @@
     "dev": "tsx watch src/server.ts",
     "lint": "eslint src --max-warnings 0",
     "start": "node dist/server.js",
-    "test": "vitest run --exclude **/*.e2e.test.ts",
+    "test": "vitest run --config vitest.unit.config.ts",
     "test:e2e": "vitest run src/platform-context.e2e.test.ts",
-    "test:coverage": "vitest run --coverage",
+    "test:event-foundation:e2e": "vitest run src/event-foundation.e2e.test.ts",
+    "test:coverage": "vitest run --config vitest.unit.config.ts --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@acs/contracts": "workspace:*",
+    "@acs/event-foundation": "workspace:*",
     "@acs/foundation": "workspace:*",
     "@acs/observability": "workspace:*",
     "@fastify/cors": "11.3.0",

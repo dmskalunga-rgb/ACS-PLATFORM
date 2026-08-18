@@ -84,6 +84,10 @@ jobs:
       ACS_TENANT_DATABASE_URL: postgresql://acs_phase1_tenant_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_TENANT_ADMIN_DATABASE_URL: postgresql://acs_phase1_admin_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_SECURITY_AUDIT_DATABASE_URL: postgresql://acs_phase1_auditor_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_PUBLISHER_DATABASE_URL: postgresql://acs_event_publisher_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_CONSUMER_DATABASE_URL: postgresql://acs_event_consumer_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_OPERATOR_DATABASE_URL: postgresql://acs_event_operator_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_RETENTION_DATABASE_URL: postgresql://acs_event_retention_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -97,3 +101,4 @@ jobs:
       - run: pnpm db:validate
       - run: pnpm --filter @acs/platform-api... build
       - run: pnpm test:phase1:e2e
+      - run: pnpm test:event-foundation:e2e

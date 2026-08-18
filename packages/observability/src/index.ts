@@ -5,7 +5,7 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import pino, { type DestinationStream, type Logger, type LoggerOptions } from 'pino';
-import { Counter, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 export const LOG_REDACTION_PATHS = [
   'req.headers.authorization',
@@ -57,7 +57,44 @@ export function createMetricsRegistry(serviceName: string) {
     registers: [registry],
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
   });
-  return { authenticationDuration, authentications, registry, requests };
+  const eventClaims = new Counter({
+    name: 'acs_event_delivery_claims_total',
+    help: 'Events claimed by the broker-neutral publisher foundation.',
+    registers: [registry],
+  });
+  const eventOutcomes = new Counter({
+    name: 'acs_event_delivery_outcomes_total',
+    help: 'Event delivery outcomes using bounded low-cardinality labels.',
+    labelNames: ['outcome'] as const,
+    registers: [registry],
+  });
+  const eventPublishDuration = new Histogram({
+    name: 'acs_event_publish_duration_seconds',
+    help: 'Publisher-to-transport operation latency in seconds.',
+    registers: [registry],
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  });
+  const eventPendingDepth = new Gauge({
+    name: 'acs_event_pending_depth',
+    help: 'Current pending and retryable event depth.',
+    registers: [registry],
+  });
+  const eventOldestPendingAge = new Gauge({
+    name: 'acs_event_oldest_pending_age_seconds',
+    help: 'Age of the oldest event eligible for delivery.',
+    registers: [registry],
+  });
+  return {
+    authenticationDuration,
+    authentications,
+    eventClaims,
+    eventOldestPendingAge,
+    eventOutcomes,
+    eventPendingDepth,
+    eventPublishDuration,
+    registry,
+    requests,
+  };
 }
 
 export function setActiveTenantTraceContext(tenantId: string, action: string): void {

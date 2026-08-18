@@ -1,8 +1,9 @@
 # ADR-0014: Tenant administration and authorization lifecycle
 
-- Status: PROPOSED
+- Status: PROPOSED_REVISION_REQUIRED
 - Date: 2026-08-14
 - Scope: Phase 1 Platform Foundation only
+- Human disposition: `REVISE`, PR #6 comment `5328117974`, 2026-08-18
 
 ## Context
 
@@ -38,7 +39,16 @@ system.
 Authorization revocation takes effect on the next operation because every request resolves the
 current active membership and current role-permission graph before issuing a short-lived grant.
 The transactional event table is an outbox boundary, not a fictitious message broker. Publishing
-and retention policies remain future operational work.
+and retention use the pre-Phase-2 Event Delivery & Operational Lifecycle Foundation. The outbox
+remains the canonical source; delivery state is stored separately. A recoverable publisher claims
+bounded batches with PostgreSQL lease/locking semantics, exits the transaction before transport
+I/O, and records `PUBLISHED`, bounded retry, or `DEAD_LETTERED` outcomes.
+
+Delivery is at least once. Consumer idempotency, controlled replay, retention, audit,
+observability, and crash recovery are mandatory. No global ordering is assumed. A future broker
+adapter remains transport-agnostic and requires separate selection. Replay and lifecycle override
+are privileged, server-authorized, step-up-marked operations; Event Delivery privileges do not
+confer future Commercial or Finance authority.
 
 ## Explicit exclusions
 

@@ -1,10 +1,12 @@
 # ADR-0012: Opaque transaction-bound tenant grants
 
-Status: `PROPOSED`
+Status: `PROPOSED_REVISION_REQUIRED`
 
 Decision class: `SECURITY_IMPLEMENTATION_DECISION`
 
 Date: 2026-08-09
+
+Human disposition: `REVISE`, recorded in PR #6 comment `5328117974` on 2026-08-18.
 
 ## Context
 
@@ -50,3 +52,18 @@ holding both issuer and tenant credentials remains capable of requesting authori
 requires secret isolation, rotation, workload hardening, and monitoring. Grant cleanup and
 retention require an operational job before production. This ADR remains pending governance
 approval and production validation.
+
+## Required operational revision
+
+Before final acceptance, the grant lifecycle must retain these invariants:
+
+- a grant is one-use, expires, and is bound to the issuing permission, tenant, user, backend PID,
+  and database transaction;
+- consumption and failure are observable without exposing the token;
+- cleanup and retention are configurable, bounded, concurrent-safe, least-privileged, and owned
+  by an approved operational function;
+- cleanup never removes a grant still eligible for activation and emits bounded audit/metrics;
+- replay or reuse outside the bound transaction fails closed.
+
+No retention duration is approved. Trusted-grant cleanup remains
+`REQUIRED_BEFORE_PRODUCTION` and is not implemented by the Event Foundation slice.
