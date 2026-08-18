@@ -1,6 +1,6 @@
 # ACS Phase 2 Customer Registry Definition of Ready
 
-Status: `IMPLEMENTED_PENDING_REMOTE_CI`
+Status: `IMPLEMENTED_REMOTE_CI_VERIFIED`
 
 ## Entry checkpoint
 

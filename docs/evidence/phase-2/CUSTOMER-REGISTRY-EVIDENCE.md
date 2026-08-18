@@ -1,6 +1,6 @@
 # ACS Phase 2 Customer Registry Evidence
 
-Status: `IMPLEMENTED_PENDING_REMOTE_CI`
+Status: `IMPLEMENTED_REMOTE_CI_VERIFIED`
 
 ## Scope and baseline
 
@@ -74,9 +74,19 @@ Production SLOs are not inferred.
 
 ## Remote evidence
 
-Repository validation, Phase 2 Customer Registry validation, Phase 1 regression and Phase 0
-regression/security must all validate the final published SHA. Run IDs and conclusions remain
-`PENDING_REMOTE_CI` until the branch is published.
+Implementation HEAD `ce424cdc0da2c7cc2e76561b00ec69a8656d6e58` was validated by:
+
+| Workflow                                  | Run           | Event               | Result    |
+| ----------------------------------------- | ------------- | ------------------- | --------- |
+| Repository validation                     | `32149619296` | `workflow_dispatch` | `SUCCESS` |
+| Phase 2 Customer Registry validation      | `32149574314` | `push`              | `SUCCESS` |
+| Phase 1 platform multi-tenancy validation | `32149574185` | `push`              | `SUCCESS` |
+| Phase zero engineering validation         | `32149574070` | `push`              | `SUCCESS` |
+
+Phase 0 remote jobs verified quality, PostgreSQL migration/isolation, CodeQL, secrets, SCA/SBOM,
+filesystem/container images and IaC/config. GitHub reported only the already tracked Node.js 20
+action-runtime deprecation annotation; it was not a failed gate. The evidence-closure commit must
+receive fresh runs before the branch final decision.
 
 ## Remaining boundaries
 
