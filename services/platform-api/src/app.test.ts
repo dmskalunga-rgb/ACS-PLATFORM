@@ -50,6 +50,8 @@ describe('FOUNDATION platform API', () => {
     const document = z.object({ paths: z.record(z.string(), z.unknown()) }).parse(response.json());
     expect(document.paths['/health']).toBeDefined();
     expect(document.paths['/api/v1/platform/context']).toBeDefined();
+    expect(document.paths['/api/v1/commercial/customers']).toBeDefined();
+    expect(document.paths['/api/v1/commercial/customers/{customerId}']).toBeDefined();
     expect(response.body).toContain('developmentBearer');
     expect(response.body).toContain('Development/test identity only');
   });
