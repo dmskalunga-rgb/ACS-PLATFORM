@@ -45,6 +45,15 @@ const eventRollbackPath = resolve(
   'database/rollbacks/20260818000000_event_delivery_foundation.sql',
 );
 const eventTestPath = resolve('database/tests/event_foundation_lifecycle.sql');
+const customerRolesPath = resolve('database/roles/phase2_customer_registry_roles.sql');
+const customerMigrationPath = resolve(
+  'database/migrations/20260818010000_phase2_customer_registry.sql',
+);
+const customerRollbackPath = resolve(
+  'database/rollbacks/20260818010000_phase2_customer_registry.sql',
+);
+const customerTestPath = resolve('database/tests/rls/customer_registry_isolation.sql');
+const customerSeedPath = resolve('database/tests/fixtures/customer_registry_seed.sql');
 
 const testRoles = [
   'acs_phase1_auditor_login_test',
@@ -65,6 +74,8 @@ const testRoles = [
   'acs_event_operator',
   'acs_event_retention',
   'acs_phase0_tenant_test',
+  'acs_phase2_customer_login_test',
+  'acs_phase2_customer_registry',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -80,6 +91,12 @@ async function dropTestRoles(): Promise<void> {
 await client.connect();
 try {
   await dropTestRoles();
+  const customerRegistryExists = await client.query(
+    "SELECT to_regclass('commercial.customers') AS relation",
+  );
+  if (customerRegistryExists.rows[0]?.relation !== null) {
+    await client.query(await readFile(customerRollbackPath, 'utf8'));
+  }
   const eventFoundationExists = await client.query(
     "SELECT to_regclass('platform.event_deliveries') AS relation",
   );
@@ -98,6 +115,8 @@ try {
   await client.query(await readFile(tenantAdminMigrationPath, 'utf8'));
   await client.query(await readFile(eventRolesPath, 'utf8'));
   await client.query(await readFile(eventMigrationPath, 'utf8'));
+  await client.query(await readFile(customerRolesPath, 'utf8'));
+  await client.query(await readFile(customerMigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
   );
@@ -118,9 +137,15 @@ try {
     'GRANT SELECT, UPDATE, DELETE ON platform.audit_logs, platform.security_audit_logs TO acs_phase1_audit_integrity_test',
   );
   await client.query(await readFile(phase1SeedPath, 'utf8'));
+  await client.query(await readFile(customerSeedPath, 'utf8'));
   await client.query(await readFile(phase1TestPath, 'utf8'));
   await client.query(await readFile(tenantAdminTestPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
+  await client.query(await readFile(customerTestPath, 'utf8'));
+  await client.query(await readFile(customerRollbackPath, 'utf8'));
+  await client.query(await readFile(customerMigrationPath, 'utf8'));
+  await client.query(await readFile(customerSeedPath, 'utf8'));
+  await client.query(await readFile(customerTestPath, 'utf8'));
   await client.query(await readFile(eventRollbackPath, 'utf8'));
   await client.query(await readFile(eventMigrationPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
@@ -147,9 +172,11 @@ try {
     GRANT acs_event_consumer TO acs_event_consumer_login_test;
     GRANT acs_event_operator TO acs_event_operator_login_test;
     GRANT acs_event_retention TO acs_event_retention_login_test;
+    CREATE ROLE acs_phase2_customer_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
+    GRANT acs_phase2_customer_registry TO acs_phase2_customer_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_AND_PLATFORM', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_AND_CUSTOMER', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();
