@@ -897,7 +897,7 @@ export async function buildApp(
   });
 
   app.setErrorHandler(async (error, request, reply) => {
-    if ('validation' in error && Array.isArray(error.validation)) {
+    if (error instanceof Error && 'validation' in error && Array.isArray(error.validation)) {
       return reply.status(400).send(
         errorEnvelopeSchema.parse({
           error: {
