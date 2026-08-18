@@ -1,0 +1,27 @@
+BEGIN;
+DROP TRIGGER IF EXISTS domain_events_initialize_delivery ON platform.domain_events;
+DROP FUNCTION IF EXISTS platform.initialize_event_delivery();
+DROP FUNCTION IF EXISTS platform.claim_event_delivery_batch(text,integer,integer);
+DROP FUNCTION IF EXISTS platform.event_delivery_backlog();
+DROP FUNCTION IF EXISTS platform.mark_event_published(uuid,uuid,text);
+DROP FUNCTION IF EXISTS platform.mark_event_publish_failed(uuid,uuid,text,boolean,integer,timestamptz);
+DROP FUNCTION IF EXISTS platform.acquire_consumer_receipt(text,uuid,uuid,integer,integer);
+DROP FUNCTION IF EXISTS platform.complete_consumer_receipt(text,uuid,uuid,uuid);
+DROP FUNCTION IF EXISTS platform.release_consumer_receipt(text,uuid,uuid,uuid);
+DROP FUNCTION IF EXISTS platform.request_event_replay(uuid,uuid,uuid,text,uuid);
+DROP FUNCTION IF EXISTS platform.cleanup_published_events(integer,integer,uuid);
+DROP FUNCTION IF EXISTS platform.cleanup_consumer_receipts(integer,uuid);
+DROP TRIGGER IF EXISTS event_lifecycle_audit_append_only ON platform.event_lifecycle_audit;
+DROP FUNCTION IF EXISTS platform.reject_lifecycle_audit_mutation();
+DROP TABLE IF EXISTS platform.event_lifecycle_audit;
+DROP TABLE IF EXISTS platform.consumer_event_receipts;
+DROP TABLE IF EXISTS platform.event_deliveries;
+ALTER TABLE platform.domain_events DROP CONSTRAINT IF EXISTS domain_events_event_tenant_unique;
+ALTER TABLE platform.domain_events DROP CONSTRAINT IF EXISTS domain_events_payload_size;
+ALTER TABLE platform.domain_events DROP CONSTRAINT IF EXISTS domain_events_aggregate_key_format;
+ALTER TABLE platform.domain_events DROP COLUMN IF EXISTS aggregate_key;
+DELETE FROM platform.permissions WHERE permission_key IN ('platform.events.read','platform.events.replay');
+CREATE OR REPLACE FUNCTION platform.reject_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'domain events are append-only' USING ERRCODE='42501'; END;
+$$;
+COMMIT;
