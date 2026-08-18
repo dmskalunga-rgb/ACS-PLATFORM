@@ -18,6 +18,13 @@ Status: `PENDING_GOVERNANCE_APPROVAL`. This does not replace normative ANX-C.
 | Event delivery state   | PostgreSQL `platform.event_deliveries`                                  | Platform Integration/Eventing   | SECURITY; tenant scoped; bounded lifecycle                    | `IMPLEMENTATION_DEFINED`      |
 | Consumer receipt       | PostgreSQL `platform.consumer_event_receipts`                           | Consuming service owner pending | SECURITY; configurable retry/replay-window retention          | `IMPLEMENTATION_DEFINED`      |
 | Event lifecycle audit  | PostgreSQL `platform.event_lifecycle_audit`                             | Governance/Audit                | SECURITY; append-only; retention pending approval             | `IMPLEMENTATION_DEFINED`      |
+| Commercial customer    | PostgreSQL `commercial.customers`                                       | Commercial Data Owner; named owner `PENDING_GOVERNANCE_APPROVAL` | INTERNAL identifiers; BUSINESS registry data; optional CONFIDENTIAL_PII contact; no hard delete; retention pending approval | `AUTHORIZED_FOR_IMPLEMENTATION` |
+
+Customer lineage is: authenticated user action → Customer API → authoritative
+`commercial.customers` row → append-only audit → canonical domain event/outbox → Event Foundation.
+Real consumers in this slice are the Customer API and Web UI. Future commercial consumers remain
+`NOT_IMPLEMENTED / FUTURE_DEPENDENCY`. Customer data is not tenant identity data and is not used by
+AI, RAG or graph processing in this slice.
 
 The probe is not an ACS domain entity. Ownership, classification, lineage, retention, deletion,
 residency, and lawful use are required before functional data delivery.

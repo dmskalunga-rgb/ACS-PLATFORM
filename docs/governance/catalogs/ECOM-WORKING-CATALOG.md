@@ -16,6 +16,7 @@ Status: `PENDING_GOVERNANCE_APPROVAL`. This does not replace normative ANX-A.
 | OIDC identity mapping           | VOL-II-2.7; ADR-0013     | `PENDING_GOVERNANCE_APPROVAL`   | `IMPLEMENTATION_DEFINED` | Data owner/steward pending              |
 | Event Delivery Foundation       | VOL-VII-7.7; ADR-0006    | Platform Integration/Eventing   | `IMPLEMENTATION_DEFINED` | Named owner remains pending             |
 | Event operational security      | PR #6 comment 5328117974 | Platform Security/Authorization | `IMPLEMENTATION_DEFINED` | Replay is privileged and step-up marked |
+| Commercial Customer Registry    | VOL-VI-6.4.2; Phase 2 authorization | Commercial Product/Domain Authority; named owner `PENDING_GOVERNANCE_APPROVAL` | `AUTHORIZED_FOR_IMPLEMENTATION` | Tenant-owned customer master; no billing capability |
 
 Functional ownership is approved; named people remain `PENDING_GOVERNANCE_APPROVAL`. Missing
 assignments remain blockers for affected production or functional slices.

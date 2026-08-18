@@ -20,6 +20,10 @@ Status: `PENDING_GOVERNANCE_APPROVAL`. This does not replace normative ANX-B.
 | EventTransportPort     | Future broker adapter  | Transport-neutral event plus acceptance reference                    | Broker remains `NOT_SELECTED`; adapter-specific resilience  | `IMPLEMENTATION_DEFINED` |
 | Event consumer         | Consumer receipt store | Tenant/event/consumer idempotency record                             | Atomic acquire/process/complete; duplicate safe result      | `IMPLEMENTATION_DEFINED` |
 | Authorized operator    | Replay boundary        | Step-up marker, AuthorizationPort, tenant/event, reason, correlation | Fail closed; bounded replay; append-only audit              | `IMPLEMENTATION_DEFINED` |
+| Customer Registry Web  | Customer Registry API  | `/api/v1/commercial/customers`; OIDC; tenant-scoped permissions      | Explicit loading/empty/error/unauthorized/forbidden/conflict | `AUTHORIZED_FOR_IMPLEMENTATION` |
+| Customer Registry API  | PostgreSQL              | Trusted tenant grant, `commercial.customers`, FORCE RLS              | Transaction rollback and fail closed                        | `AUTHORIZED_FOR_IMPLEMENTATION` |
+| Customer mutation      | Transactional outbox    | Versioned `commercial.customer.*.v1` canonical envelope              | Atomic rollback; contact PII excluded                       | `AUTHORIZED_FOR_IMPLEMENTATION` |
+| Outbox publisher       | EventTransportPort      | Existing broker-neutral at-least-once contract                       | Retry/DLQ/lease recovery; production broker `NOT_SELECTED`  | `IMPLEMENTATION_DEFINED` |
 
 OIDC owner, SLA, provider product and confidential endpoint values remain
 `PENDING_GOVERNANCE_APPROVAL`. The API never follows token-supplied `jku` or issuer locations.
