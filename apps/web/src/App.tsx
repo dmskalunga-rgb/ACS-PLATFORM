@@ -5,6 +5,7 @@ import {
   type ContextClientConfiguration,
 } from './context-client-configuration.js';
 import { TenantAdministrationPanel } from './TenantAdministration.js';
+import { CustomerRegistryPanel } from './CustomerRegistry.js';
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -127,10 +128,10 @@ export function App({
         <p className="eyebrow">ACS · Enterprise AI-Driven Cyber Defense Platform</p>
         <h1 id="foundation-title">Platform Foundation</h1>
         <p className="lede">
-          Phase 1 establishes the authenticated, tenant-isolated platform context. No Phase 2 domain
-          is enabled.
+          Phase 2 begins with one governed, tenant-scoped Commercial Customer Registry vertical
+          slice.
         </p>
-        <span className="badge">PHASE 1</span>
+        <span className="badge">PHASE 2 · CUSTOMER REGISTRY</span>
       </section>
       <div className="status-grid">
         <section className="status-card" aria-live="polite" aria-busy={health.kind === 'loading'}>
@@ -208,6 +209,17 @@ export function App({
         </section>
         {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
           <TenantAdministrationPanel
+            apiBaseUrl={apiBaseUrl}
+            tenantId={contextConfiguration.tenantId}
+            authorization={
+              contextConfiguration.accessToken === undefined
+                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
+                : `Bearer ${contextConfiguration.accessToken}`
+            }
+          />
+        )}
+        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
+          <CustomerRegistryPanel
             apiBaseUrl={apiBaseUrl}
             tenantId={contextConfiguration.tenantId}
             authorization={

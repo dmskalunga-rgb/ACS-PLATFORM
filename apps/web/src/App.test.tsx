@@ -36,7 +36,7 @@ describe('FOUNDATION application shell', () => {
     render(<App contextConfiguration={{}} />);
     expect(screen.getByRole('heading', { name: 'Platform Foundation' })).toBeVisible();
     expect(await screen.findByText('acs-platform-api')).toBeVisible();
-    expect(screen.getByText('PHASE 1')).toBeVisible();
+    expect(screen.getByText('PHASE 2 · CUSTOMER REGISTRY')).toBeVisible();
     expect(screen.getByText(/NOT_CONFIGURED/)).toBeVisible();
   });
 
