@@ -1,10 +1,12 @@
 # ADR-0013: Production OIDC/JWT authentication
 
-Status: `PROPOSED`
+Status: `PROPOSED_REVISION_REQUIRED`
 
 Decision class: `SECURITY_IMPLEMENTATION_DECISION`
 
 Date: 2026-08-12
+
+Human disposition: `REVISE`, recorded in PR #6 comment `5328117974` on 2026-08-18.
 
 ## Context and baseline drivers
 
@@ -81,3 +83,15 @@ interfaces; this bearer-validation slice requires no client secret.
 
 Audit retention and the final owner assignments remain `PENDING_GOVERNANCE_APPROVAL`. This ADR
 does not approve ADR-0011/0012, broad IAM, JIT provisioning, Phase 2 or production deployment.
+
+## Required assurance and session revision
+
+Privileged operations, including Event Foundation replay or lifecycle override, declare a
+server-side step-up requirement and fail closed if assurance is absent or insufficient. Validated
+`acr`/`amr` claims may satisfy that requirement only after an explicit mapping for the selected
+IdP. Frontend flags never establish assurance.
+
+Before final acceptance, an approved policy must define session lifecycle, refresh, revocation,
+local and global logout, IdP ownership, and break-glass interaction. Break-glass requires an
+authenticated identity, justification, limited duration, immutable audit, and retrospective
+review. No provider-specific claim value or assurance level is invented here.

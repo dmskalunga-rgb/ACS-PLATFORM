@@ -1,10 +1,12 @@
 # ADR-0011: Trusted identity and tenant-context resolution
 
-Status: `PROPOSED`
+Status: `ACCEPTED_BY_HUMAN_GOVERNANCE`
 
 Decision class: `IMPLEMENTATION_DECISION`
 
 Date: 2026-08-09
+
+Human disposition: `ACCEPT`, recorded in PR #6 comment `5328117974` on 2026-08-18.
 
 ## Context and baseline drivers
 
@@ -65,4 +67,5 @@ The first slice proves the complete security path with a small API surface. Addi
 permissions, lifecycle transitions, tenant administration, and enterprise IAM require later
 traced decisions and are not implied by this ADR.
 
-This proposal does not become approved architecture until the required governance decision.
+This boundary is accepted architecture. Operational grant cleanup and retention remain a
+separate `REQUIRED_BEFORE_PRODUCTION` obligation and are not silently closed by acceptance.
