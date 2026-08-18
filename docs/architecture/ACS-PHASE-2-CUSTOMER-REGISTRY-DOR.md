@@ -1,6 +1,6 @@
 # ACS Phase 2 Customer Registry Definition of Ready
 
-Status: `AUTHORIZED_FOR_IMPLEMENTATION`
+Status: `IMPLEMENTED_PENDING_REMOTE_CI`
 
 ## Entry checkpoint
 
@@ -22,12 +22,12 @@ history, audit and event evidence. Final regulatory retention remains
 
 ## Canonical data
 
-| Attribute | Purpose | Classification |
-| --- | --- | --- |
-| `id`, `tenant_id`, `version` | Internal identity, isolation and concurrency | `INTERNAL` |
-| `display_name`, optional `reference_code`, `status` | Minimum commercial registry data | `BUSINESS` |
-| optional `contact_email` | Operational contact only | `CONFIDENTIAL_PII` |
-| created/updated timestamps and actor IDs | Audit metadata | `SECURITY` |
+| Attribute                                           | Purpose                                      | Classification     |
+| --------------------------------------------------- | -------------------------------------------- | ------------------ |
+| `id`, `tenant_id`, `version`                        | Internal identity, isolation and concurrency | `INTERNAL`         |
+| `display_name`, optional `reference_code`, `status` | Minimum commercial registry data             | `BUSINESS`         |
+| optional `contact_email`                            | Operational contact only                     | `CONFIDENTIAL_PII` |
+| created/updated timestamps and actor IDs            | Audit metadata                               | `SECURITY`         |
 
 No fiscal, banking, payment, identity-document, credential, billing or secret data is permitted.
 Contact email is optional, returned only to authorized readers, excluded from events, logs and
@@ -35,11 +35,11 @@ metrics, and redacted from audit metadata.
 
 ## Personas, permissions and SoD
 
-| Abstract persona | Canonical permissions |
-| --- | --- |
-| Commercial Customer Reader | `commercial.customer.read` |
-| Commercial Customer Editor | read, `commercial.customer.create`, `commercial.customer.update` |
-| Commercial Customer Administrator | editor permissions, `commercial.customer.admin` |
+| Abstract persona                  | Canonical permissions                                            |
+| --------------------------------- | ---------------------------------------------------------------- |
+| Commercial Customer Reader        | `commercial.customer.read`                                       |
+| Commercial Customer Editor        | read, `commercial.customer.create`, `commercial.customer.update` |
+| Commercial Customer Administrator | editor permissions, `commercial.customer.admin`                  |
 
 Permissions are resolved from current PostgreSQL membership/role state through
 `AuthorizationPort`; JWT claims and frontend guards are never permission sources. These roles do
@@ -62,11 +62,12 @@ accepts only `displayName`, `referenceCode`, `contactEmail`, `status` and `versi
 
 The slice approves these version-one event types:
 
-- `commercial.customer.created.v1` after successful creation;
-- `commercial.customer.updated.v1` after a material non-status update;
-- `commercial.customer.status-changed.v1` after an `ACTIVE`/`INACTIVE` transition.
+- `commercial.customer.created` after successful creation;
+- `commercial.customer.updated` after a material non-status update;
+- `commercial.customer.status_changed` after an `ACTIVE`/`INACTIVE` transition.
 
-Events use the canonical envelope and are inserted into `platform.domain_events` atomically with
+Version `1.0.0` is carried by the canonical envelope rather than encoded into `event_type`. Events
+are inserted into `platform.domain_events` atomically with
 the customer and audit mutation. Payloads contain customer ID, resulting version and permitted
 changed-field/status metadata only; contact PII is excluded. There are no invented commercial
 consumers. Publishing is proven through the broker-neutral Event Foundation contract harness.
