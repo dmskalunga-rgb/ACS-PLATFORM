@@ -16,6 +16,7 @@
     "db:validate": "node --experimental-strip-types tools/database/validate.ts",
     "test:phase1:e2e": "pnpm --filter @acs/platform-api test:e2e",
     "test:event-foundation:e2e": "pnpm --filter @acs/platform-api test:event-foundation:e2e",
+    "test:phase2:e2e": "pnpm --filter @acs/platform-api test:customer-registry:e2e",
     "dev": "turbo run dev --parallel",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

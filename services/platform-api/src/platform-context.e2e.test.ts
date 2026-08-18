@@ -1,5 +1,9 @@
 import pg from 'pg';
-import { tenantAdministrationSchema } from '@acs/contracts';
+import {
+  customerEnvelopeSchema,
+  customerListEnvelopeSchema,
+  tenantAdministrationSchema,
+} from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
 import type { PlatformConfiguration } from './config.js';
@@ -13,6 +17,7 @@ const requiredEnvironment = {
   issuer: process.env.ACS_CONTEXT_RESOLVER_DATABASE_URL,
   tenant: process.env.ACS_TENANT_DATABASE_URL,
   tenantAdmin: process.env.ACS_TENANT_ADMIN_DATABASE_URL,
+  customer: process.env.ACS_CUSTOMER_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -29,6 +34,7 @@ const configuration: PlatformConfiguration = {
   securityAuditDatabaseUrl: requiredEnvironment.auditor as string,
   tenantDatabaseUrl: requiredEnvironment.tenant as string,
   tenantAdminDatabaseUrl: requiredEnvironment.tenantAdmin as string,
+  customerDatabaseUrl: requiredEnvironment.customer as string,
   webOrigin: 'http://localhost:5173',
 };
 
@@ -122,6 +128,160 @@ async function context(subject: string | undefined, tenant: string | undefined) 
 }
 
 describe('Phase 1 API to PostgreSQL tenant isolation', () => {
+  it('executes the Customer Registry OIDC, authorization, RLS, audit and outbox path', async () => {
+    const startedAt = performance.now();
+    const headers = {
+      authorization: `Bearer ${oidcToken}`,
+      'x-acs-tenant-id': tenantA,
+      'idempotency-key': '82000000-0000-4000-8000-000000000011',
+    };
+    const created = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/customers',
+      headers,
+      payload: {
+        display_name: 'Acme Angola',
+        reference_code: 'ACME-AO',
+        contact_email: 'ops@acme.test',
+      },
+    });
+    expect(created.statusCode, created.body).toBe(200);
+    const customer = customerEnvelopeSchema.parse(created.json()).data;
+    const createMilliseconds = performance.now() - startedAt;
+    expect(customer).toMatchObject({ display_name: 'Acme Angola', status: 'ACTIVE', version: 1 });
+
+    const replay = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/customers',
+      headers,
+      payload: {
+        display_name: 'Acme Angola',
+        reference_code: 'ACME-AO',
+        contact_email: 'ops@acme.test',
+      },
+    });
+    expect(replay.json()).toMatchObject({
+      data: { id: customer.id },
+      meta: { idempotent_replay: true },
+    });
+    const divergent = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/customers',
+      headers,
+      payload: { display_name: 'Different customer' },
+    });
+    expect(divergent.statusCode).toBe(409);
+
+    const listStartedAt = performance.now();
+    const listed = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/customers?limit=10',
+      headers: { authorization: `Bearer ${oidcToken}`, 'x-acs-tenant-id': tenantA },
+    });
+    expect(customerListEnvelopeSchema.parse(listed.json()).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: customer.id })]),
+    );
+    const listMilliseconds = performance.now() - listStartedAt;
+    const readStartedAt = performance.now();
+    const read = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/customers/${customer.id}`,
+      headers: { authorization: `Bearer ${oidcToken}`, 'x-acs-tenant-id': tenantA },
+    });
+    expect(customerEnvelopeSchema.parse(read.json()).data.id).toBe(customer.id);
+    const readMilliseconds = performance.now() - readStartedAt;
+    const foreign = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/customers/${customer.id}`,
+      headers: {
+        authorization: `Bearer ${await signedOidcToken('charlie')}`,
+        'x-acs-tenant-id': tenantB,
+      },
+    });
+    expect(foreign.statusCode).toBe(403);
+    const invalidJwt = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/customers/${customer.id}`,
+      headers: { authorization: 'Bearer invalid.jwt', 'x-acs-tenant-id': tenantA },
+    });
+    expect(invalidJwt.statusCode).toBe(401);
+    const massAssignment = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/customers/${customer.id}`,
+      headers: {
+        authorization: `Bearer ${oidcToken}`,
+        'x-acs-tenant-id': tenantA,
+        'idempotency-key': '82000000-0000-4000-8000-000000000099',
+      },
+      payload: { tenant_id: tenantB, display_name: 'Hijacked', expected_version: 1 },
+    });
+    expect(massAssignment.statusCode).toBe(400);
+
+    const updateStartedAt = performance.now();
+    const updated = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/customers/${customer.id}`,
+      headers: {
+        authorization: `Bearer ${oidcToken}`,
+        'x-acs-tenant-id': tenantA,
+        'idempotency-key': '82000000-0000-4000-8000-000000000022',
+      },
+      payload: { display_name: 'Acme Angola Updated', expected_version: 1 },
+    });
+    expect(updated.json()).toMatchObject({ data: { version: 2 } });
+    const updateMilliseconds = performance.now() - updateStartedAt;
+    const stale = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/customers/${customer.id}`,
+      headers: {
+        authorization: `Bearer ${oidcToken}`,
+        'x-acs-tenant-id': tenantA,
+        'idempotency-key': '82000000-0000-4000-8000-000000000033',
+      },
+      payload: { display_name: 'Stale', expected_version: 1 },
+    });
+    expect(stale.statusCode).toBe(409);
+    const concurrent = await Promise.all([
+      oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/customers/${customer.id}`,
+        headers: {
+          authorization: `Bearer ${oidcToken}`,
+          'x-acs-tenant-id': tenantA,
+          'idempotency-key': '82000000-0000-4000-8000-000000000044',
+        },
+        payload: { display_name: 'Concurrent A', expected_version: 2 },
+      }),
+      oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/customers/${customer.id}`,
+        headers: {
+          authorization: `Bearer ${oidcToken}`,
+          'x-acs-tenant-id': tenantA,
+          'idempotency-key': '82000000-0000-4000-8000-000000000055',
+        },
+        payload: { display_name: 'Concurrent B', expected_version: 2 },
+      }),
+    ]);
+    expect(concurrent.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    const evidence = await admin.query<{
+      audits: number;
+      events: number;
+      deliveries: number;
+      pii_events: number;
+    }>(
+      `SELECT
+       (SELECT count(*)::int FROM platform.audit_logs WHERE resource=$1) audits,
+       (SELECT count(*)::int FROM platform.domain_events WHERE payload->>'customer_id'=$2) events,
+       (SELECT count(*)::int FROM platform.event_deliveries d JOIN platform.domain_events e USING(event_id) WHERE e.payload->>'customer_id'=$2) deliveries,
+       (SELECT count(*)::int FROM platform.domain_events WHERE payload::text LIKE '%ops@acme.test%') pii_events`,
+      [`commercial:customer:${customer.id}`, customer.id],
+    );
+    expect(evidence.rows[0]).toEqual({ audits: 3, events: 3, deliveries: 3, pii_events: 0 });
+    process.stdout.write(
+      `${JSON.stringify({ baseline_only_not_slo: true, customer_create_with_outbox_milliseconds: Number(createMilliseconds.toFixed(2)), customer_read_milliseconds: Number(readMilliseconds.toFixed(2)), customer_list_milliseconds: Number(listMilliseconds.toFixed(2)), customer_update_with_outbox_milliseconds: Number(updateMilliseconds.toFixed(2)), customer_journey_milliseconds: Number((performance.now() - startedAt).toFixed(2)), outbox_records: evidence.rows[0]?.events })}\n`,
+    );
+  });
   it('lists tenant administration through role authorization and denies cross-tenant access', async () => {
     const allowed = await app.inject({
       method: 'GET',
