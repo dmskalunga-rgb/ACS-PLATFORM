@@ -35,6 +35,14 @@ Production capability roles are provisioned by `database/roles/phase1_platform_r
 credentials. Deployment-owned LOGIN identities and their secrets are created outside Git and are
 assigned to exactly one least-privileged NOLOGIN capability role.
 
+## Phase 2 Customer Registry
+
+Migration `20260818010000_phase2_customer_registry.sql` introduces only the canonical,
+tenant-owned `commercial.customers` source and its bounded idempotency records. It enables and
+forces RLS, exposes no delete path, and reuses trusted grants, audit and the immutable outbox.
+`db:validate` executes the migration, isolation proof, disposable rollback, reapplication and
+isolation proof again. Production correction remains forward-only after authoritative data exists.
+
 ## Pre-Phase-2 Event Delivery Foundation
 
 Migration `20260818000000_event_delivery_foundation.sql` extends the existing immutable

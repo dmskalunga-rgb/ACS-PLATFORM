@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
   administrationMutationResultSchema,
+  customerCreateSchema,
+  customerEnvelopeSchema,
+  customerListEnvelopeSchema,
+  customerUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -37,6 +41,8 @@ import {
   PostgresTenantContextRepository,
 } from './postgres-platform-context.js';
 import { PostgresTenantAdminRepository } from './postgres-tenant-administration.js';
+import { PostgresCustomerRepository } from './postgres-customer-registry.js';
+import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import {
   TenantAdministrationFailure,
   TenantAdministrationService,
@@ -56,6 +62,7 @@ export async function buildApp(
     readonly logger?: boolean;
     readonly platformContextService?: PlatformContextService;
     readonly tenantAdministrationService?: TenantAdministrationService;
+    readonly customerRegistryService?: CustomerRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -63,6 +70,7 @@ export async function buildApp(
     serviceName: 'acs-platform-api',
   });
   const app = Fastify({
+    ajv: { customOptions: { removeAdditional: false } },
     genReqId: () => randomUUID(),
     ...(options.logger === false ? { logger: false } : { loggerInstance: logger }),
   });
@@ -73,6 +81,8 @@ export async function buildApp(
   let platformContextService = options.platformContextService;
   let tenantAdministrationService = options.tenantAdministrationService;
   let tenantAdminRepository: PostgresTenantAdminRepository | undefined;
+  let customerRepository: PostgresCustomerRepository | undefined;
+  let customerRegistryService = options.customerRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -119,6 +129,16 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.customerDatabaseUrl !== undefined) {
+      customerRepository = new PostgresCustomerRepository(configuration.customerDatabaseUrl);
+      customerRegistryService = new CustomerRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        customerRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -126,6 +146,7 @@ export async function buildApp(
         postgresRepository?.close(),
         securityAuditRepository?.close(),
         tenantAdminRepository?.close(),
+        customerRepository?.close(),
       ]);
     });
   }
@@ -135,9 +156,10 @@ export async function buildApp(
   await app.register(swagger, {
     openapi: {
       info: {
-        title: 'ACS Platform Foundation API',
-        version: '0.0.0-foundation',
-        description: 'Technical FOUNDATION endpoints only; no ACS 5.x domain API.',
+        title: 'ACS Platform and Commercial Customer Registry API',
+        version: '0.1.0-phase-2-customer-registry',
+        description:
+          'Governed platform foundation plus the authorized tenant-scoped Customer Registry slice.',
       },
       components: {
         securitySchemes: {
@@ -588,6 +610,280 @@ export async function buildApp(
       },
     });
 
+  const customerRouteSchema = {
+    security: [
+      configuration.identityMode === 'oidc' ? { oidcBearer: [] } : { developmentBearer: [] },
+    ],
+    headers: {
+      type: 'object',
+      properties: {
+        authorization: { type: 'string' },
+        'x-acs-tenant-id': { type: 'string', format: 'uuid' },
+        'idempotency-key': { type: 'string', format: 'uuid' },
+      },
+    },
+  } as const;
+  const customerError = (
+    error: CustomerRegistryFailure,
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'FORBIDDEN'
+          ? 403
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : 409;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  const customerTenant = (request: { headers: Record<string, unknown> }) => {
+    const value = request.headers['x-acs-tenant-id'];
+    return typeof value === 'string' ? uuidSchema.safeParse(value) : undefined;
+  };
+  const customerUnavailable = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'CUSTOMER_REGISTRY_NOT_CONFIGURED',
+          message: 'Customer Registry dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  app.post(
+    '/api/v1/commercial/customers',
+    {
+      schema: {
+        ...customerRouteSchema,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['display_name'],
+          properties: {
+            display_name: { type: 'string', minLength: 1, maxLength: 160 },
+            reference_code: { type: ['string', 'null'], minLength: 1, maxLength: 80 },
+            contact_email: { type: ['string', 'null'], format: 'email', maxLength: 254 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!customerRegistryService) return customerUnavailable(request, reply);
+      const tenant = customerTenant(request);
+      const key = request.headers['idempotency-key'];
+      const body = customerCreateSchema.safeParse(request.body);
+      if (
+        tenant?.success !== true ||
+        typeof key !== 'string' ||
+        !uuidSchema.safeParse(key).success ||
+        !body.success
+      )
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Tenant, idempotency key and customer payload are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return customerEnvelopeSchema.parse(
+          await customerRegistryService.create(
+            request.headers.authorization,
+            tenant.data,
+            key,
+            body.data,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof CustomerRegistryFailure) return customerError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.get(
+    '/api/v1/commercial/customers',
+    {
+      schema: {
+        ...customerRouteSchema,
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
+            cursor: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!customerRegistryService) return customerUnavailable(request, reply);
+      const tenant = customerTenant(request);
+      const query = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          cursor: z.uuid().optional(),
+        })
+        .strict()
+        .safeParse(request.query);
+      if (tenant?.success !== true || !query.success)
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'A valid tenant and bounded pagination are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return customerListEnvelopeSchema.parse(
+          await customerRegistryService.list(
+            request.headers.authorization,
+            tenant.data,
+            query.data.limit,
+            query.data.cursor,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof CustomerRegistryFailure) return customerError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.get(
+    '/api/v1/commercial/customers/:customerId',
+    {
+      schema: {
+        ...customerRouteSchema,
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['customerId'],
+          properties: { customerId: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!customerRegistryService) return customerUnavailable(request, reply);
+      const tenant = customerTenant(request);
+      const customerId = uuidSchema.safeParse(
+        (request.params as { customerId?: string }).customerId,
+      );
+      if (tenant?.success !== true || !customerId.success)
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Valid tenant and customer identifiers are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return customerEnvelopeSchema.parse(
+          await customerRegistryService.get(
+            request.headers.authorization,
+            tenant.data,
+            customerId.data,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof CustomerRegistryFailure) return customerError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.patch(
+    '/api/v1/commercial/customers/:customerId',
+    {
+      schema: {
+        ...customerRouteSchema,
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['customerId'],
+          properties: { customerId: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['expected_version'],
+          properties: {
+            display_name: { type: 'string', minLength: 1, maxLength: 160 },
+            reference_code: { type: ['string', 'null'], minLength: 1, maxLength: 80 },
+            contact_email: { type: ['string', 'null'], format: 'email', maxLength: 254 },
+            status: { type: 'string', enum: ['ACTIVE', 'INACTIVE'] },
+            expected_version: { type: 'integer', minimum: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!customerRegistryService) return customerUnavailable(request, reply);
+      const tenant = customerTenant(request);
+      const key = request.headers['idempotency-key'];
+      const customerId = uuidSchema.safeParse(
+        (request.params as { customerId?: string }).customerId,
+      );
+      const body = customerUpdateSchema.safeParse(request.body);
+      if (
+        tenant?.success !== true ||
+        !customerId.success ||
+        typeof key !== 'string' ||
+        !uuidSchema.safeParse(key).success ||
+        !body.success
+      )
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Valid tenant, customer, idempotency key and update are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return customerEnvelopeSchema.parse(
+          await customerRegistryService.update(
+            request.headers.authorization,
+            tenant.data,
+            customerId.data,
+            key,
+            body.data,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof CustomerRegistryFailure) return customerError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({
       error: {
@@ -601,6 +897,18 @@ export async function buildApp(
   });
 
   app.setErrorHandler(async (error, request, reply) => {
+    if (error instanceof Error && 'validation' in error && Array.isArray(error.validation)) {
+      return reply.status(400).send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: 'INVALID_REQUEST',
+            message: 'The request does not match the published API contract.',
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+    }
     request.log.error(
       { error: sanitizeErrorForLog(error), correlation_id: request.correlationId },
       'request failed',
