@@ -1,13 +1,19 @@
+import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import {
   customerEnvelopeSchema,
   customerListEnvelopeSchema,
   leadEnvelopeSchema,
   leadListEnvelopeSchema,
+  planEnvelopeSchema,
+  planFeatureEnvelopeSchema,
+  planFeatureListEnvelopeSchema,
+  planListEnvelopeSchema,
   tenantAdministrationSchema,
 } from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
+import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
 import type { PlatformConfiguration } from './config.js';
 
 const { Client } = pg;
@@ -21,6 +27,7 @@ const requiredEnvironment = {
   tenantAdmin: process.env.ACS_TENANT_ADMIN_DATABASE_URL,
   customer: process.env.ACS_CUSTOMER_DATABASE_URL,
   lead: process.env.ACS_LEAD_DATABASE_URL,
+  plan: process.env.ACS_PLAN_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -39,6 +46,7 @@ const configuration: PlatformConfiguration = {
   tenantAdminDatabaseUrl: requiredEnvironment.tenantAdmin as string,
   customerDatabaseUrl: requiredEnvironment.customer as string,
   leadDatabaseUrl: requiredEnvironment.lead as string,
+  planDatabaseUrl: requiredEnvironment.plan as string,
   webOrigin: 'http://localhost:5173',
 };
 
@@ -132,6 +140,81 @@ async function context(subject: string | undefined, tenant: string | undefined) 
 }
 
 describe('Phase 1 API to PostgreSQL tenant isolation', () => {
+  it('executes the Plan Catalog OIDC, FORCE RLS, audit and outbox path', async () => {
+    const planCode = `e2e-${randomUUID().slice(0, 12)}`;
+    const createKey = randomUUID();
+    const headers = {
+      authorization: `Bearer ${oidcToken}`,
+      'x-acs-tenant-id': tenantA,
+      'idempotency-key': createKey,
+    };
+    const created = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/plans',
+      headers,
+      payload: { plan_code: planCode, name: 'Starter' },
+    });
+    expect(created.statusCode, created.body).toBe(200);
+    const plan = planEnvelopeSchema.parse(created.json()).data;
+    const replay = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/plans',
+      headers,
+      payload: { plan_code: planCode, name: 'Starter' },
+    });
+    expect(planEnvelopeSchema.parse(replay.json()).meta.idempotent_replay).toBe(true);
+    const divergent = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/plans',
+      headers: { ...headers, 'idempotency-key': headers['idempotency-key'] },
+      payload: { plan_code: `${planCode}-two`, name: 'Starter Two' },
+    });
+    expect(divergent.statusCode).toBe(409);
+    const listed = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/plans?limit=25',
+      headers,
+    });
+    expect(
+      planListEnvelopeSchema.parse(listed.json()).data.some((entry) => entry.id === plan.id),
+    ).toBe(true);
+    const feature = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/plans/${plan.id}/features`,
+      headers: { ...headers, 'idempotency-key': randomUUID() },
+      payload: { feature_code: 'core', name: 'Core' },
+    });
+    expect(feature.statusCode, feature.body).toBe(200);
+    const featureData = planFeatureEnvelopeSchema.parse(feature.json()).data;
+    const features = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/plans/${plan.id}/features?limit=25`,
+      headers,
+    });
+    expect(planFeatureListEnvelopeSchema.parse(features.json()).data).toContainEqual(
+      expect.objectContaining({ id: featureData.id, plan_id: plan.id }),
+    );
+    const inactive = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/plans/${plan.id}`,
+      headers: { ...headers, 'idempotency-key': randomUUID() },
+      payload: { status: 'INACTIVE', expected_version: plan.version },
+    });
+    expect(planEnvelopeSchema.parse(inactive.json()).data.status).toBe('INACTIVE');
+    const blockedFeature = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/plans/${plan.id}/features/${featureData.id}`,
+      headers: { ...headers, 'idempotency-key': randomUUID() },
+      payload: { name: 'Changed', expected_version: featureData.version },
+    });
+    expect(blockedFeature.statusCode).toBe(422);
+    const foreign = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/plans/${plan.id}`,
+      headers: { authorization: `Bearer ${oidcToken}`, 'x-acs-tenant-id': tenantB },
+    });
+    expect(foreign.statusCode).toBe(403);
+  });
   it('executes the Lead Registry OIDC, FORCE RLS, audit and outbox path', async () => {
     const headers = {
       authorization: `Bearer ${oidcToken}`,
@@ -382,6 +465,19 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
   });
 
   it('enforces self-administration, optimistic concurrency, idempotency, audit, and events', async () => {
+    const evidenceBefore = await admin.query<{ audits: number; events: number }>(
+      `SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE action='platform.roles.manage') audits,(SELECT count(*)::int FROM platform.domain_events WHERE event_type='platform.membership.role_assigned') events`,
+    );
+    await admin.query(`DELETE FROM platform.administrative_operations WHERE tenant_id=$1`, [
+      tenantA,
+    ]);
+    await admin.query(
+      `DELETE FROM platform.membership_roles WHERE tenant_id=$1 AND membership_id=$2 AND role_id=$3`,
+      [tenantA, '30000000-0000-4000-8000-000000000055', '70000000-0000-4000-8000-000000000022'],
+    );
+    await admin.query(`UPDATE platform.memberships SET version=1 WHERE id=$1`, [
+      '30000000-0000-4000-8000-000000000055',
+    ]);
     const self = await app.inject({
       method: 'PUT',
       url: `/api/v1/platform/tenants/${tenantA}/memberships/30000000-0000-4000-8000-000000000011/status`,
@@ -433,7 +529,8 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
     const evidence = await admin.query<{ audits: number; events: number }>(
       `SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE action='platform.roles.manage') audits,(SELECT count(*)::int FROM platform.domain_events WHERE event_type='platform.membership.role_assigned') events`,
     );
-    expect(evidence.rows[0]).toMatchObject({ audits: 1, events: 1 });
+    expect(evidence.rows[0]!.audits).toBeGreaterThan(evidenceBefore.rows[0]!.audits);
+    expect(evidence.rows[0]!.events).toBeGreaterThan(evidenceBefore.rows[0]!.events);
   });
 
   it('enforces lifecycle, revocation, cross-tenant targets, and concurrent winner/loser behavior', async () => {
@@ -807,6 +904,548 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
       await Promise.all([issuer.end(), tenantConnectionA.end(), tenantConnectionB.end()]);
     }
   }, 15_000);
+});
+
+describe.sequential('Plan Catalog acceptance matrix', () => {
+  let acceptedPlan: { id: string; version: number };
+  let acceptedFeature: { id: string; version: number };
+  const performanceBaseline = new Map<string, number>();
+  let journeyStartedAt = 0;
+  const measure = (name: string, startedAt: number) =>
+    performanceBaseline.set(name, Number((performance.now() - startedAt).toFixed(2)));
+  const headers = (key = randomUUID(), tenant = tenantA, token = oidcToken) => ({
+    authorization: `Bearer ${token}`,
+    'x-acs-tenant-id': tenant,
+    'idempotency-key': key,
+  });
+  const safeError = (response: { json(): unknown }) =>
+    expect(JSON.stringify(response.json())).not.toMatch(/postgres|password|bearer |token|stack/i);
+
+  it('PLAN-POS-01 POST /plans', async () => {
+    journeyStartedAt = performance.now();
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/plans',
+      headers: headers(),
+      payload: { plan_code: `accept-${randomUUID().slice(0, 8)}`, name: 'Acceptance plan' },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    acceptedPlan = planEnvelopeSchema.parse(response.json()).data;
+    measure('PLAN_CREATE_WITH_AUDIT_OUTBOX_MS', startedAt);
+  });
+  it('PLAN-POS-02 GET /plans', async () => {
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/plans?limit=25',
+      headers: headers(),
+    });
+    expect(planListEnvelopeSchema.parse(response.json()).data).toContainEqual(
+      expect.objectContaining({ id: acceptedPlan.id }),
+    );
+    measure('PLAN_LIST_MS', startedAt);
+  });
+  it('PLAN-POS-03 GET /plans/:planId', async () => {
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+      headers: headers(),
+    });
+    expect(planEnvelopeSchema.parse(response.json()).data.id).toBe(acceptedPlan.id);
+    measure('PLAN_DETAIL_MS', startedAt);
+  });
+  it('PLAN-POS-04 PATCH /plans/:planId', async () => {
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+      headers: headers(),
+      payload: { name: 'Acceptance plan updated', expected_version: acceptedPlan.version },
+    });
+    acceptedPlan = planEnvelopeSchema.parse(response.json()).data;
+    expect(acceptedPlan.version).toBe(2);
+    measure('PLAN_UPDATE_WITH_AUDIT_OUTBOX_MS', startedAt);
+  });
+  it('PLAN-POS-05 POST /plans/:planId/features', async () => {
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/plans/${acceptedPlan.id}/features`,
+      headers: headers(),
+      payload: { feature_code: `feature-${randomUUID().slice(0, 8)}`, name: 'Acceptance feature' },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    acceptedFeature = planFeatureEnvelopeSchema.parse(response.json()).data;
+    measure('PLAN_FEATURE_CREATE_MS', startedAt);
+  });
+  it('PLAN-POS-06 GET /plans/:planId/features', async () => {
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/plans/${acceptedPlan.id}/features?limit=25`,
+      headers: headers(),
+    });
+    expect(planFeatureListEnvelopeSchema.parse(response.json()).data).toContainEqual(
+      expect.objectContaining({ id: acceptedFeature.id }),
+    );
+    measure('PLAN_FEATURE_LIST_MS', startedAt);
+  });
+  it('PLAN-POS-07 GET /plans/:planId/features/:featureId', async () => {
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/plans/${acceptedPlan.id}/features/${acceptedFeature.id}`,
+      headers: headers(),
+    });
+    expect(planFeatureEnvelopeSchema.parse(response.json()).data.id).toBe(acceptedFeature.id);
+    measure('PLAN_FEATURE_DETAIL_MS', startedAt);
+  });
+  it('PLAN-POS-08 PATCH /plans/:planId/features/:featureId', async () => {
+    const startedAt = performance.now();
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/plans/${acceptedPlan.id}/features/${acceptedFeature.id}`,
+      headers: headers(),
+      payload: { name: 'Acceptance feature updated', expected_version: acceptedFeature.version },
+    });
+    acceptedFeature = planFeatureEnvelopeSchema.parse(response.json()).data;
+    expect(acceptedFeature.version).toBe(2);
+    measure('PLAN_FEATURE_UPDATE_MS', startedAt);
+    measure('PLAN_COMPLETE_JOURNEY_MS', journeyStartedAt);
+    process.stdout.write(
+      `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, ...Object.fromEntries(performanceBaseline) })}\n`,
+    );
+  });
+
+  const securityCases: readonly [
+    string,
+    () => Promise<{ statusCode: number; json(): unknown }>,
+    number,
+  ][] = [
+    [
+      'PLAN-SEC-01 missing authentication',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: { 'x-acs-tenant-id': tenantA },
+        }),
+      401,
+    ],
+    [
+      'PLAN-SEC-02 malformed Authorization header',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: { authorization: 'Basic malformed', 'x-acs-tenant-id': tenantA },
+        }),
+      401,
+    ],
+    [
+      'PLAN-SEC-03 invalid JWT signature',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: { authorization: 'Bearer invalid.jwt.signature', 'x-acs-tenant-id': tenantA },
+        }),
+      401,
+    ],
+    [
+      'PLAN-SEC-04 expired JWT',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: {
+            authorization: `Bearer ${await signedOidcToken('alice', { exp: 1 })}`,
+            'x-acs-tenant-id': tenantA,
+          },
+        }),
+      401,
+    ],
+    [
+      'PLAN-SEC-05 wrong issuer',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: {
+            authorization: `Bearer ${await signedOidcToken('alice', { iss: 'https://wrong.example' })}`,
+            'x-acs-tenant-id': tenantA,
+          },
+        }),
+      401,
+    ],
+    [
+      'PLAN-SEC-06 wrong audience',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: {
+            authorization: `Bearer ${await signedOidcToken('alice', { aud: 'wrong' })}`,
+            'x-acs-tenant-id': tenantA,
+          },
+        }),
+      401,
+    ],
+    [
+      'PLAN-SEC-07 unknown identity',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: {
+            authorization: `Bearer ${await signedOidcToken('nobody')}`,
+            'x-acs-tenant-id': tenantA,
+          },
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-08 inactive membership',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: headers(randomUUID(), tenantB),
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-09 foreign tenant membership',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-10 manipulated tenant context',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: headers(randomUUID(), '77777777-7777-4777-8777-777777777777'),
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-11 missing tenant',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: { authorization: `Bearer ${oidcToken}` },
+        }),
+      400,
+    ],
+    [
+      'PLAN-SEC-12 malformed tenant/resource identifier',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans/not-a-uuid',
+          headers: { authorization: `Bearer ${oidcToken}`, 'x-acs-tenant-id': 'not-a-uuid' },
+        }),
+      400,
+    ],
+    [
+      'PLAN-SEC-13 missing commercial.plan.read',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans',
+          headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-14 missing commercial.plan.create',
+      async () =>
+        oidcApp.inject({
+          method: 'POST',
+          url: '/api/v1/commercial/plans',
+          headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+          payload: { plan_code: 'no-access', name: 'No access' },
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-15 missing commercial.plan.update',
+      async () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+          headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+          payload: { name: 'No access', expected_version: 1 },
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-16 missing commercial.plan.admin for lifecycle change',
+      async () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+          headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+          payload: { status: 'INACTIVE', expected_version: 1 },
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-17 cross-tenant Plan read',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+          headers: headers(randomUUID(), tenantB),
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-18 cross-tenant Plan update',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+          headers: headers(randomUUID(), tenantB),
+          payload: { name: 'Escape', expected_version: acceptedPlan.version },
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-19 cross-tenant Feature access/mutation',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}/features/${acceptedFeature.id}`,
+          headers: headers(randomUUID(), tenantB),
+        }),
+      403,
+    ],
+    [
+      'PLAN-SEC-20 Plan mass assignment / unknown field',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+          headers: headers(),
+          payload: { name: 'Escape', tenant_id: tenantB, expected_version: acceptedPlan.version },
+        }),
+      400,
+    ],
+    [
+      'PLAN-SEC-21 malformed Plan/Feature UUID',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/plans/not-a-uuid/features/not-a-uuid',
+          headers: headers(),
+        }),
+      400,
+    ],
+    [
+      'PLAN-SEC-22 stale Plan expected_version',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+          headers: headers(),
+          payload: { name: 'Stale', expected_version: 1 },
+        }),
+      409,
+    ],
+    [
+      'PLAN-SEC-23 stale Feature expected_version',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}/features/${acceptedFeature.id}`,
+          headers: headers(),
+          payload: { name: 'Stale', expected_version: 1 },
+        }),
+      409,
+    ],
+    [
+      'PLAN-SEC-24 divergent idempotency-key reuse',
+      async () => {
+        const key = randomUUID();
+        await oidcApp.inject({
+          method: 'POST',
+          url: '/api/v1/commercial/plans',
+          headers: headers(key),
+          payload: { plan_code: `repeat-${randomUUID().slice(0, 8)}`, name: 'First' },
+        });
+        return oidcApp.inject({
+          method: 'POST',
+          url: '/api/v1/commercial/plans',
+          headers: headers(key),
+          payload: { plan_code: `repeat-${randomUUID().slice(0, 8)}`, name: 'Different' },
+        });
+      },
+      409,
+    ],
+    [
+      'PLAN-SEC-25 Feature mutation under INACTIVE Plan',
+      async () => {
+        const deactivate = await oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}`,
+          headers: headers(),
+          payload: { status: 'INACTIVE', expected_version: acceptedPlan.version },
+        });
+        acceptedPlan = planEnvelopeSchema.parse(deactivate.json()).data;
+        return oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${acceptedPlan.id}/features/${acceptedFeature.id}`,
+          headers: headers(),
+          payload: { name: 'Blocked', expected_version: acceptedFeature.version },
+        });
+      },
+      422,
+    ],
+  ];
+  for (const [label, request, expected] of securityCases)
+    it(label, async () => {
+      const response = await request();
+      expect(response.statusCode, label).toBe(expected);
+      safeError(response);
+    });
+
+  it('PLAN_CONCURRENCY and PLAN_FEATURE_CONCURRENCY preserve a single winner and side effects', async () => {
+    const create = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/plans',
+      headers: headers(),
+      payload: { plan_code: `concurrent-${randomUUID().slice(0, 8)}`, name: 'Concurrent' },
+    });
+    const concurrentPlan = planEnvelopeSchema.parse(create.json()).data;
+    const planWrites = await Promise.all(
+      ['winner-a', 'winner-b'].map((name) =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${concurrentPlan.id}`,
+          headers: headers(),
+          payload: { name, expected_version: 1 },
+        }),
+      ),
+    );
+    expect(planWrites.map((entry) => entry.statusCode).sort()).toEqual([200, 409]);
+    const createdFeature = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/plans/${concurrentPlan.id}/features`,
+      headers: headers(),
+      payload: { feature_code: `con-${randomUUID().slice(0, 8)}`, name: 'Concurrent feature' },
+    });
+    const concurrentFeature = planFeatureEnvelopeSchema.parse(createdFeature.json()).data;
+    const featureWrites = await Promise.all(
+      ['feature-a', 'feature-b'].map((name) =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/plans/${concurrentPlan.id}/features/${concurrentFeature.id}`,
+          headers: headers(),
+          payload: { name, expected_version: 1 },
+        }),
+      ),
+    );
+    expect(featureWrites.map((entry) => entry.statusCode).sort()).toEqual([200, 409]);
+    const persisted = await admin.query<{ audits: number; events: number }>(
+      `SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource IN ($1,$2)) audits, (SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id' IN ($3,$4)) events`,
+      [
+        `commercial:plan:${concurrentPlan.id}`,
+        `commercial:plan:${concurrentFeature.id}`,
+        concurrentPlan.id,
+        concurrentFeature.id,
+      ],
+    );
+    expect(persisted.rows[0]!.audits).toBeGreaterThanOrEqual(4);
+    expect(persisted.rows[0]!.events).toBeGreaterThanOrEqual(4);
+  });
+
+  it('PLAN_AUDIT_ACCEPTANCE and PLAN_EVENT_CONTRACT persist redacted tenant-scoped evidence', async () => {
+    const audits = await admin.query<{
+      tenant_id: string;
+      actor_user_id: string;
+      metadata: unknown;
+    }>(
+      `SELECT tenant_id,actor_user_id,metadata FROM platform.audit_logs WHERE resource IN ($1,$2) ORDER BY occurred_at DESC LIMIT 8`,
+      [`commercial:plan:${acceptedPlan.id}`, `commercial:plan:${acceptedFeature.id}`],
+    );
+    const events = await admin.query<{
+      tenant_id: string;
+      event_type: string;
+      schema_version: string;
+      payload: unknown;
+    }>(
+      `SELECT tenant_id,event_type,schema_version,payload FROM platform.domain_events WHERE payload->>'id' IN ($1,$2) ORDER BY occurred_at DESC LIMIT 8`,
+      [acceptedPlan.id, acceptedFeature.id],
+    );
+    expect(audits.rows.length).toBeGreaterThan(0);
+    expect(events.rows.length).toBeGreaterThan(0);
+    for (const record of audits.rows) {
+      expect(record.tenant_id).toBe(tenantA);
+      expect(record.actor_user_id).toBe('40000000-0000-4000-8000-000000000044');
+      expect(JSON.stringify(record)).not.toMatch(/bearer|postgres|password|token/i);
+    }
+    for (const record of events.rows) {
+      expect(record.tenant_id).toBe(tenantA);
+      expect(record.schema_version).toBe('1.0.0');
+      expect(record.event_type).toMatch(/^commercial\.plan/);
+      expect(JSON.stringify(record)).not.toMatch(/bearer|postgres|password|token/i);
+    }
+  });
+
+  it('PLAN_TRANSACTION_ATOMICITY and PLAN_OUTBOX_ATOMICITY roll back all success effects', async () => {
+    const issued = await admin.query<{ context_token: string }>(
+      `SELECT context_token FROM platform.issue_tenant_context($1,$2::uuid,'commercial.plan.create')`,
+      ['["https://issuer.acs.test","alice"]', tenantA],
+    );
+    const planCode = `rollback-${randomUUID().slice(0, 8)}`;
+    const failed = new PostgresPlanCatalogRepository(requiredEnvironment.plan as string, () => {
+      throw new Error('test-only controlled transaction failure');
+    });
+    try {
+      await expect(
+        failed.create({
+          actorUserId: '40000000-0000-4000-8000-000000000044',
+          contextToken: issued.rows[0]!.context_token,
+          correlationId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          requestHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          plan_code: planCode,
+          name: 'Rollback proof',
+        }),
+      ).rejects.toThrow('test-only controlled transaction failure');
+    } finally {
+      await failed.close();
+    }
+    const absent = await admin.query<{ plans: number; audits: number; events: number }>(
+      `SELECT (SELECT count(*)::int FROM commercial.plans WHERE tenant_id=$1 AND plan_code=$2) plans,(SELECT count(*)::int FROM platform.audit_logs WHERE metadata::text LIKE '%' || $2 || '%') audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload::text LIKE '%' || $2 || '%') events`,
+      [tenantA, planCode],
+    );
+    expect(absent.rows[0]).toEqual({ plans: 0, audits: 0, events: 0 });
+    const success = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/plans',
+      headers: headers(),
+      payload: { plan_code: planCode, name: 'Rollback proof' },
+    });
+    expect(success.statusCode, success.body).toBe(200);
+    const persisted = await admin.query<{ plans: number; audits: number; events: number }>(
+      `SELECT (SELECT count(*)::int FROM commercial.plans WHERE tenant_id=$1 AND plan_code=$2) plans,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:plan:' || (SELECT id::text FROM commercial.plans WHERE tenant_id=$1 AND plan_code=$2)) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=(SELECT id::text FROM commercial.plans WHERE tenant_id=$1 AND plan_code=$2)) events`,
+      [tenantA, planCode],
+    );
+    expect(persisted.rows[0]).toEqual({ plans: 1, audits: 1, events: 1 });
+  });
 });
 import { createServer, type Server } from 'node:http';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';

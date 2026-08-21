@@ -9,6 +9,14 @@ import {
   leadEnvelopeSchema,
   leadListEnvelopeSchema,
   leadUpdateSchema,
+  planCreateSchema,
+  planEnvelopeSchema,
+  planFeatureCreateSchema,
+  planFeatureEnvelopeSchema,
+  planFeatureListEnvelopeSchema,
+  planFeatureUpdateSchema,
+  planListEnvelopeSchema,
+  planUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -47,8 +55,10 @@ import {
 import { PostgresTenantAdminRepository } from './postgres-tenant-administration.js';
 import { PostgresCustomerRepository } from './postgres-customer-registry.js';
 import { PostgresLeadRepository } from './postgres-lead-registry.js';
+import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
+import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
 import {
   TenantAdministrationFailure,
   TenantAdministrationService,
@@ -70,6 +80,7 @@ export async function buildApp(
     readonly tenantAdministrationService?: TenantAdministrationService;
     readonly customerRegistryService?: CustomerRegistryService;
     readonly leadRegistryService?: LeadRegistryService;
+    readonly planCatalogService?: PlanCatalogService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -92,6 +103,8 @@ export async function buildApp(
   let customerRegistryService = options.customerRegistryService;
   let leadRepository: PostgresLeadRepository | undefined;
   let leadRegistryService = options.leadRegistryService;
+  let planRepository: PostgresPlanCatalogRepository | undefined;
+  let planCatalogService = options.planCatalogService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -158,6 +171,16 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.planDatabaseUrl !== undefined) {
+      planRepository = new PostgresPlanCatalogRepository(configuration.planDatabaseUrl);
+      planCatalogService = new PlanCatalogService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        planRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -167,6 +190,7 @@ export async function buildApp(
         tenantAdminRepository?.close(),
         customerRepository?.close(),
         leadRepository?.close(),
+        planRepository?.close(),
       ]);
     });
   }
@@ -1171,6 +1195,262 @@ export async function buildApp(
       }
     },
   );
+
+  const planError = (
+    error: PlanCatalogFailure,
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply
+      .status(
+        error.code === 'UNAUTHENTICATED'
+          ? 401
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : error.code === 'STALE_VERSION' || error.code === 'IDEMPOTENCY_CONFLICT'
+              ? 409
+              : error.code === 'PLAN_INACTIVE'
+                ? 422
+                : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: error.code,
+            message: error.message,
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+  const planUnavailable = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'PLAN_CATALOG_NOT_CONFIGURED',
+          message: 'Plan Catalog dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const planInput = (request: { headers: Record<string, unknown> }) =>
+    z.uuid().safeParse(request.headers['x-acs-tenant-id']);
+  const planKey = (request: { headers: Record<string, unknown> }) => {
+    const key = request.headers['idempotency-key'];
+    return typeof key === 'string' && uuidSchema.safeParse(key).success ? key : null;
+  };
+  const planParam = (request: { params: unknown }, key: string) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>)[key]
+        : undefined,
+    );
+  const invalidPlan = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Valid tenant, identifiers, request body and idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  app.post('/api/v1/commercial/plans', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      key = planKey(request),
+      body = planCreateSchema.safeParse(request.body);
+    if (!tenant.success || !key || !body.success) return invalidPlan(request, reply);
+    try {
+      return planEnvelopeSchema.parse(
+        await planCatalogService.create(
+          request.headers.authorization,
+          tenant.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/plans', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      q = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          cursor: z.uuid().optional(),
+        })
+        .strict()
+        .safeParse(request.query);
+    if (!tenant.success || !q.success) return invalidPlan(request, reply);
+    try {
+      return planListEnvelopeSchema.parse(
+        await planCatalogService.list(
+          request.headers.authorization,
+          tenant.data,
+          q.data.limit,
+          q.data.cursor,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/plans/:planId', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      id = planParam(request, 'planId');
+    if (!tenant.success || !id.success) return invalidPlan(request, reply);
+    try {
+      return planEnvelopeSchema.parse(
+        await planCatalogService.get(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+  app.patch('/api/v1/commercial/plans/:planId', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      id = planParam(request, 'planId'),
+      key = planKey(request),
+      body = planUpdateSchema.safeParse(request.body);
+    if (!tenant.success || !id.success || !key || !body.success) return invalidPlan(request, reply);
+    try {
+      return planEnvelopeSchema.parse(
+        await planCatalogService.update(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+  app.post('/api/v1/commercial/plans/:planId/features', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      id = planParam(request, 'planId'),
+      key = planKey(request),
+      body = planFeatureCreateSchema.safeParse(request.body);
+    if (!tenant.success || !id.success || !key || !body.success) return invalidPlan(request, reply);
+    try {
+      return planFeatureEnvelopeSchema.parse(
+        await planCatalogService.createFeature(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/plans/:planId/features', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      id = planParam(request, 'planId'),
+      q = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          cursor: z.uuid().optional(),
+        })
+        .strict()
+        .safeParse(request.query);
+    if (!tenant.success || !id.success || !q.success) return invalidPlan(request, reply);
+    try {
+      return planFeatureListEnvelopeSchema.parse(
+        await planCatalogService.listFeatures(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          q.data.limit,
+          q.data.cursor,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/plans/:planId/features/:featureId', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      planId = planParam(request, 'planId'),
+      featureId = planParam(request, 'featureId');
+    if (!tenant.success || !planId.success || !featureId.success)
+      return invalidPlan(request, reply);
+    try {
+      return planFeatureEnvelopeSchema.parse(
+        await planCatalogService.getFeature(
+          request.headers.authorization,
+          tenant.data,
+          planId.data,
+          featureId.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+  app.patch('/api/v1/commercial/plans/:planId/features/:featureId', async (request, reply) => {
+    if (!planCatalogService) return planUnavailable(request, reply);
+    const tenant = planInput(request),
+      planId = planParam(request, 'planId'),
+      featureId = planParam(request, 'featureId'),
+      key = planKey(request),
+      body = planFeatureUpdateSchema.safeParse(request.body);
+    if (!tenant.success || !planId.success || !featureId.success || !key || !body.success)
+      return invalidPlan(request, reply);
+    try {
+      return planFeatureEnvelopeSchema.parse(
+        await planCatalogService.updateFeature(
+          request.headers.authorization,
+          tenant.data,
+          planId.data,
+          featureId.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
 
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({
