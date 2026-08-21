@@ -19,6 +19,7 @@ Status: `PENDING_GOVERNANCE_APPROVAL`. This does not replace normative ANX-C.
 | Consumer receipt       | PostgreSQL `platform.consumer_event_receipts`                           | Consuming service owner pending                                  | SECURITY; configurable retry/replay-window retention                                                                        | `IMPLEMENTATION_DEFINED`         |
 | Event lifecycle audit  | PostgreSQL `platform.event_lifecycle_audit`                             | Governance/Audit                                                 | SECURITY; append-only; retention pending approval                                                                           | `IMPLEMENTATION_DEFINED`         |
 | Commercial customer    | PostgreSQL `commercial.customers`                                       | Commercial Data Owner; named owner `PENDING_GOVERNANCE_APPROVAL` | INTERNAL identifiers; BUSINESS registry data; optional CONFIDENTIAL_PII contact; no hard delete; retention pending approval | `IMPLEMENTED_REMOTE_CI_VERIFIED` |
+| Commercial lead        | PostgreSQL `commercial.leads`                                           | Commercial Data Owner; named owner `PENDING_GOVERNANCE_APPROVAL` | INTERNAL identifiers; BUSINESS registry data; optional CONFIDENTIAL_PII contact; no hard delete; retention pending approval | `APPROVED_FOR_IMPLEMENTATION`    |
 
 Customer lineage is: authenticated user action → Customer API → authoritative
 `commercial.customers` row → append-only audit → canonical domain event/outbox → Event Foundation.

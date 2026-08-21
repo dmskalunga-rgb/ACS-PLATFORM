@@ -23,6 +23,9 @@ Status: `PENDING_GOVERNANCE_APPROVAL`. This does not replace normative ANX-B.
 | Customer Registry Web  | Customer Registry API  | `/api/v1/commercial/customers`; OIDC; tenant-scoped permissions      | Explicit loading/empty/error/unauthorized/forbidden/conflict | `IMPLEMENTED_REMOTE_CI_VERIFIED` |
 | Customer Registry API  | PostgreSQL             | Trusted tenant grant, `commercial.customers`, FORCE RLS              | Transaction rollback and fail closed                         | `IMPLEMENTED_REMOTE_CI_VERIFIED` |
 | Customer mutation      | Transactional outbox   | Versioned `commercial.customer.*` canonical envelope                 | Atomic rollback; contact PII excluded                        | `IMPLEMENTED_REMOTE_CI_VERIFIED` |
+| Lead Registry Web      | Lead Registry API      | `/api/v1/commercial/leads`; OIDC; tenant-scoped permissions          | Explicit loading/empty/error/unauthorized/forbidden/conflict | `APPROVED_FOR_IMPLEMENTATION`    |
+| Lead Registry API      | PostgreSQL             | Trusted tenant grant, `commercial.leads`, FORCE RLS                  | Transaction rollback and fail closed                         | `APPROVED_FOR_IMPLEMENTATION`    |
+| Lead mutation          | Transactional outbox   | Versioned `commercial.lead.*` canonical envelope                     | Atomic rollback; contact PII excluded                        | `APPROVED_FOR_IMPLEMENTATION`    |
 | Outbox publisher       | EventTransportPort     | Existing broker-neutral at-least-once contract                       | Retry/DLQ/lease recovery; production broker `NOT_SELECTED`   | `IMPLEMENTATION_DEFINED`         |
 
 OIDC owner, SLA, provider product and confidential endpoint values remain

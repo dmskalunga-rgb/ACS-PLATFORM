@@ -2,6 +2,8 @@ import pg from 'pg';
 import {
   customerEnvelopeSchema,
   customerListEnvelopeSchema,
+  leadEnvelopeSchema,
+  leadListEnvelopeSchema,
   tenantAdministrationSchema,
 } from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,6 +20,7 @@ const requiredEnvironment = {
   tenant: process.env.ACS_TENANT_DATABASE_URL,
   tenantAdmin: process.env.ACS_TENANT_ADMIN_DATABASE_URL,
   customer: process.env.ACS_CUSTOMER_DATABASE_URL,
+  lead: process.env.ACS_LEAD_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -35,6 +38,7 @@ const configuration: PlatformConfiguration = {
   tenantDatabaseUrl: requiredEnvironment.tenant as string,
   tenantAdminDatabaseUrl: requiredEnvironment.tenantAdmin as string,
   customerDatabaseUrl: requiredEnvironment.customer as string,
+  leadDatabaseUrl: requiredEnvironment.lead as string,
   webOrigin: 'http://localhost:5173',
 };
 
@@ -128,6 +132,82 @@ async function context(subject: string | undefined, tenant: string | undefined) 
 }
 
 describe('Phase 1 API to PostgreSQL tenant isolation', () => {
+  it('executes the Lead Registry OIDC, FORCE RLS, audit and outbox path', async () => {
+    const headers = {
+      authorization: `Bearer ${oidcToken}`,
+      'x-acs-tenant-id': tenantA,
+      'idempotency-key': '83000000-0000-4000-8000-000000000011',
+    };
+    const created = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/leads',
+      headers,
+      payload: { display_name: 'Acme Prospect', source: 'MANUAL', contact_email: 'lead@acme.test' },
+    });
+    expect(created.statusCode, created.body).toBe(200);
+    const lead = leadEnvelopeSchema.parse(created.json()).data;
+    expect(lead).toMatchObject({ display_name: 'Acme Prospect', status: 'NEW', version: 1 });
+    const replay = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/leads',
+      headers,
+      payload: { display_name: 'Acme Prospect', source: 'MANUAL', contact_email: 'lead@acme.test' },
+    });
+    expect(replay.json()).toMatchObject({
+      data: { id: lead.id },
+      meta: { idempotent_replay: true },
+    });
+    const divergent = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/leads',
+      headers,
+      payload: { display_name: 'Different lead' },
+    });
+    expect(divergent.statusCode).toBe(409);
+    const list = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/leads?limit=10',
+      headers: { authorization: `Bearer ${oidcToken}`, 'x-acs-tenant-id': tenantA },
+    });
+    expect(leadListEnvelopeSchema.parse(list.json()).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: lead.id })]),
+    );
+    const foreign = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/leads/${lead.id}`,
+      headers: {
+        authorization: `Bearer ${await signedOidcToken('charlie')}`,
+        'x-acs-tenant-id': tenantB,
+      },
+    });
+    expect(foreign.statusCode).toBe(403);
+    const mass = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/leads/${lead.id}`,
+      headers: { ...headers, 'idempotency-key': '83000000-0000-4000-8000-000000000012' },
+      payload: { tenant_id: tenantB, display_name: 'escape', expected_version: 1 },
+    });
+    expect(mass.statusCode).toBe(400);
+    const updated = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/leads/${lead.id}`,
+      headers: { ...headers, 'idempotency-key': '83000000-0000-4000-8000-000000000013' },
+      payload: { status: 'QUALIFIED', expected_version: 1 },
+    });
+    expect(updated.json()).toMatchObject({ data: { version: 2, status: 'QUALIFIED' } });
+    const stale = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/leads/${lead.id}`,
+      headers: { ...headers, 'idempotency-key': '83000000-0000-4000-8000-000000000014' },
+      payload: { display_name: 'stale', expected_version: 1 },
+    });
+    expect(stale.statusCode).toBe(409);
+    const evidence = await admin.query<{ audits: number; events: number; pii: number }>(
+      `SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource=$1) audits, (SELECT count(*)::int FROM platform.domain_events WHERE payload->>'lead_id'=$2) events, (SELECT count(*)::int FROM platform.domain_events WHERE payload::text LIKE '%lead@acme.test%') pii`,
+      [`commercial:lead:${lead.id}`, lead.id],
+    );
+    expect(evidence.rows[0]).toEqual({ audits: 2, events: 2, pii: 0 });
+  });
   it('executes the Customer Registry OIDC, authorization, RLS, audit and outbox path', async () => {
     const startedAt = performance.now();
     const headers = {
