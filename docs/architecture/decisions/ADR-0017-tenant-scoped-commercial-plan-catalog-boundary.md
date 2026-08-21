@@ -34,3 +34,12 @@ concurrency, idempotency, audit and canonical `commercial.plan.*` /
 `commercial.plan_feature.*` outbox events. Retention, production broker,
 production identity configuration, SLOs and named ownership remain governance
 decisions and this ADR remains `PROPOSED` until separately accepted.
+
+## Alternatives rejected and unresolved decisions
+
+A platform-global catalog, reusable cross-Plan Feature catalog, independent
+Feature lifecycle, arbitrary JSON constraints and a pricing/subscription-led
+model are rejected for this slice because they expand the authorized master-data
+boundary. Numeric retention, named owners/approvers, production broker,
+production IdP/client registration, provider-specific assurance mapping and
+SLO thresholds remain unresolved governance decisions.

@@ -89,9 +89,9 @@ subscriptions and other non-allowlisted fields are rejected.
 
 `INACTIVE` Plans remain readable to authorized actors and cannot accept new
 feature creation or feature update. Feature mutation is rejected when its
-parent is inactive. The future implementation must decide whether a Plan
-version increments for a child mutation and document it in the OpenAPI
-contract; the child `expected_version` remains mandatory either way.
+parent is inactive. A Plan version does not increment for a managed-child
+mutation; the child `expected_version` is mandatory and is the concurrency
+token for that mutation.
 
 ## Audit, events and observability
 
