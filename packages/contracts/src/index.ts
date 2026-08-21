@@ -6,3 +6,4 @@ export * from './customer-registry.js';
 export * from './lead-registry.js';
 export * from './plan-catalog.js';
 export * from './partner-registry.js';
+export * from './opportunity-registry.js';
