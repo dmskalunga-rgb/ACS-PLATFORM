@@ -9,11 +9,15 @@ import {
   planFeatureEnvelopeSchema,
   planFeatureListEnvelopeSchema,
   planListEnvelopeSchema,
+  partnerEnvelopeSchema,
+  partnerListEnvelopeSchema,
+  type Partner,
   tenantAdministrationSchema,
 } from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
 import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
+import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.js';
 import type { PlatformConfiguration } from './config.js';
 
 const { Client } = pg;
@@ -28,6 +32,7 @@ const requiredEnvironment = {
   customer: process.env.ACS_CUSTOMER_DATABASE_URL,
   lead: process.env.ACS_LEAD_DATABASE_URL,
   plan: process.env.ACS_PLAN_DATABASE_URL,
+  partner: process.env.ACS_PARTNER_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -47,11 +52,13 @@ const configuration: PlatformConfiguration = {
   customerDatabaseUrl: requiredEnvironment.customer as string,
   leadDatabaseUrl: requiredEnvironment.lead as string,
   planDatabaseUrl: requiredEnvironment.plan as string,
+  partnerDatabaseUrl: requiredEnvironment.partner as string,
   webOrigin: 'http://localhost:5173',
 };
 
 const tenantA = '00000000-0000-4000-8000-000000000011';
 const tenantB = '00000000-0000-4000-8000-000000000022';
+const tenantC = '00000000-0000-4000-8000-000000000033';
 let app: Awaited<ReturnType<typeof buildApp>>;
 let oidcApp: Awaited<ReturnType<typeof buildApp>>;
 let admin: pg.Client;
@@ -904,6 +911,487 @@ describe('Phase 1 API to PostgreSQL tenant isolation', () => {
       await Promise.all([issuer.end(), tenantConnectionA.end(), tenantConnectionB.end()]);
     }
   }, 15_000);
+});
+
+describe.sequential('Partner Registry acceptance matrix', () => {
+  let accepted: Partner;
+  const headers = (key = randomUUID(), tenant = tenantA, token = oidcToken) => ({
+    authorization: `Bearer ${token}`,
+    'x-acs-tenant-id': tenant,
+    'idempotency-key': key,
+  });
+  it('PARTNER-POS-01 through PARTNER-POS-04 create, list, detail, update, audit and event', async () => {
+    const started = performance.now();
+    const createKey = randomUUID();
+    const createStartedAt = performance.now();
+    const create = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(createKey),
+      payload: {
+        partner_code: `partner-${randomUUID().slice(0, 8)}`,
+        display_name: 'Partner acceptance',
+      },
+    });
+    const createMilliseconds = performance.now() - createStartedAt;
+    expect(create.statusCode, create.body).toBe(200);
+    accepted = partnerEnvelopeSchema.parse(create.json()).data;
+    const replay = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(createKey),
+      payload: { partner_code: accepted.partner_code, display_name: accepted.display_name },
+    });
+    expect(partnerEnvelopeSchema.parse(replay.json()).meta.idempotent_replay).toBe(true);
+    const listStartedAt = performance.now();
+    const list = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/partners?limit=25',
+      headers: headers(),
+    });
+    const listMilliseconds = performance.now() - listStartedAt;
+    expect(partnerListEnvelopeSchema.parse(list.json()).data).toContainEqual(
+      expect.objectContaining({ id: accepted.id }),
+    );
+    const detailStartedAt = performance.now();
+    const detail = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/partners/${accepted.id}`,
+      headers: headers(),
+    });
+    const detailMilliseconds = performance.now() - detailStartedAt;
+    expect(partnerEnvelopeSchema.parse(detail.json()).data.id).toBe(accepted.id);
+    const updateStartedAt = performance.now();
+    const update = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/partners/${accepted.id}`,
+      headers: headers(),
+      payload: { display_name: 'Partner acceptance updated', expected_version: accepted.version },
+    });
+    const updateMilliseconds = performance.now() - updateStartedAt;
+    expect(update.statusCode, update.body).toBe(200);
+    accepted = partnerEnvelopeSchema.parse(update.json()).data;
+    const lifecycleStartedAt = performance.now();
+    const lifecycle = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/partners/${accepted.id}`,
+      headers: headers(),
+      payload: { status: 'INACTIVE', expected_version: accepted.version },
+    });
+    const lifecycleMilliseconds = performance.now() - lifecycleStartedAt;
+    expect(partnerEnvelopeSchema.parse(lifecycle.json()).data.status).toBe('INACTIVE');
+    const evidence = await admin.query<{ audits: number; events: number; leaked: number }>(
+      `SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource=$1) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=$2) events,(SELECT count(*)::int FROM platform.domain_events WHERE payload::text LIKE '%Partner acceptance%') leaked`,
+      [`commercial:partner:${accepted.id}`, accepted.id],
+    );
+    expect(evidence.rows[0]).toEqual({ audits: 3, events: 3, leaked: 0 });
+    process.stdout.write(
+      `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, PARTNER_CREATE_WITH_AUDIT_OUTBOX_MS: Number(createMilliseconds.toFixed(2)), PARTNER_DETAIL_MS: Number(detailMilliseconds.toFixed(2)), PARTNER_LIST_MS: Number(listMilliseconds.toFixed(2)), PARTNER_UPDATE_WITH_AUDIT_OUTBOX_MS: Number(updateMilliseconds.toFixed(2)), PARTNER_STATUS_TRANSITION_MS: Number(lifecycleMilliseconds.toFixed(2)), PARTNER_COMPLETE_JOURNEY_MS: Number((performance.now() - started).toFixed(2)) })}\n`,
+    );
+  });
+  const securityCases: readonly [string, () => Promise<{ statusCode: number }>, number][] = [
+    [
+      'PRT-NEG-001 unauthenticated create',
+      () =>
+        oidcApp.inject({
+          method: 'POST',
+          url: '/api/v1/commercial/partners',
+          headers: { 'x-acs-tenant-id': tenantA, 'idempotency-key': randomUUID() },
+          payload: { partner_code: 'unauth', display_name: 'Unauth' },
+        }),
+      401,
+    ],
+    [
+      'PRT-NEG-002 unauthenticated list',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/partners',
+          headers: { 'x-acs-tenant-id': tenantA },
+        }),
+      401,
+    ],
+    [
+      'PRT-NEG-003 unauthenticated detail',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: { 'x-acs-tenant-id': tenantA },
+        }),
+      401,
+    ],
+    [
+      'PRT-NEG-004 unauthenticated patch',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: { 'x-acs-tenant-id': tenantA, 'idempotency-key': randomUUID() },
+          payload: { display_name: 'No', expected_version: accepted.version },
+        }),
+      401,
+    ],
+    [
+      'PRT-NEG-005 create permission denied',
+      async () =>
+        oidcApp.inject({
+          method: 'POST',
+          url: '/api/v1/commercial/partners',
+          headers: headers(randomUUID(), tenantC, await signedOidcToken('bob')),
+          payload: { partner_code: 'denied', display_name: 'Denied' },
+        }),
+      403,
+    ],
+    [
+      'PRT-NEG-006 read permission denied',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/partners',
+          headers: headers(randomUUID(), tenantC, await signedOidcToken('bob')),
+        }),
+      403,
+    ],
+    [
+      'PRT-NEG-007 detail permission denied',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(randomUUID(), tenantC, await signedOidcToken('bob')),
+        }),
+      403,
+    ],
+    [
+      'PRT-NEG-008 patch permission denied',
+      async () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(randomUUID(), tenantC, await signedOidcToken('bob')),
+          payload: { display_name: 'Denied', expected_version: accepted.version },
+        }),
+      403,
+    ],
+    [
+      'PRT-NEG-009 tenant injection',
+      () =>
+        oidcApp.inject({
+          method: 'POST',
+          url: '/api/v1/commercial/partners',
+          headers: headers(),
+          payload: { partner_code: 'nope', display_name: 'Nope', tenant_id: tenantB },
+        }),
+      400,
+    ],
+    [
+      'PRT-NEG-011 mass assignment',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(),
+          payload: {
+            partner_id: randomUUID(),
+            created_at: '2026-01-01T00:00:00.000Z',
+            commission_rate: 1,
+            expected_version: accepted.version,
+          },
+        }),
+      400,
+    ],
+    [
+      'PRT-NEG-021 invalid lifecycle',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(),
+          payload: { status: 'SUSPENDED', expected_version: accepted.version },
+        }),
+      400,
+    ],
+    [
+      'PRT-NEG-022 hard delete unavailable',
+      () =>
+        oidcApp.inject({
+          method: 'DELETE',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(),
+        }),
+      404,
+    ],
+    [
+      'PRT-NEG-013 cross-tenant detail',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(randomUUID(), tenantB),
+        }),
+      403,
+    ],
+    [
+      'PRT-NEG-014 cross-tenant patch',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(randomUUID(), tenantB),
+          payload: { display_name: 'Escape', expected_version: accepted.version },
+        }),
+      403,
+    ],
+    [
+      'PRT-NEG-016 stale version',
+      () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(),
+          payload: { display_name: 'Stale', expected_version: 1 },
+        }),
+      409,
+    ],
+  ];
+  it.each(securityCases)('%s', async (label, request, status) => {
+    expect((await request()).statusCode, label).toBe(status);
+  });
+  it('PRT-NEG-010 unknown field rejection', async () => {
+    const r = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(),
+      payload: { partner_code: 'unknown', display_name: 'Unknown', unknown_field: true },
+    });
+    expect(r.statusCode).toBe(400);
+  });
+  it('PRT-NEG-012 cross-tenant list isolation', async () => {
+    const created = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+      payload: {
+        partner_code: `tenant-b-${randomUUID().slice(0, 8)}`,
+        display_name: 'Tenant B isolated',
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const foreign = partnerEnvelopeSchema.parse(created.json()).data;
+    const r = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/partners?limit=100',
+      headers: headers(),
+    });
+    const data = partnerListEnvelopeSchema.parse(r.json()).data;
+    expect(data.some((partner) => partner.id === accepted.id)).toBe(true);
+    expect(data.some((partner) => partner.id === foreign.id)).toBe(false);
+  });
+  it('PRT-NEG-015 BOLA/IDOR foreign identifier is denied', async () => {
+    const r = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/partners/${accepted.id}`,
+      headers: headers(randomUUID(), tenantB),
+    });
+    expect(r.statusCode).toBe(403);
+  });
+  it('PARTNER-CONCURRENCY and atomicity preserve one winner and no partial side effects', async () => {
+    const writes = await Promise.all(
+      ['a', 'b'].map((display_name) =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/partners/${accepted.id}`,
+          headers: headers(),
+          payload: { display_name, expected_version: 3 },
+        }),
+      ),
+    );
+    expect(writes.map((entry) => entry.statusCode).sort()).toEqual([200, 409]);
+    const issued = await admin.query<{ context_token: string }>(
+      `SELECT context_token FROM platform.issue_tenant_context($1,$2::uuid,'commercial.partner.create')`,
+      ['["https://issuer.acs.test","alice"]', tenantA],
+    );
+    const code = `rollback-${randomUUID().slice(0, 8)}`;
+    const failed = new PostgresPartnerRegistryRepository(
+      requiredEnvironment.partner as string,
+      () => {
+        throw new Error('test-only controlled transaction failure');
+      },
+    );
+    try {
+      await expect(
+        failed.create({
+          actorUserId: '40000000-0000-4000-8000-000000000044',
+          contextToken: issued.rows[0]!.context_token,
+          correlationId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          requestHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          partner_code: code,
+          display_name: 'Rollback proof',
+        }),
+      ).rejects.toThrow('test-only controlled transaction failure');
+    } finally {
+      await failed.close();
+    }
+    expect(
+      (
+        await admin.query<{ count: number }>(
+          'SELECT count(*)::int AS count FROM commercial.partners WHERE tenant_id=$1 AND partner_code=$2',
+          [tenantA, code],
+        )
+      ).rows[0]!.count,
+    ).toBe(0);
+  });
+  it('PARTNER-SEC uniqueness and divergent replay are tenant-scoped and deterministic', async () => {
+    const duplicate = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(),
+      payload: { partner_code: accepted.partner_code.toUpperCase(), display_name: 'Duplicate' },
+    });
+    expect(duplicate.statusCode).toBe(409);
+    const key = randomUUID();
+    const first = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(key),
+      payload: { partner_code: `replay-${randomUUID().slice(0, 8)}`, display_name: 'First' },
+    });
+    expect(first.statusCode).toBe(200);
+    const divergent = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(key),
+      payload: { partner_code: `replay-${randomUUID().slice(0, 8)}`, display_name: 'Different' },
+    });
+    expect(divergent.statusCode).toBe(409);
+    const properties = await admin.query<{
+      rls: boolean;
+      force: boolean;
+      bypass: boolean;
+      superuser: boolean;
+    }>(
+      `SELECT c.relrowsecurity AS rls,c.relforcerowsecurity AS force,r.rolbypassrls AS bypass,r.rolsuper AS superuser FROM pg_class c CROSS JOIN pg_roles r WHERE c.oid='commercial.partners'::regclass AND r.rolname='acs_phase2_partner_registry'`,
+    );
+    expect(properties.rows[0]).toEqual({ rls: true, force: true, bypass: false, superuser: false });
+  });
+  it('PRT-NEG-017 rejects a duplicate normalized code in the same tenant', async () => {
+    const r = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(),
+      payload: { partner_code: accepted.partner_code.toUpperCase(), display_name: 'Duplicate' },
+    });
+    expect(r.statusCode).toBe(409);
+  });
+  it('PRT-NEG-019 rejects divergent idempotency replay', async () => {
+    const key = randomUUID();
+    await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(key),
+      payload: { partner_code: `diff-${randomUUID().slice(0, 8)}`, display_name: 'First' },
+    });
+    const r = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(key),
+      payload: { partner_code: `diff-${randomUUID().slice(0, 8)}`, display_name: 'Different' },
+    });
+    expect(r.statusCode).toBe(409);
+  });
+  it('PRT-NEG-020 replays the same idempotent request without a duplicate row', async () => {
+    const key = randomUUID(),
+      code = `same-${randomUUID().slice(0, 8)}`,
+      payload = { partner_code: code, display_name: 'Same' };
+    const first = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(key),
+      payload,
+    });
+    const replay = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(key),
+      payload,
+    });
+    expect(partnerEnvelopeSchema.parse(replay.json()).data.id).toBe(
+      partnerEnvelopeSchema.parse(first.json()).data.id,
+    );
+    expect(
+      (
+        await admin.query<{ count: number }>(
+          'SELECT count(*)::int AS count FROM commercial.partners WHERE tenant_id=$1 AND partner_code=$2',
+          [tenantA, code],
+        )
+      ).rows[0]!.count,
+    ).toBe(1);
+  });
+  it('PRT-NEG-023 audit redacts sensitive data', async () => {
+    const r = await admin.query(
+      'SELECT actor_user_id,tenant_id,action,resource,metadata FROM platform.audit_logs WHERE resource=$1',
+      [`commercial:partner:${accepted.id}`],
+    );
+    expect(JSON.stringify(r.rows)).not.toMatch(
+      /bearer|token|password|commission|financial|partner acceptance/i,
+    );
+  });
+  it('PRT-NEG-024 event payload redacts sensitive data', async () => {
+    const r = await admin.query(
+      "SELECT payload FROM platform.domain_events WHERE payload->>'id'=$1",
+      [accepted.id],
+    );
+    expect(JSON.stringify(r.rows)).not.toMatch(
+      /bearer|token|password|commission|financial|partner acceptance/i,
+    );
+  });
+  it('PRT-NEG-025 direct Partner role retains FORCE RLS and no bypass authority', async () => {
+    const r = await admin.query<{
+      rls: boolean;
+      force: boolean;
+      bypass: boolean;
+      superuser: boolean;
+    }>(
+      `SELECT c.relrowsecurity AS rls,c.relforcerowsecurity AS force,ro.rolbypassrls AS bypass,ro.rolsuper AS superuser FROM pg_class c CROSS JOIN pg_roles ro WHERE c.oid='commercial.partners'::regclass AND ro.rolname='acs_phase2_partner_registry'`,
+    );
+    expect(r.rows[0]).toEqual({ rls: true, force: true, bypass: false, superuser: false });
+  });
+  it('PRT-NEG-018 allows the same normalized code in a different authorized tenant', async () => {
+    const code = `shared-${randomUUID().slice(0, 8)}`;
+    const a = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(),
+      payload: { partner_code: code.toUpperCase(), display_name: 'Tenant A Partner' },
+    });
+    const b = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/partners',
+      headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+      payload: { partner_code: code, display_name: 'Tenant B Partner' },
+    });
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(200);
+    const aPartner = partnerEnvelopeSchema.parse(a.json()).data;
+    const bPartner = partnerEnvelopeSchema.parse(b.json()).data;
+    expect(aPartner.id).not.toBe(bPartner.id);
+    const foreign = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/partners/${bPartner.id}`,
+      headers: headers(),
+    });
+    expect(foreign.statusCode).toBe(404);
+    const reverse = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/partners/${aPartner.id}`,
+      headers: headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+    });
+    expect(reverse.statusCode).toBe(404);
+  });
 });
 
 describe.sequential('Plan Catalog acceptance matrix', () => {

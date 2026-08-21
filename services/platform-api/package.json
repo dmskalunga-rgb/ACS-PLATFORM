@@ -15,6 +15,7 @@
     "test:customer-registry:e2e": "vitest run src/platform-context.e2e.test.ts -t Customer.Registry",
     "test:lead-registry:e2e": "vitest run src/platform-context.e2e.test.ts -t Lead.Registry",
     "test:plan-catalog:e2e": "vitest run src/platform-context.e2e.test.ts -t Plan.Catalog",
+    "test:partner-registry:e2e": "vitest run src/platform-context.e2e.test.ts -t Partner.Registry",
     "test:coverage": "vitest run --config vitest.unit.config.ts --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

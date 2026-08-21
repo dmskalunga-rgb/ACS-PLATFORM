@@ -1,4 +1,4 @@
-name: Phase 2 Customer Registry validation
+name: Phase 2 Partner Registry validation
 
 on:
   pull_request:
@@ -12,8 +12,8 @@ env:
   NODE_VERSION: 24.19.0
 
 jobs:
-  customer-quality:
-    name: Customer Registry quality, contracts, UI and build
+  partner-quality:
+    name: Partner Registry quality, contracts, UI and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -26,9 +26,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-
-  customer-postgresql-e2e:
-    name: Customer OIDC, AuthorizationPort, FORCE RLS, audit and event E2E
+  partner-postgresql-e2e:
+    name: Partner OIDC, authorization, FORCE RLS, audit and event E2E
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -37,13 +36,10 @@ jobs:
           POSTGRES_DB: acs_foundation
           POSTGRES_PASSWORD: acs_ci_ephemeral
           POSTGRES_USER: acs
-        ports:
-          - 5432:5432
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U acs -d acs_foundation"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       ACS_ENV: test
       DATABASE_URL: postgresql://acs:acs_ci_ephemeral@localhost:5432/acs_foundation
@@ -71,5 +67,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:validate
       - run: pnpm --filter @acs/platform-api... build
+      - run: pnpm test:partner-registry:e2e
+      - run: pnpm test:plan-catalog:e2e
+      - run: pnpm test:lead-registry:e2e
       - run: pnpm test:phase2:e2e
       - run: pnpm test:event-foundation:e2e

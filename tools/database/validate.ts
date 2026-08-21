@@ -64,6 +64,15 @@ const planMigrationPath = resolve('database/migrations/20260822000000_phase2_pla
 const planRollbackPath = resolve('database/rollbacks/20260822000000_phase2_plan_catalog.sql');
 const planTestPath = resolve('database/tests/rls/plan_catalog_isolation.sql');
 const planSeedPath = resolve('database/tests/fixtures/plan_catalog_seed.sql');
+const partnerRolesPath = resolve('database/roles/phase2_partner_registry_roles.sql');
+const partnerMigrationPath = resolve(
+  'database/migrations/20260823000000_phase2_partner_registry.sql',
+);
+const partnerRollbackPath = resolve(
+  'database/rollbacks/20260823000000_phase2_partner_registry.sql',
+);
+const partnerTestPath = resolve('database/tests/rls/partner_registry_isolation.sql');
+const partnerSeedPath = resolve('database/tests/fixtures/partner_registry_seed.sql');
 
 const testRoles = [
   'acs_phase1_auditor_login_test',
@@ -87,9 +96,11 @@ const testRoles = [
   'acs_phase2_customer_login_test',
   'acs_phase2_lead_login_test',
   'acs_phase2_plan_login_test',
+  'acs_phase2_partner_login_test',
   'acs_phase2_customer_registry',
   'acs_phase2_lead_registry',
   'acs_phase2_plan_catalog',
+  'acs_phase2_partner_registry',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -137,6 +148,8 @@ try {
   await client.query(await readFile(leadMigrationPath, 'utf8'));
   await client.query(await readFile(planRolesPath, 'utf8'));
   await client.query(await readFile(planMigrationPath, 'utf8'));
+  await client.query(await readFile(partnerRolesPath, 'utf8'));
+  await client.query(await readFile(partnerMigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
   );
@@ -160,16 +173,26 @@ try {
   await client.query(await readFile(customerSeedPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
   await client.query(await readFile(planSeedPath, 'utf8'));
+  await client.query(await readFile(partnerSeedPath, 'utf8'));
   await client.query(await readFile(phase1TestPath, 'utf8'));
   await client.query(await readFile(tenantAdminTestPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
   await client.query(await readFile(customerTestPath, 'utf8'));
   await client.query(await readFile(leadTestPath, 'utf8'));
   await client.query(await readFile(planTestPath, 'utf8'));
+  await client.query(await readFile(partnerTestPath, 'utf8'));
+  await client.query(await readFile(partnerRollbackPath, 'utf8'));
+  await client.query(await readFile(partnerMigrationPath, 'utf8'));
+  await client.query(await readFile(partnerSeedPath, 'utf8'));
+  await client.query(await readFile(partnerTestPath, 'utf8'));
   await client.query(await readFile(planRollbackPath, 'utf8'));
   await client.query(await readFile(planMigrationPath, 'utf8'));
   await client.query(await readFile(planSeedPath, 'utf8'));
   await client.query(await readFile(planTestPath, 'utf8'));
+  await client.query(await readFile(partnerRollbackPath, 'utf8'));
+  await client.query(await readFile(partnerMigrationPath, 'utf8'));
+  await client.query(await readFile(partnerSeedPath, 'utf8'));
+  await client.query(await readFile(partnerTestPath, 'utf8'));
   await client.query(await readFile(leadRollbackPath, 'utf8'));
   await client.query(await readFile(leadMigrationPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
@@ -192,6 +215,12 @@ try {
   await client.query(await readFile(eventRollbackPath, 'utf8'));
   await client.query(await readFile(eventMigrationPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
+  // Customer rollback drops the shared commercial schema. Restore Partner only
+  // after all shared Event Foundation lifecycle checks have completed.
+  await client.query(await readFile(partnerRollbackPath, 'utf8'));
+  await client.query(await readFile(partnerMigrationPath, 'utf8'));
+  await client.query(await readFile(partnerSeedPath, 'utf8'));
+  await client.query(await readFile(partnerTestPath, 'utf8'));
   const durableDenials = await client.query(
     "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
   );
@@ -221,9 +250,11 @@ try {
     GRANT acs_phase2_lead_registry TO acs_phase2_lead_login_test;
     CREATE ROLE acs_phase2_plan_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
     GRANT acs_phase2_plan_catalog TO acs_phase2_plan_login_test;
+    CREATE ROLE acs_phase2_partner_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
+    GRANT acs_phase2_partner_registry TO acs_phase2_partner_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_CUSTOMER_LEAD_AND_PLAN', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_CUSTOMER_LEAD_PLAN_AND_PARTNER', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();
