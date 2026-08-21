@@ -25,6 +25,14 @@ import {
   opportunityEnvelopeSchema,
   opportunityListEnvelopeSchema,
   opportunityUpdateSchema,
+  proposalAssignSchema,
+  proposalCreateSchema,
+  proposalEnvelopeSchema,
+  proposalLineCreateSchema,
+  proposalLineUpdateSchema,
+  proposalListEnvelopeSchema,
+  proposalTransitionSchema,
+  proposalUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -41,8 +49,8 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import Fastify from 'fastify';
-import { z } from 'zod';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import { z, type ZodType } from 'zod';
 import type { PlatformConfiguration } from './config.js';
 import {
   DevelopmentHeaderIdentityAdapter,
@@ -66,11 +74,23 @@ import { PostgresLeadRepository } from './postgres-lead-registry.js';
 import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
 import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.js';
 import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-registry.js';
+import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
 import { PartnerRegistryFailure, PartnerRegistryService } from './partner-registry.js';
 import { OpportunityRegistryFailure, OpportunityRegistryService } from './opportunity-registry.js';
+import {
+  ProposalRegistryFailure,
+  ProposalRegistryService,
+  PROPOSAL_ACCEPT,
+  PROPOSAL_APPROVE,
+  PROPOSAL_CANCEL,
+  PROPOSAL_EXPIRE,
+  PROPOSAL_REJECT,
+  PROPOSAL_REVISE,
+  PROPOSAL_SEND,
+} from './proposal-registry.js';
 import {
   TenantAdministrationFailure,
   TenantAdministrationService,
@@ -95,6 +115,7 @@ export async function buildApp(
     readonly planCatalogService?: PlanCatalogService;
     readonly partnerRegistryService?: PartnerRegistryService;
     readonly opportunityRegistryService?: OpportunityRegistryService;
+    readonly proposalRegistryService?: ProposalRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -123,6 +144,8 @@ export async function buildApp(
   let partnerRegistryService = options.partnerRegistryService;
   let opportunityRepository: PostgresOpportunityRegistryRepository | undefined;
   let opportunityRegistryService = options.opportunityRegistryService;
+  let proposalRepository: PostgresProposalRegistryRepository | undefined;
+  let proposalRegistryService = options.proposalRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -221,6 +244,18 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.proposalDatabaseUrl !== undefined) {
+      proposalRepository = new PostgresProposalRegistryRepository(
+        configuration.proposalDatabaseUrl,
+      );
+      proposalRegistryService = new ProposalRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        proposalRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -233,6 +268,7 @@ export async function buildApp(
         planRepository?.close(),
         partnerRepository?.close(),
         opportunityRepository?.close(),
+        proposalRepository?.close(),
       ]);
     });
   }
@@ -1821,6 +1857,246 @@ export async function buildApp(
       throw error;
     }
   });
+
+  const proposalError = (
+    error: ProposalRegistryFailure,
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply
+      .status(
+        error.code === 'UNAUTHENTICATED'
+          ? 401
+          : error.code === 'NOT_FOUND' || error.code === 'INVALID_REFERENCE'
+            ? 404
+            : ['STALE_VERSION', 'IDEMPOTENCY_CONFLICT', 'DUPLICATE_PROPOSAL_CODE'].includes(
+                  error.code,
+                )
+              ? 409
+              : ['INVALID_TRANSITION', 'TERMINAL_PROPOSAL', 'INVALID_VALUE'].includes(error.code)
+                ? 400
+                : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: error.code,
+            message: error.message,
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+  const proposalUnavailable = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'PROPOSAL_REGISTRY_NOT_CONFIGURED',
+          message: 'Proposal Registry dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const proposalTenant = (request: { headers: Record<string, unknown> }) =>
+    z.uuid().safeParse(request.headers['x-acs-tenant-id']);
+  const proposalKey = (request: { headers: Record<string, unknown> }) => {
+    const key = request.headers['idempotency-key'];
+    return typeof key === 'string' && uuidSchema.safeParse(key).success ? key : null;
+  };
+  const proposalId = (request: { params: unknown }) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).proposalId
+        : undefined,
+    );
+  const proposalLineId = (request: { params: unknown }) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).lineId
+        : undefined,
+    );
+  const invalidProposal = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Valid tenant, identifiers, request body and idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const proposalRoute = async <TBody>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    body: ZodType<TBody>,
+    call: (
+      service: ProposalRegistryService,
+      tenant: string,
+      id: string,
+      key: string,
+      value: TBody,
+      lineId?: string,
+    ) => Promise<unknown>,
+    line = false,
+  ) => {
+    if (!proposalRegistryService) return proposalUnavailable(request, reply);
+    const tenant = proposalTenant(request);
+    const id = proposalId(request);
+    const key = proposalKey(request);
+    const parsed = body.safeParse(request.body);
+    const parsedLineId = line ? proposalLineId(request) : undefined;
+    if (
+      !tenant.success ||
+      !id.success ||
+      !key ||
+      !parsed.success ||
+      (parsedLineId !== undefined && !parsedLineId.success)
+    )
+      return invalidProposal(request, reply);
+    const lineId = parsedLineId?.success === true ? parsedLineId.data : undefined;
+    try {
+      return proposalEnvelopeSchema.parse(
+        await call(proposalRegistryService, tenant.data, id.data, key, parsed.data, lineId),
+      );
+    } catch (error) {
+      if (error instanceof ProposalRegistryFailure) return proposalError(error, request, reply);
+      throw error;
+    }
+  };
+  app.post('/api/v1/commercial/proposals', async (request, reply) => {
+    if (!proposalRegistryService) return proposalUnavailable(request, reply);
+    const tenant = proposalTenant(request),
+      key = proposalKey(request),
+      body = proposalCreateSchema.safeParse(request.body);
+    if (!tenant.success || !key || !body.success) return invalidProposal(request, reply);
+    try {
+      return proposalEnvelopeSchema.parse(
+        await proposalRegistryService.create(
+          request.headers.authorization,
+          tenant.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ProposalRegistryFailure) return proposalError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/proposals', async (request, reply) => {
+    if (!proposalRegistryService) return proposalUnavailable(request, reply);
+    const tenant = proposalTenant(request),
+      q = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          cursor: z.uuid().optional(),
+        })
+        .strict()
+        .safeParse(request.query);
+    if (!tenant.success || !q.success) return invalidProposal(request, reply);
+    try {
+      return proposalListEnvelopeSchema.parse(
+        await proposalRegistryService.list(
+          request.headers.authorization,
+          tenant.data,
+          q.data.limit,
+          q.data.cursor,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ProposalRegistryFailure) return proposalError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/proposals/:proposalId', async (request, reply) => {
+    if (!proposalRegistryService) return proposalUnavailable(request, reply);
+    const tenant = proposalTenant(request),
+      id = proposalId(request);
+    if (!tenant.success || !id.success) return invalidProposal(request, reply);
+    try {
+      return proposalEnvelopeSchema.parse(
+        await proposalRegistryService.get(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ProposalRegistryFailure) return proposalError(error, request, reply);
+      throw error;
+    }
+  });
+  app.patch('/api/v1/commercial/proposals/:proposalId', async (request, reply) =>
+    proposalRoute(request, reply, proposalUpdateSchema, (s, t, id, k, v) =>
+      s.update(request.headers.authorization, t, id, k, v, metadata(request)),
+    ),
+  );
+  app.post('/api/v1/commercial/proposals/:proposalId/assign', async (request, reply) =>
+    proposalRoute(request, reply, proposalAssignSchema, (s, t, id, k, v) =>
+      s.assign(request.headers.authorization, t, id, k, v, metadata(request)),
+    ),
+  );
+  app.post('/api/v1/commercial/proposals/:proposalId/lines', async (request, reply) =>
+    proposalRoute(request, reply, proposalLineCreateSchema, (s, t, id, k, v) =>
+      s.line(request.headers.authorization, t, id, undefined, k, 'create', v, metadata(request)),
+    ),
+  );
+  app.patch('/api/v1/commercial/proposals/:proposalId/lines/:lineId', async (request, reply) =>
+    proposalRoute(
+      request,
+      reply,
+      proposalLineUpdateSchema,
+      (s, t, id, k, v, lineId) =>
+        s.line(request.headers.authorization, t, id, lineId, k, 'update', v, metadata(request)),
+      true,
+    ),
+  );
+  app.delete('/api/v1/commercial/proposals/:proposalId/lines/:lineId', async (request, reply) =>
+    proposalRoute(
+      request,
+      reply,
+      proposalTransitionSchema,
+      (s, t, id, k, v, lineId) =>
+        s.line(request.headers.authorization, t, id, lineId, k, 'delete', v, metadata(request)),
+      true,
+    ),
+  );
+  for (const [path, transition, action] of [
+    ['submit', 'submit', 'commercial.proposal.update'],
+    ['return-to-draft', 'return-to-draft', PROPOSAL_APPROVE],
+    ['approve', 'approve', PROPOSAL_APPROVE],
+    ['revise', 'revise', PROPOSAL_REVISE],
+    ['send', 'send', PROPOSAL_SEND],
+    ['accept', 'accept', PROPOSAL_ACCEPT],
+    ['reject', 'reject', PROPOSAL_REJECT],
+    ['cancel', 'cancel', PROPOSAL_CANCEL],
+    ['expire', 'expire', PROPOSAL_EXPIRE],
+  ] as const)
+    app.post(`/api/v1/commercial/proposals/:proposalId/${path}`, async (request, reply) =>
+      proposalRoute(request, reply, proposalTransitionSchema, (s, t, id, k, v) =>
+        s.transition(
+          request.headers.authorization,
+          t,
+          id,
+          k,
+          transition,
+          action,
+          v,
+          metadata(request),
+        ),
+      ),
+    );
 
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({

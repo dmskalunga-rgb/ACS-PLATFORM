@@ -10,6 +10,7 @@ import { LeadRegistryPanel } from './LeadRegistry.js';
 import { PlanCatalogPanel } from './PlanCatalog.js';
 import { PartnerRegistryPanel } from './PartnerRegistry.js';
 import { OpportunityRegistryPanel } from './OpportunityRegistry.js';
+import { ProposalRegistryPanel } from './ProposalRegistry.js';
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -268,6 +269,17 @@ export function App({
         )}
         {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
           <OpportunityRegistryPanel
+            apiBaseUrl={apiBaseUrl}
+            tenantId={contextConfiguration.tenantId}
+            authorization={
+              contextConfiguration.accessToken === undefined
+                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
+                : `Bearer ${contextConfiguration.accessToken}`
+            }
+          />
+        )}
+        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
+          <ProposalRegistryPanel
             apiBaseUrl={apiBaseUrl}
             tenantId={contextConfiguration.tenantId}
             authorization={

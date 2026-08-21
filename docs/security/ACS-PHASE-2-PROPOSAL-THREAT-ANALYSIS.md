@@ -1,6 +1,6 @@
 # ACS Phase 2 — Proposal / Quotation Threat Analysis
 
-Status: `PRE_IMPLEMENTATION / DETERMINISTIC_FOR_IMPLEMENTATION_PREPARATION`
+Status: `LOCAL_IMPLEMENTATION_EVIDENCED / NOT_PRODUCTION_APPROVED`
 
 | Threat                                          | Required control                                                                                      | Future proof                       |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -15,5 +15,6 @@ Status: `PRE_IMPLEMENTATION / DETERMINISTIC_FOR_IMPLEMENTATION_PREPARATION`
 | Commercial data exposure                        | `CONFIDENTIAL_COMMERCIAL` classification; no PII/free text in events/logs                             | Redaction and API-contract tests   |
 | Relationship substitution                       | Customer/Partner match parent Opportunity; primary Opportunity Plan must appear in lines              | PRP-NEG-054–056                    |
 
-The policy is deterministic for implementation preparation; no mitigation is
-claimed until the listed controls are implemented and independently tested.
+The listed controls are implemented and locally tested by the Proposal E2E
+matrix. This evidence does not approve retention, production identity/broker
+configuration, formal SLOs, named owners, or production deployment.

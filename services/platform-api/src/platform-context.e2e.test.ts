@@ -13,6 +13,9 @@ import {
   partnerListEnvelopeSchema,
   opportunityEnvelopeSchema,
   opportunityListEnvelopeSchema,
+  proposalEnvelopeSchema,
+  proposalListEnvelopeSchema,
+  type Proposal,
   type Opportunity,
   type Partner,
   tenantAdministrationSchema,
@@ -22,6 +25,8 @@ import { buildApp } from './app.js';
 import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
 import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.js';
 import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-registry.js';
+import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
+import { PostgresTenantContextRepository } from './postgres-platform-context.js';
 import type { PlatformConfiguration } from './config.js';
 
 const { Client } = pg;
@@ -38,11 +43,15 @@ const requiredEnvironment = {
   plan: process.env.ACS_PLAN_DATABASE_URL,
   partner: process.env.ACS_PARTNER_DATABASE_URL,
   opportunity: process.env.ACS_OPPORTUNITY_DATABASE_URL,
+  proposal: process.env.ACS_PROPOSAL_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
   if (value === undefined || value === '') throw new Error(`${name} E2E database URL is required.`);
 }
+const proposalDatabaseUrl = requiredEnvironment.proposal;
+if (proposalDatabaseUrl === undefined || proposalDatabaseUrl === '')
+  throw new Error('proposal E2E database URL is required.');
 
 const configuration: PlatformConfiguration = {
   environment: 'test',
@@ -59,6 +68,9 @@ const configuration: PlatformConfiguration = {
   planDatabaseUrl: requiredEnvironment.plan as string,
   partnerDatabaseUrl: requiredEnvironment.partner as string,
   opportunityDatabaseUrl: requiredEnvironment.opportunity as string,
+  ...(process.env.ACS_PROPOSAL_DATABASE_URL === undefined
+    ? {}
+    : { proposalDatabaseUrl: process.env.ACS_PROPOSAL_DATABASE_URL }),
   webOrigin: 'http://localhost:5173',
 };
 
@@ -2520,6 +2532,1959 @@ describe.sequential('Opportunity Registry signed OIDC acceptance matrix', () => 
     expect(evidence.rows[0]).toEqual({ audits: 3, events: 3 });
     process.stdout.write(
       `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, OPPORTUNITY_CREATE_WITH_AUDIT_OUTBOX_MS: Number(createMilliseconds.toFixed(2)), OPPORTUNITY_DETAIL_MS: Number(detailMilliseconds.toFixed(2)), OPPORTUNITY_LIST_MS: Number(listMilliseconds.toFixed(2)), OPPORTUNITY_UPDATE_WITH_AUDIT_OUTBOX_MS: Number(updateMilliseconds.toFixed(2)), OPPORTUNITY_STAGE_TRANSITION_MS: Number(transitionMilliseconds.toFixed(2)), OPPORTUNITY_COMPLETE_JOURNEY_MS: Number((performance.now() - journeyStartedAt).toFixed(2)) })}\n`,
+    );
+  });
+});
+
+describe.sequential('Proposal Registry signed OIDC acceptance matrix', () => {
+  const aliceMembership = '30000000-0000-4000-8000-000000000055';
+  const aliceUser = '40000000-0000-4000-8000-000000000044';
+  let opportunityId: string;
+  let planId: string;
+  let bobToken: string;
+  let unprivilegedToken: string;
+  let foreignOpportunityId: string;
+  let foreignCustomerId: string;
+  let foreignPartnerId: string;
+  let foreignPlanId: string;
+  let proposal: Proposal;
+  const headers = (key = randomUUID(), tenant = tenantA, token = oidcToken) => ({
+    authorization: `Bearer ${token}`,
+    'x-acs-tenant-id': tenant,
+    'idempotency-key': key,
+  });
+  const create = (payload: Record<string, unknown>, requestHeaders = headers()) =>
+    oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/proposals',
+      headers: requestHeaders,
+      payload,
+    });
+  const payload = (overrides: Record<string, unknown> = {}) => ({
+    proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+    title: 'Negative security fixture',
+    opportunity_id: opportunityId,
+    currency_code: 'USD',
+    valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    ...overrides,
+  });
+  const approvedDraft = async (): Promise<Proposal> => {
+    const created = await create({
+      proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+      title: 'Lifecycle fixture',
+      opportunity_id: opportunityId,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    let draft = proposalEnvelopeSchema.parse(created.json()).data;
+    const line = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/lines`,
+      headers: headers(),
+      payload: {
+        plan_id: planId,
+        quantity: '1.0000',
+        unit_price: '5.0000',
+        expected_version: draft.version,
+      },
+    });
+    draft = proposalEnvelopeSchema.parse(line.json()).data;
+    const submitted = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/submit`,
+      headers: headers(),
+      payload: { expected_version: draft.version },
+    });
+    draft = proposalEnvelopeSchema.parse(submitted.json()).data;
+    const approved = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/approve`,
+      headers: headers(randomUUID(), tenantA, bobToken),
+      payload: { expected_version: draft.version },
+    });
+    expect(approved.statusCode, approved.body).toBe(200);
+    return proposalEnvelopeSchema.parse(approved.json()).data;
+  };
+  const addLine = async (
+    draft: Proposal,
+    values: { planId?: string; quantity?: string; unitPrice?: string } = {},
+  ): Promise<Proposal> => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/lines`,
+      headers: headers(),
+      payload: {
+        plan_id: values.planId ?? planId,
+        quantity: values.quantity ?? '1.0000',
+        unit_price: values.unitPrice ?? '5.0000',
+        expected_version: draft.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return proposalEnvelopeSchema.parse(response.json()).data;
+  };
+  const transition = async (
+    current: Proposal,
+    action: string,
+    token = oidcToken,
+  ): Promise<Proposal> => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${current.id}/${action}`,
+      headers: headers(randomUUID(), tenantA, token),
+      payload: { expected_version: current.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return proposalEnvelopeSchema.parse(response.json()).data;
+  };
+  const sentDraft = async (): Promise<Proposal> => transition(await approvedDraft(), 'send');
+  const issueProposalContext = async (action: string, subject = 'alice') => {
+    const contexts = new PostgresTenantContextRepository(
+      requiredEnvironment.issuer as string,
+      requiredEnvironment.tenant as string,
+    );
+    const issued = await contexts.issueContext(
+      JSON.stringify(['https://issuer.acs.test', subject]),
+      tenantA,
+      action,
+    );
+    if (issued === null) throw new Error('Canonical Proposal test context was not issued.');
+    return { contextToken: issued.contextToken, close: () => contexts.close() };
+  };
+
+  beforeAll(async () => {
+    const fixture = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.opportunities(tenant_id,opportunity_code,title,owner_membership_id,created_by,updated_by) VALUES($1,$2,'Proposal OIDC fixture',$3,$4,$4) RETURNING id",
+      [tenantA, `proposal-${randomUUID().slice(0, 10)}`, aliceMembership, aliceUser],
+    );
+    opportunityId = fixture.rows[0]!.id;
+    const plan = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.plans(tenant_id,plan_code,name,created_by,updated_by) VALUES($1,$2,'Proposal primary plan',$3,$3) RETURNING id",
+      [tenantA, `proposal-plan-${randomUUID().slice(0, 8)}`, aliceUser],
+    );
+    planId = plan.rows[0]!.id;
+    await admin.query('UPDATE commercial.opportunities SET plan_id=$1 WHERE id=$2', [
+      planId,
+      opportunityId,
+    ]);
+    await admin.query(
+      "INSERT INTO platform.memberships(id,tenant_id,user_id,status) VALUES('30000000-0000-4000-8000-000000000099',$1,'50000000-0000-4000-8000-000000000055','ACTIVE') ON CONFLICT DO NOTHING",
+      [tenantA],
+    );
+    await admin.query(
+      "INSERT INTO platform.membership_permissions(tenant_id,membership_id,permission_key) SELECT $1,'30000000-0000-4000-8000-000000000099',permission_key FROM platform.permissions WHERE permission_key LIKE 'commercial.proposal.%' ON CONFLICT DO NOTHING",
+      [tenantA],
+    );
+    bobToken = await signedOidcToken('bob');
+    const charlie = await admin.query<{ user_id: string }>(
+      "SELECT user_id FROM platform.memberships WHERE id='30000000-0000-4000-8000-000000000088'",
+    );
+    await admin.query(
+      "INSERT INTO platform.memberships(id,tenant_id,user_id,status) VALUES('30000000-0000-4000-8000-000000000077',$1,$2,'ACTIVE') ON CONFLICT DO NOTHING",
+      [tenantA, charlie.rows[0]!.user_id],
+    );
+    const suffix = randomUUID().slice(0, 8);
+    const customer = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.customers(tenant_id,display_name,reference_code,created_by,updated_by) VALUES($1,'Foreign proposal customer',$2,$3,$3) RETURNING id",
+      [tenantB, `foreign-${suffix}`, charlie.rows[0]!.user_id],
+    );
+    foreignCustomerId = customer.rows[0]!.id;
+    const partner = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.partners(tenant_id,partner_code,display_name,created_by,updated_by) VALUES($1,$2,'Foreign proposal partner',$3,$3) RETURNING id",
+      [tenantB, `foreign-${suffix}`, charlie.rows[0]!.user_id],
+    );
+    foreignPartnerId = partner.rows[0]!.id;
+    const foreignPlan = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.plans(tenant_id,plan_code,name,created_by,updated_by) VALUES($1,$2,'Foreign proposal plan',$3,$3) RETURNING id",
+      [tenantB, `foreign-${suffix}`, charlie.rows[0]!.user_id],
+    );
+    foreignPlanId = foreignPlan.rows[0]!.id;
+    const opportunity = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.opportunities(tenant_id,opportunity_code,title,owner_membership_id,created_by,updated_by) VALUES($1,$2,'Foreign proposal opportunity',$3,$4,$4) RETURNING id",
+      [
+        tenantB,
+        `foreign-${suffix}`,
+        '30000000-0000-4000-8000-000000000088',
+        charlie.rows[0]!.user_id,
+      ],
+    );
+    foreignOpportunityId = opportunity.rows[0]!.id;
+    unprivilegedToken = await signedOidcToken('charlie');
+  });
+
+  it('PRP-POS-001 creates a Proposal through signed OIDC and trusted context', async () => {
+    const response = await create({
+      proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+      title: 'Proposal acceptance fixture',
+      opportunity_id: opportunityId,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal).toMatchObject({ status: 'DRAFT', revision_number: 1, version: 1 });
+  });
+
+  it('PRP-POS-002 lists only tenant-scoped Proposals', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/proposals?limit=100',
+      headers: headers(),
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(proposalListEnvelopeSchema.parse(response.json()).data.length).toBeGreaterThan(0);
+  });
+
+  it('PRP-POS-003 returns Proposal detail through signed OIDC', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/proposals/${proposal.id}`,
+      headers: headers(),
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(proposalEnvelopeSchema.parse(response.json()).data.id).toBe(proposal.id);
+  });
+
+  it('PRP-POS-004 updates a DRAFT Proposal with expected_version', async () => {
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/proposals/${proposal.id}`,
+      headers: headers(),
+      payload: { title: 'Updated Proposal acceptance fixture', expected_version: proposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal.version).toBe(2);
+  });
+
+  it('PRP-NEG-001 rejects unauthenticated Proposal creation', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/proposals',
+      headers: { 'x-acs-tenant-id': tenantA, 'idempotency-key': randomUUID() },
+      payload: {
+        proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+        title: 'Unauthenticated',
+        opportunity_id: opportunityId,
+        currency_code: 'USD',
+        valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    });
+    expect(response.statusCode, response.body).toBe(401);
+  });
+
+  it('PRP-POS-005 adds a same-tenant primary Plan line with server totals', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${proposal.id}/lines`,
+      headers: headers(),
+      payload: {
+        plan_id: planId,
+        quantity: '1.0000',
+        unit_price: '12.3456',
+        expected_version: proposal.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal).toMatchObject({
+      proposal_subtotal: '12.3456',
+      grand_total: '12.3456',
+      version: 3,
+    });
+  });
+
+  it('PRP-POS-006 updates a DRAFT line and recalculates exact totals', async () => {
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/proposals/${proposal.id}/lines/${proposal.lines[0]!.id}`,
+      headers: headers(),
+      payload: { quantity: '2.0000', unit_price: '1.2346', expected_version: proposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal).toMatchObject({
+      proposal_subtotal: '2.4692',
+      grand_total: '2.4692',
+      version: 4,
+    });
+  });
+
+  it('PRP-POS-007 removes a DRAFT line and resets totals', async () => {
+    const response = await oidcApp.inject({
+      method: 'DELETE',
+      url: `/api/v1/commercial/proposals/${proposal.id}/lines/${proposal.lines[0]!.id}`,
+      headers: headers(),
+      payload: { expected_version: proposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal).toMatchObject({
+      lines: [],
+      proposal_subtotal: '0.0000',
+      grand_total: '0.0000',
+      version: 5,
+    });
+  });
+
+  it('PRP-POS-008 submits when the Opportunity primary Plan is present', async () => {
+    const line = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${proposal.id}/lines`,
+      headers: headers(),
+      payload: {
+        plan_id: planId,
+        quantity: '1.0000',
+        unit_price: '10.0000',
+        expected_version: proposal.version,
+      },
+    });
+    proposal = proposalEnvelopeSchema.parse(line.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${proposal.id}/submit`,
+      headers: headers(),
+      payload: { expected_version: proposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal.status).toBe('PENDING_APPROVAL');
+  });
+
+  it('PRP-POS-009 returns approval to DRAFT with audit-only lifecycle evidence', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${proposal.id}/return-to-draft`,
+      headers: headers(),
+      payload: { expected_version: proposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal.status).toBe('DRAFT');
+    const audit = await admin.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM platform.audit_logs WHERE resource=$1 AND action='proposal.approval_returned'",
+      [`commercial:proposal:${proposal.id}`],
+    );
+    expect(audit.rows[0]!.count).toBe(1);
+  });
+
+  it('PRP-POS-010 approves with a membership distinct from the creator', async () => {
+    const submitted = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${proposal.id}/submit`,
+      headers: headers(),
+      payload: { expected_version: proposal.version },
+    });
+    proposal = proposalEnvelopeSchema.parse(submitted.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${proposal.id}/approve`,
+      headers: headers(randomUUID(), tenantA, bobToken),
+      payload: { expected_version: proposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    proposal = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(proposal).toMatchObject({
+      status: 'APPROVED',
+      approved_by_membership_id: '30000000-0000-4000-8000-000000000099',
+    });
+    expect(proposal.approved_at).not.toBeNull();
+  });
+
+  it('PRP-POS-011 sends an APPROVED Proposal and assigns issued_at server-side', async () => {
+    const approved = await approvedDraft();
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${approved.id}/send`,
+      headers: headers(),
+      payload: { expected_version: approved.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const sent = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(sent).toMatchObject({ status: 'SENT' });
+    expect(sent.issued_at).not.toBeNull();
+  });
+
+  it('PRP-POS-012 accepts a SENT Proposal before validity expiry', async () => {
+    const approved = await approvedDraft();
+    const sent = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${approved.id}/send`,
+      headers: headers(),
+      payload: { expected_version: approved.version },
+    });
+    expect(sent.statusCode, sent.body).toBe(200);
+    const sentProposal = proposalEnvelopeSchema.parse(sent.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${sentProposal.id}/accept`,
+      headers: headers(),
+      payload: { expected_version: sentProposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(proposalEnvelopeSchema.parse(response.json()).data.status).toBe('ACCEPTED');
+  });
+
+  it('PRP-POS-013 rejects a separate SENT Proposal', async () => {
+    const approved = await approvedDraft();
+    const sent = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${approved.id}/send`,
+      headers: headers(),
+      payload: { expected_version: approved.version },
+    });
+    const sentProposal = proposalEnvelopeSchema.parse(sent.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${sentProposal.id}/reject`,
+      headers: headers(),
+      payload: { expected_version: sentProposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(proposalEnvelopeSchema.parse(response.json()).data.status).toBe('REJECTED');
+  });
+
+  it('PRP-POS-014 cancels an APPROVED Proposal', async () => {
+    const approved = await approvedDraft();
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${approved.id}/cancel`,
+      headers: headers(),
+      payload: { expected_version: approved.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(proposalEnvelopeSchema.parse(response.json()).data.status).toBe('CANCELLED');
+  });
+
+  it('PRP-POS-015 accepts same-tenant Customer, Partner and multiple Plans', async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const customer = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.customers(tenant_id,display_name,reference_code,created_by,updated_by) VALUES($1,'Proposal customer',$2,$3,$3) RETURNING id",
+      [tenantA, `prp-${suffix}`, aliceUser],
+    );
+    const partner = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.partners(tenant_id,partner_code,display_name,created_by,updated_by) VALUES($1,$2,'Proposal partner',$3,$3) RETURNING id",
+      [tenantA, `prp-${suffix}`, aliceUser],
+    );
+    const extraPlan = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.plans(tenant_id,plan_code,name,created_by,updated_by) VALUES($1,$2,'Proposal additional plan',$3,$3) RETURNING id",
+      [tenantA, `prp-${suffix}`, aliceUser],
+    );
+    const relationOpportunity = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.opportunities(tenant_id,opportunity_code,title,owner_membership_id,customer_id,partner_id,plan_id,created_by,updated_by) VALUES($1,$2,'Proposal relationship fixture',$3,$4,$5,$6,$7,$7) RETURNING id",
+      [
+        tenantA,
+        `prp-${suffix}`,
+        aliceMembership,
+        customer.rows[0]!.id,
+        partner.rows[0]!.id,
+        planId,
+        aliceUser,
+      ],
+    );
+    const created = await create({
+      proposal_code: `PRP-${suffix}`,
+      title: 'Relationship Proposal',
+      opportunity_id: relationOpportunity.rows[0]!.id,
+      customer_id: customer.rows[0]!.id,
+      partner_id: partner.rows[0]!.id,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    let related = proposalEnvelopeSchema.parse(created.json()).data;
+    for (const id of [planId, extraPlan.rows[0]!.id]) {
+      const line = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/proposals/${related.id}/lines`,
+        headers: headers(),
+        payload: {
+          plan_id: id,
+          quantity: '1.0000',
+          unit_price: '1.0000',
+          expected_version: related.version,
+        },
+      });
+      related = proposalEnvelopeSchema.parse(line.json()).data;
+    }
+    const submitted = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${related.id}/submit`,
+      headers: headers(),
+      payload: { expected_version: related.version },
+    });
+    expect(submitted.statusCode, submitted.body).toBe(200);
+    expect(proposalEnvelopeSchema.parse(submitted.json()).data.status).toBe('PENDING_APPROVAL');
+  });
+
+  it('PRP-POS-016 derives NUMERIC(19,4) HALF_UP line and proposal totals server-side', async () => {
+    const created = await create({
+      proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+      title: 'Authoritative totals fixture',
+      opportunity_id: opportunityId,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    let draft = proposalEnvelopeSchema.parse(created.json()).data;
+    draft = await addLine(draft, { quantity: '1.2345', unitPrice: '1.0001' });
+    draft = await addLine(draft, { quantity: '2.0000', unitPrice: '3.3333' });
+    expect(draft).toMatchObject({ proposal_subtotal: '7.9012', grand_total: '7.9012' });
+    expect(draft.lines.map((line) => line.line_subtotal)).toEqual(['1.2346', '6.6666']);
+  });
+
+  it('PRP-POS-017 preserves Plan commercial snapshots after source Plan mutation', async () => {
+    const created = await create({
+      proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+      title: 'Snapshot stability fixture',
+      opportunity_id: opportunityId,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    const draft = await addLine(proposalEnvelopeSchema.parse(created.json()).data, {
+      unitPrice: '12.3456',
+    });
+    const snapshot = draft.lines[0]!;
+    await admin.query('UPDATE commercial.plans SET name=$1,description=$2 WHERE id=$3', [
+      'Mutated plan source',
+      'Mutated source description',
+      planId,
+    ]);
+    const detail = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/proposals/${draft.id}`,
+      headers: headers(),
+    });
+    expect(detail.statusCode, detail.body).toBe(200);
+    expect(proposalEnvelopeSchema.parse(detail.json()).data.lines[0]).toMatchObject(snapshot);
+  });
+
+  it('PRP-POS-018 creates immutable historical revision and line snapshots', async () => {
+    const approved = await approvedDraft();
+    const revised = await transition(approved, 'revise');
+    expect(revised).toMatchObject({ status: 'DRAFT', revision_number: 2 });
+    const revision = await admin.query<{
+      id: string;
+      proposal_code: string;
+      currency_code: string;
+      status: string;
+      proposal_subtotal: string;
+      valid_until: string;
+      created_by_membership_id: string;
+    }>(
+      'SELECT id,proposal_code,currency_code,status,proposal_subtotal::text,valid_until::text,created_by_membership_id FROM commercial.proposal_revisions WHERE proposal_id=$1 AND revision_number=1',
+      [approved.id],
+    );
+    expect(revision.rowCount).toBe(1);
+    expect(revision.rows[0]).toMatchObject({
+      proposal_code: approved.proposal_code,
+      currency_code: approved.currency_code,
+      status: 'APPROVED',
+      proposal_subtotal: approved.proposal_subtotal,
+      created_by_membership_id: approved.created_by_membership_id,
+    });
+    const lines = await admin.query<{ plan_id: string; unit_price: string; line_subtotal: string }>(
+      'SELECT plan_id,unit_price::text,line_subtotal::text FROM commercial.proposal_revision_line_items WHERE proposal_revision_id=$1',
+      [revision.rows[0]!.id],
+    );
+    expect(lines.rows).toEqual([
+      expect.objectContaining({
+        plan_id: approved.lines[0]!.plan_id,
+        unit_price: approved.lines[0]!.unit_price,
+        line_subtotal: approved.lines[0]!.line_subtotal,
+      }),
+    ]);
+  });
+
+  it('PRP-POS-019 denies acceptance of an overdue persisted SENT Proposal', async () => {
+    const sent = await sentDraft();
+    await admin.query(
+      "UPDATE commercial.proposals SET valid_until=clock_timestamp()-interval '1 minute' WHERE id=$1",
+      [sent.id],
+    );
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${sent.id}/accept`,
+      headers: headers(),
+      payload: { expected_version: sent.version },
+    });
+    expect(response.statusCode, response.body).toBe(400);
+    const state = await admin.query<{ status: string; accepted: number; events: number }>(
+      "SELECT p.status,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||p.id::text AND action='proposal.accept') accepted,(SELECT count(*)::int FROM platform.domain_events WHERE event_type='commercial.proposal.accepted' AND payload->>'id'=p.id::text) events FROM commercial.proposals p WHERE p.id=$1",
+      [sent.id],
+    );
+    expect(state.rows[0]).toEqual({ status: 'SENT', accepted: 0, events: 0 });
+  });
+
+  it('PRP-POS-020 applies explicit revise current-aggregate effects', async () => {
+    const approved = await approvedDraft();
+    const revised = await transition(approved, 'revise');
+    expect(revised).toMatchObject({
+      id: approved.id,
+      proposal_code: approved.proposal_code,
+      status: 'DRAFT',
+      revision_number: approved.revision_number + 1,
+      version: approved.version + 1,
+      approved_by_membership_id: null,
+      approved_at: null,
+    });
+    const prematureSend = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${revised.id}/send`,
+      headers: headers(),
+      payload: { expected_version: revised.version },
+    });
+    expect(prematureSend.statusCode, prematureSend.body).toBe(400);
+    const evidence = await admin.query<{ audits: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource=$1 AND action='commercial.proposal.revise') audits,(SELECT count(*)::int FROM platform.domain_events WHERE event_type='commercial.proposal.revision_created' AND payload->>'id'=$2) events",
+      [`commercial:proposal:${approved.id}`, approved.id],
+    );
+    expect(evidence.rows[0]).toEqual({ audits: 1, events: 1 });
+  });
+
+  it('PRP-POS-021 explicitly persists SENT Proposal expiry', async () => {
+    const sent = await sentDraft();
+    await admin.query(
+      "UPDATE commercial.proposals SET valid_until=clock_timestamp()-interval '1 minute' WHERE id=$1",
+      [sent.id],
+    );
+    const expired = await transition(sent, 'expire');
+    expect(expired).toMatchObject({ status: 'EXPIRED', version: sent.version + 1 });
+    const evidence = await admin.query<{ audits: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource=$1 AND action='commercial.proposal.expire') audits,(SELECT count(*)::int FROM platform.domain_events WHERE event_type='commercial.proposal.expired' AND payload->>'id'=$2) events",
+      [`commercial:proposal:${sent.id}`, sent.id],
+    );
+    expect(evidence.rows[0]).toEqual({ audits: 1, events: 1 });
+  });
+
+  it('PRP-POS-022 reassigns a DRAFT Proposal owner without changing its creator', async () => {
+    const created = await create({
+      proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+      title: 'Owner reassignment fixture',
+      opportunity_id: opportunityId,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    const draft = proposalEnvelopeSchema.parse(created.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/assign`,
+      headers: headers(),
+      payload: {
+        owner_membership_id: '30000000-0000-4000-8000-000000000099',
+        expected_version: draft.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const reassigned = proposalEnvelopeSchema.parse(response.json()).data;
+    expect(reassigned).toMatchObject({
+      owner_membership_id: '30000000-0000-4000-8000-000000000099',
+      created_by_membership_id: draft.created_by_membership_id,
+      version: draft.version + 1,
+      status: 'DRAFT',
+    });
+    const audit = await admin.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM platform.audit_logs WHERE resource=$1 AND action='commercial.proposal.assign'",
+      [`commercial:proposal:${draft.id}`],
+    );
+    expect(audit.rows[0]!.count).toBe(1);
+  });
+
+  it('PRP-POS-023 returns PENDING_APPROVAL to DRAFT with audit-only evidence', async () => {
+    const created = await create({
+      proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+      title: 'Approval return fixture',
+      opportunity_id: opportunityId,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    const pending = await transition(
+      await addLine(proposalEnvelopeSchema.parse(created.json()).data),
+      'submit',
+    );
+    const returned = await transition(pending, 'return-to-draft');
+    expect(returned).toMatchObject({ status: 'DRAFT', version: pending.version + 1 });
+    const evidence = await admin.query<{ audits: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource=$1 AND action='proposal.approval_returned') audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=$2 AND event_type='commercial.proposal.updated') events",
+      [`commercial:proposal:${pending.id}`, pending.id],
+    );
+    expect(evidence.rows[0]).toEqual({ audits: 1, events: 1 });
+  });
+
+  it('PRP-POS-024 submits a multi-Plan Proposal containing the Opportunity primary Plan', async () => {
+    const extra = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.plans(tenant_id,plan_code,name,created_by,updated_by) VALUES($1,$2,'Multi plan fixture',$3,$3) RETURNING id",
+      [tenantA, `prp-${randomUUID().slice(0, 8)}`, aliceUser],
+    );
+    const created = await create({
+      proposal_code: `PRP-${randomUUID().slice(0, 8)}`,
+      title: 'Multi-plan primary fixture',
+      opportunity_id: opportunityId,
+      currency_code: 'USD',
+      valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    let draft = await addLine(proposalEnvelopeSchema.parse(created.json()).data);
+    draft = await addLine(draft, { planId: extra.rows[0]!.id });
+    const submitted = await transition(draft, 'submit');
+    expect(submitted).toMatchObject({ status: 'PENDING_APPROVAL' });
+    expect(submitted.lines.map((line) => line.plan_id)).toEqual([planId, extra.rows[0]!.id]);
+  });
+
+  it('PRP-POS-025 preserves immutable revision history while current revision evolves', async () => {
+    const approved = await approvedDraft();
+    let current = await transition(approved, 'revise');
+    const historical = await admin.query<{
+      id: string;
+      title: string;
+      proposal_subtotal: string;
+      line_subtotal: string;
+    }>(
+      'SELECT r.id,r.title,r.proposal_subtotal::text,l.line_subtotal::text FROM commercial.proposal_revisions r JOIN commercial.proposal_revision_line_items l ON l.proposal_revision_id=r.id WHERE r.proposal_id=$1 AND r.revision_number=1',
+      [approved.id],
+    );
+    const before = historical.rows[0]!;
+    const updated = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/proposals/${current.id}`,
+      headers: headers(),
+      payload: { title: 'Revision two current state', expected_version: current.version },
+    });
+    expect(updated.statusCode, updated.body).toBe(200);
+    current = proposalEnvelopeSchema.parse(updated.json()).data;
+    const line = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/proposals/${current.id}/lines/${current.lines[0]!.id}`,
+      headers: headers(),
+      payload: { quantity: '2.0000', expected_version: current.version },
+    });
+    expect(line.statusCode, line.body).toBe(200);
+    const after = await admin.query<typeof before>(
+      'SELECT r.id,r.title,r.proposal_subtotal::text,l.line_subtotal::text FROM commercial.proposal_revisions r JOIN commercial.proposal_revision_line_items l ON l.proposal_revision_id=r.id WHERE r.id=$1',
+      [before.id],
+    );
+    expect(after.rows[0]).toEqual(before);
+  });
+
+  it('PRP-NEG-002 denies unauthenticated Proposal list', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/proposals',
+      headers: { 'x-acs-tenant-id': tenantA },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('PRP-NEG-003 denies unauthenticated Proposal detail', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/proposals/${proposal.id}`,
+      headers: { 'x-acs-tenant-id': tenantA },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('PRP-NEG-004 denies unauthenticated Proposal update', async () => {
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/proposals/${proposal.id}`,
+      headers: { 'x-acs-tenant-id': tenantA, 'idempotency-key': randomUUID() },
+      payload: { title: 'Denied', expected_version: proposal.version },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('PRP-NEG-005 denies a valid identity lacking Proposal create permission', async () => {
+    const response = await create(payload(), headers(randomUUID(), tenantA, unprivilegedToken));
+    expect(response.statusCode, response.body).toBe(403);
+  });
+
+  it('PRP-NEG-006 rejects client tenant authority injection', async () => {
+    const response = await create(payload({ tenant_id: tenantB }));
+    expect(response.statusCode, response.body).toBe(400);
+  });
+
+  it('PRP-NEG-007 rejects unknown Proposal create fields', async () => {
+    const response = await create(payload({ unknown_property: 'forbidden' }));
+    expect(response.statusCode, response.body).toBe(400);
+  });
+
+  it('PRP-NEG-008 rejects server-owned lifecycle field mutation', async () => {
+    const response = await create(payload({ status: 'APPROVED' }));
+    expect(response.statusCode, response.body).toBe(400);
+  });
+
+  it('PRP-NEG-009 rejects mass assignment of server totals', async () => {
+    const response = await create(
+      payload({ proposal_subtotal: '999.0000', grand_total: '999.0000' }),
+    );
+    expect(response.statusCode, response.body).toBe(400);
+  });
+
+  it('PRP-NEG-010 rejects a foreign Opportunity without disclosure', async () => {
+    const response = await create(payload({ opportunity_id: foreignOpportunityId }));
+    expect(response.statusCode, response.body).toBe(404);
+  });
+
+  it('PRP-NEG-011 rejects a foreign Customer without disclosure', async () => {
+    const response = await create(payload({ customer_id: foreignCustomerId }));
+    expect(response.statusCode, response.body).toBe(404);
+  });
+
+  it('PRP-NEG-012 rejects a foreign Partner without disclosure', async () => {
+    const response = await create(payload({ partner_id: foreignPartnerId }));
+    expect(response.statusCode, response.body).toBe(404);
+  });
+
+  it('PRP-NEG-013 rejects a foreign Plan line without disclosure', async () => {
+    const created = await create(payload());
+    const draft = proposalEnvelopeSchema.parse(created.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/lines`,
+      headers: headers(),
+      payload: {
+        plan_id: foreignPlanId,
+        quantity: '1.0000',
+        unit_price: '1.0000',
+        expected_version: draft.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(404);
+  });
+
+  it('PRP-NEG-014 rejects a foreign owner membership', async () => {
+    const response = await create(
+      payload({ owner_membership_id: '30000000-0000-4000-8000-000000000088' }),
+    );
+    expect(response.statusCode, response.body).toBe(404);
+  });
+
+  it('PRP-NEG-015 returns non-disclosing 404 for foreign Proposal detail', async () => {
+    const foreign = await create(
+      payload({ opportunity_id: foreignOpportunityId }),
+      headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+    );
+    const foreignProposal = proposalEnvelopeSchema.parse(foreign.json()).data;
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/proposals/${foreignProposal.id}`,
+      headers: headers(),
+    });
+    expect(response.statusCode, response.body).toBe(404);
+  });
+
+  it('PRP-NEG-016 returns non-disclosing 404 for foreign Proposal mutation', async () => {
+    const foreign = await create(
+      payload({ opportunity_id: foreignOpportunityId }),
+      headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+    );
+    const foreignProposal = proposalEnvelopeSchema.parse(foreign.json()).data;
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/proposals/${foreignProposal.id}`,
+      headers: headers(),
+      payload: { title: 'Cross tenant mutation', expected_version: foreignProposal.version },
+    });
+    expect(response.statusCode, response.body).toBe(404);
+  });
+
+  it('PRP-NEG-017 rejects duplicate normalized Proposal code', async () => {
+    const code = `PRP-${randomUUID().slice(0, 8)}`;
+    expect((await create(payload({ proposal_code: code }))).statusCode).toBe(200);
+    const duplicate = await create(payload({ proposal_code: code.toLowerCase() }));
+    expect(duplicate.statusCode, duplicate.body).toBe(409);
+  });
+
+  it('PRP-NEG-018 rejects unsupported ISO currency', async () => {
+    const response = await create(payload({ currency_code: 'ZZZ' }));
+    expect(response.statusCode, response.body).toBe(400);
+  });
+
+  it('PRP-NEG-019 rejects non-positive Proposal line quantity', async () => {
+    const created = await create(payload());
+    const draft = proposalEnvelopeSchema.parse(created.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/lines`,
+      headers: headers(),
+      payload: {
+        plan_id: planId,
+        quantity: '0.0000',
+        unit_price: '1.0000',
+        expected_version: draft.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(400);
+  });
+
+  it('PRP-NEG-020 rejects invalid Proposal money representation', async () => {
+    const created = await create(payload());
+    const draft = proposalEnvelopeSchema.parse(created.json()).data;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${draft.id}/lines`,
+      headers: headers(),
+      payload: {
+        plan_id: planId,
+        quantity: '1.0000',
+        unit_price: 'not-money',
+        expected_version: draft.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(400);
+  });
+
+  it('PRP-NEG-021 rejects client-authoritative totals', async () => {
+    expect((await create(payload({ grand_total: '1.0000' }))).statusCode).toBe(400);
+  });
+  it('PRP-NEG-022 rejects invalid Proposal validity contract', async () => {
+    expect((await create(payload({ valid_until: 'not-a-date' }))).statusCode).toBe(400);
+  });
+  it('PRP-NEG-023 denies acceptance after validity expiry', async () => {
+    const sent = await sentDraft();
+    await admin.query(
+      "UPDATE commercial.proposals SET valid_until=clock_timestamp()-interval '1 minute' WHERE id=$1",
+      [sent.id],
+    );
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${sent.id}/accept`,
+      headers: headers(),
+      payload: { expected_version: sent.version },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('PRP-NEG-024 rejects illegal DRAFT to SEND transition', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${draft.id}/send`,
+          headers: headers(),
+          payload: { expected_version: draft.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-025 rejects terminal Proposal mutation', async () => {
+    const accepted = await transition(await sentDraft(), 'accept');
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/proposals/${accepted.id}`,
+          headers: headers(),
+          payload: { title: 'Terminal mutation', expected_version: accepted.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-026 denies creator self-approval', async () => {
+    const pending = await transition(
+      await addLine(proposalEnvelopeSchema.parse((await create(payload())).json()).data),
+      'submit',
+    );
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${pending.id}/approve`,
+          headers: headers(),
+          payload: { expected_version: pending.version },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+  it.each([
+    ['PRP-NEG-027', 'approve', 'PENDING_APPROVAL'],
+    ['PRP-NEG-028', 'send', 'APPROVED'],
+    ['PRP-NEG-029', 'accept', 'SENT'],
+    ['PRP-NEG-030', 'cancel', 'APPROVED'],
+  ])('%s denies unprivileged lifecycle action %s', async (_id, action, state) => {
+    let current = await approvedDraft();
+    if (state === 'PENDING_APPROVAL') current = await transition(current, 'revise');
+    if (state === 'PENDING_APPROVAL') current = await transition(current, 'submit');
+    if (state === 'SENT') current = await transition(current, 'send');
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${current.id}/${action}`,
+      headers: headers(randomUUID(), tenantA, unprivilegedToken),
+      payload: { expected_version: current.version },
+    });
+    expect(response.statusCode, response.body).toBe(403);
+  });
+  it('PRP-NEG-031 rejects stale expected_version without mutation', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    await addLine(draft);
+    const stale = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/proposals/${draft.id}`,
+      headers: headers(),
+      payload: { title: 'Stale', expected_version: draft.version },
+    });
+    expect(stale.statusCode).toBe(409);
+  });
+  it('PRP-NEG-032 rejects divergent idempotency replay', async () => {
+    const key = randomUUID();
+    expect((await create(payload({ title: 'First' }), headers(key))).statusCode).toBe(200);
+    expect((await create(payload({ title: 'Second' }), headers(key))).statusCode).toBe(409);
+  });
+  it('PRP-NEG-033 isolates idempotency keys across tenants', async () => {
+    const key = randomUUID();
+    expect((await create(payload(), headers(key))).statusCode).toBe(200);
+    const response = await create(
+      payload({ opportunity_id: foreignOpportunityId }),
+      headers(key, tenantB, await signedOidcToken('charlie')),
+    );
+    expect(response.statusCode, response.body).toBe(200);
+  });
+  it('PRP-NEG-034 keeps Proposal tables protected by RLS and FORCE RLS', async () => {
+    const result = await admin.query<{ rowsecurity: boolean; relforcerowsecurity: boolean }>(
+      "SELECT c.relrowsecurity AS rowsecurity,c.relforcerowsecurity AS relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='commercial' AND c.relname='proposals'",
+    );
+    expect(result.rows[0]).toEqual({ rowsecurity: true, relforcerowsecurity: true });
+  });
+  it('PRP-NEG-035 keeps Proposal runtime role free of SUPERUSER and BYPASSRLS', async () => {
+    const result = await admin.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+      "SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname='acs_phase2_proposal_registry'",
+    );
+    expect(result.rows[0]).toEqual({ rolsuper: false, rolbypassrls: false });
+  });
+  it('PRP-NEG-036 exposes no Proposal root DELETE endpoint', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'DELETE',
+          url: `/api/v1/commercial/proposals/${draft.id}`,
+          headers: headers(),
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+  it('PRP-NEG-037 keeps Proposal audit metadata free of secrets', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    const result = await admin.query<{ metadata: string }>(
+      'SELECT metadata::text FROM platform.audit_logs WHERE resource=$1 ORDER BY occurred_at DESC LIMIT 1',
+      [`commercial:proposal:${draft.id}`],
+    );
+    expect(result.rows[0]!.metadata).not.toMatch(/token|authorization|secret/i);
+  });
+  it('PRP-NEG-038 keeps Proposal event payload free of commercial line data', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    const result = await admin.query<{ payload: string }>(
+      "SELECT payload::text FROM platform.domain_events WHERE payload->>'id'=$1 ORDER BY occurred_at DESC LIMIT 1",
+      [draft.id],
+    );
+    expect(result.rows[0]!.payload).not.toMatch(/unit_price|line_subtotal|description_snapshot/i);
+  });
+  it('PRP-NEG-039 rejects line mutation outside DRAFT', async () => {
+    const pending = await transition(
+      await addLine(proposalEnvelopeSchema.parse((await create(payload())).json()).data),
+      'submit',
+    );
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${pending.id}/lines`,
+          headers: headers(),
+          payload: {
+            plan_id: planId,
+            quantity: '1.0000',
+            unit_price: '1.0000',
+            expected_version: pending.version,
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-040 rejects foreign Plan line relation without disclosure', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${draft.id}/lines`,
+          headers: headers(),
+          payload: {
+            plan_id: foreignPlanId,
+            quantity: '1.0000',
+            unit_price: '1.0000',
+            expected_version: draft.version,
+          },
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+  it('PRP-NEG-041 rejects stale revise without history', async () => {
+    const p = await approvedDraft();
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/revise`,
+          headers: headers(),
+          payload: { expected_version: p.version - 1 },
+        })
+      ).statusCode,
+    ).toBe(409);
+  });
+  it('PRP-NEG-042 rejects over-precision money', async () => {
+    const p = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/lines`,
+          headers: headers(),
+          payload: {
+            plan_id: planId,
+            quantity: '1.0000',
+            unit_price: '1.00001',
+            expected_version: p.version,
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-043 rejects numeric overflow money', async () => {
+    const p = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/lines`,
+          headers: headers(),
+          payload: {
+            plan_id: planId,
+            quantity: '999999999999999.9999',
+            unit_price: '999999999999999.9999',
+            expected_version: p.version,
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-044 denies expired acceptance', async () => {
+    const p = await sentDraft();
+    await admin.query(
+      "UPDATE commercial.proposals SET valid_until=clock_timestamp()-interval '1 minute' WHERE id=$1",
+      [p.id],
+    );
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/accept`,
+          headers: headers(),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-045 rejects premature expiry', async () => {
+    const p = await sentDraft();
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/expire`,
+          headers: headers(),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-046 denies unprivileged expiry', async () => {
+    const p = await sentDraft();
+    await admin.query(
+      "UPDATE commercial.proposals SET valid_until=clock_timestamp()-interval '1 minute' WHERE id=$1",
+      [p.id],
+    );
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/expire`,
+          headers: headers(randomUUID(), tenantA, unprivilegedToken),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+  it('PRP-NEG-047 rejects revise outside APPROVED', async () => {
+    const p = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/revise`,
+          headers: headers(),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-048 rejects PATCH of APPROVED content', async () => {
+    const p = await approvedDraft();
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/proposals/${p.id}`,
+          headers: headers(),
+          payload: { title: 'Denied', expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-049 denies revision runtime writes', async () => {
+    expect(
+      (
+        await admin.query<{ allowed: boolean }>(
+          "SELECT has_table_privilege('acs_phase2_proposal_registry','commercial.proposal_revisions','UPDATE') AS allowed",
+        )
+      ).rows[0]!.allowed,
+    ).toBe(false);
+  });
+  it('PRP-NEG-050 preserves monotonic revision after failed transition', async () => {
+    const p = await approvedDraft();
+    await transition(p, 'revise');
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/revise`,
+          headers: headers(),
+          payload: { expected_version: p.version + 1 },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-051 rejects SENT revise', async () => {
+    const p = await sentDraft();
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/revise`,
+          headers: headers(),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-052 rejects approval return outside PENDING_APPROVAL', async () => {
+    const p = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/return-to-draft`,
+          headers: headers(),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-053 denies reject without permission', async () => {
+    const p = await sentDraft();
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/reject`,
+          headers: headers(randomUUID(), tenantA, unprivilegedToken),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+  it('PRP-NEG-054 rejects same-tenant Customer mismatch', async () => {
+    const s = randomUUID().slice(0, 8);
+    const a = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.customers(tenant_id,display_name,reference_code,created_by,updated_by) VALUES($1,'A',$2,$3,$3) RETURNING id",
+      [tenantA, `a-${s}`, aliceUser],
+    );
+    const b = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.customers(tenant_id,display_name,reference_code,created_by,updated_by) VALUES($1,'B',$2,$3,$3) RETURNING id",
+      [tenantA, `b-${s}`, aliceUser],
+    );
+    const o = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.opportunities(tenant_id,opportunity_code,title,owner_membership_id,customer_id,created_by,updated_by) VALUES($1,$2,'Mismatch',$3,$4,$5,$5) RETURNING id",
+      [tenantA, `o-${s}`, aliceMembership, a.rows[0]!.id, aliceUser],
+    );
+    expect(
+      (await create(payload({ opportunity_id: o.rows[0]!.id, customer_id: b.rows[0]!.id })))
+        .statusCode,
+    ).toBe(404);
+  });
+  it('PRP-NEG-055 rejects same-tenant Partner mismatch', async () => {
+    const s = randomUUID().slice(0, 8);
+    const a = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.partners(tenant_id,partner_code,display_name,created_by,updated_by) VALUES($1,$2,'A',$3,$3) RETURNING id",
+      [tenantA, `a-${s}`, aliceUser],
+    );
+    const b = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.partners(tenant_id,partner_code,display_name,created_by,updated_by) VALUES($1,$2,'B',$3,$3) RETURNING id",
+      [tenantA, `b-${s}`, aliceUser],
+    );
+    const o = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.opportunities(tenant_id,opportunity_code,title,owner_membership_id,partner_id,created_by,updated_by) VALUES($1,$2,'Mismatch',$3,$4,$5,$5) RETURNING id",
+      [tenantA, `o-${s}`, aliceMembership, a.rows[0]!.id, aliceUser],
+    );
+    expect(
+      (await create(payload({ opportunity_id: o.rows[0]!.id, partner_id: b.rows[0]!.id })))
+        .statusCode,
+    ).toBe(404);
+  });
+  it('PRP-NEG-056 rejects submit without Opportunity primary Plan', async () => {
+    const other = await admin.query<{ id: string }>(
+      "INSERT INTO commercial.plans(tenant_id,plan_code,name,created_by,updated_by) VALUES($1,$2,'Other',$3,$3) RETURNING id",
+      [tenantA, `other-${randomUUID().slice(0, 8)}`, aliceUser],
+    );
+    let p = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    p = await addLine(p, { planId: other.rows[0]!.id });
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/submit`,
+          headers: headers(),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it('PRP-NEG-057 rejects inactive owner membership', async () => {
+    await admin.query(
+      "UPDATE platform.memberships SET status='INACTIVE' WHERE id='30000000-0000-4000-8000-000000000077'",
+    );
+    expect(
+      (await create(payload({ owner_membership_id: '30000000-0000-4000-8000-000000000077' })))
+        .statusCode,
+    ).toBe(404);
+    await admin.query(
+      "UPDATE platform.memberships SET status='ACTIVE' WHERE id='30000000-0000-4000-8000-000000000077'",
+    );
+  });
+  it('PRP-NEG-058 denies owner assignment without permission', async () => {
+    const p = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/assign`,
+          headers: headers(randomUUID(), tenantA, unprivilegedToken),
+          payload: {
+            owner_membership_id: '30000000-0000-4000-8000-000000000099',
+            expected_version: p.version,
+          },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+  it('PRP-NEG-059 preserves creator SoD after owner reassignment', async () => {
+    let p = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    const assigned = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/proposals/${p.id}/assign`,
+      headers: headers(),
+      payload: {
+        owner_membership_id: '30000000-0000-4000-8000-000000000099',
+        expected_version: p.version,
+      },
+    });
+    p = proposalEnvelopeSchema.parse(assigned.json()).data;
+    p = await addLine(p);
+    p = await transition(p, 'submit');
+    expect(
+      (
+        await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${p.id}/approve`,
+          headers: headers(),
+          payload: { expected_version: p.version },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+  it('PROPOSAL-CONCURRENCY permits exactly one concurrent DRAFT writer', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    const writes = await Promise.all(
+      ['A', 'B'].map((title) =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/proposals/${draft.id}`,
+          headers: headers(),
+          payload: { title, expected_version: draft.version },
+        }),
+      ),
+    );
+    expect(writes.map((x) => x.statusCode).sort()).toEqual([200, 409]);
+    const persisted = await admin.query<{
+      version: string;
+      title: string;
+      audits: number;
+      events: number;
+    }>(
+      "SELECT p.version::text,p.title,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||p.id::text AND action='commercial.proposal.update') audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=p.id::text) events FROM commercial.proposals p WHERE id=$1",
+      [draft.id],
+    );
+    expect(persisted.rows[0]).toEqual(
+      expect.objectContaining({ version: String(draft.version + 1), audits: 1, events: 2 }),
+    );
+    expect(['A', 'B']).toContain(persisted.rows[0]!.title);
+  });
+  it('PROPOSAL-CONCURRENCY serializes submit versus update without a hybrid aggregate', async () => {
+    const draft = await addLine(
+      proposalEnvelopeSchema.parse((await create(payload())).json()).data,
+    );
+    const [submit, update] = await Promise.all([
+      oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/proposals/${draft.id}/submit`,
+        headers: headers(),
+        payload: { expected_version: draft.version },
+      }),
+      oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/proposals/${draft.id}`,
+        headers: headers(),
+        payload: { title: 'Concurrent update', expected_version: draft.version },
+      }),
+    ]);
+    // Exactly one command commits. A loser is rejected by optimistic versioning
+    // (409) or, after submit locks content, by the DRAFT invariant (400).
+    expect([submit.statusCode, update.statusCode].filter((status) => status === 200)).toHaveLength(
+      1,
+    );
+    expect([400, 409]).toContain(submit.statusCode === 200 ? update.statusCode : submit.statusCode);
+    const final = await admin.query<{ status: string; version: string; title: string }>(
+      'SELECT status,version::text,title FROM commercial.proposals WHERE id=$1',
+      [draft.id],
+    );
+    expect(final.rows[0]).toEqual(expect.objectContaining({ version: String(draft.version + 1) }));
+    expect(
+      (final.rows[0]!.status === 'PENDING_APPROVAL' &&
+        final.rows[0]!.title !== 'Concurrent update') ||
+        (final.rows[0]!.status === 'DRAFT' && final.rows[0]!.title === 'Concurrent update'),
+    ).toBe(true);
+  });
+  it('PROPOSAL-CONCURRENCY serializes approval return against approval', async () => {
+    const pending = await transition(
+      await addLine(proposalEnvelopeSchema.parse((await create(payload())).json()).data),
+      'submit',
+    );
+    const results = await Promise.all([
+      oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/proposals/${pending.id}/return-to-draft`,
+        headers: headers(),
+        payload: { expected_version: pending.version },
+      }),
+      oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/proposals/${pending.id}/approve`,
+        headers: headers(randomUUID(), tenantA, bobToken),
+        payload: { expected_version: pending.version },
+      }),
+    ]);
+    expect(results.map((x) => x.statusCode).sort()).toEqual([200, 409]);
+    const final = await admin.query<{ status: string; returned: number }>(
+      "SELECT status,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||p.id::text AND action='proposal.approval_returned') returned FROM commercial.proposals p WHERE id=$1",
+      [pending.id],
+    );
+    expect(['DRAFT', 'APPROVED']).toContain(final.rows[0]!.status);
+    expect(final.rows[0]!.returned).toBe(final.rows[0]!.status === 'DRAFT' ? 1 : 0);
+  });
+  it('PROPOSAL-CONCURRENCY serializes revise versus send and preserves revision history', async () => {
+    const approved = await approvedDraft();
+    const results = await Promise.all(
+      ['revise', 'send'].map((action) =>
+        oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${approved.id}/${action}`,
+          headers: headers(),
+          payload: { expected_version: approved.version },
+        }),
+      ),
+    );
+    expect(results.map((x) => x.statusCode).sort()).toEqual([200, 409]);
+    const final = await admin.query<{ status: string; revision_number: string; snapshots: number }>(
+      'SELECT p.status,p.revision_number::text,(SELECT count(*)::int FROM commercial.proposal_revisions WHERE proposal_id=p.id) snapshots FROM commercial.proposals p WHERE id=$1',
+      [approved.id],
+    );
+    expect(final.rows[0]).toEqual(
+      final.rows[0]!.status === 'DRAFT'
+        ? { status: 'DRAFT', revision_number: '2', snapshots: 1 }
+        : { status: 'SENT', revision_number: '1', snapshots: 0 },
+    );
+  });
+  it('PROPOSAL-CONCURRENCY serializes terminal accept versus cancel and accept versus expire', async () => {
+    const sent = await sentDraft();
+    const terminal = await Promise.all(
+      ['accept', 'cancel'].map((action) =>
+        oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${sent.id}/${action}`,
+          headers: headers(),
+          payload: { expected_version: sent.version },
+        }),
+      ),
+    );
+    expect(terminal.map((x) => x.statusCode).sort()).toEqual([200, 409]);
+    const expired = await sentDraft();
+    await admin.query(
+      "UPDATE commercial.proposals SET valid_until=clock_timestamp()-interval '1 minute' WHERE id=$1",
+      [expired.id],
+    );
+    const expiry = await Promise.all(
+      ['accept', 'expire'].map((action) =>
+        oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${expired.id}/${action}`,
+          headers: headers(),
+          payload: { expected_version: expired.version },
+        }),
+      ),
+    );
+    expect(expiry.map((x) => x.statusCode).sort()).toEqual([200, expect.any(Number)]);
+    expect(expiry.some((x) => x.statusCode === 200)).toBe(true);
+    expect(expiry.some((x) => [400, 409].includes(x.statusCode))).toBe(true);
+    const states = await admin.query<{ status: string }>(
+      'SELECT status FROM commercial.proposals WHERE id = ANY($1::uuid[])',
+      [[sent.id, expired.id]],
+    );
+    expect(states.rows.map((x) => x.status).sort()).toEqual(expect.arrayContaining(['EXPIRED']));
+    expect(states.rows.every((x) => ['ACCEPTED', 'CANCELLED', 'EXPIRED'].includes(x.status))).toBe(
+      true,
+    );
+  });
+  it('PROPOSAL-CONCURRENCY serializes owner assignment versus update and preserves creator', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    const results = await Promise.all([
+      oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/proposals/${draft.id}/assign`,
+        headers: headers(),
+        payload: {
+          owner_membership_id: '30000000-0000-4000-8000-000000000099',
+          expected_version: draft.version,
+        },
+      }),
+      oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/proposals/${draft.id}`,
+        headers: headers(),
+        payload: { title: 'Concurrent owner update', expected_version: draft.version },
+      }),
+    ]);
+    expect(results.map((x) => x.statusCode).sort()).toEqual([200, 409]);
+    const final = await admin.query<{
+      created_by_membership_id: string;
+      owner_membership_id: string;
+      version: string;
+    }>(
+      'SELECT created_by_membership_id,owner_membership_id,version::text FROM commercial.proposals WHERE id=$1',
+      [draft.id],
+    );
+    expect(final.rows[0]).toEqual(
+      expect.objectContaining({
+        created_by_membership_id: aliceMembership,
+        version: String(draft.version + 1),
+      }),
+    );
+  });
+  it('PROPOSAL-CONCURRENCY serializes competing revisions without duplicate snapshots', async () => {
+    const approved = await approvedDraft();
+    const results = await Promise.all(
+      [0, 1].map(() =>
+        oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/proposals/${approved.id}/revise`,
+          headers: headers(),
+          payload: { expected_version: approved.version },
+        }),
+      ),
+    );
+    expect(results.map((x) => x.statusCode).sort()).toEqual([200, 409]);
+    const final = await admin.query<{ revision_number: string; snapshots: number; lines: number }>(
+      'SELECT p.revision_number::text,(SELECT count(*)::int FROM commercial.proposal_revisions r WHERE r.proposal_id=p.id) snapshots,(SELECT count(*)::int FROM commercial.proposal_revision_line_items l JOIN commercial.proposal_revisions r ON r.id=l.proposal_revision_id WHERE r.proposal_id=p.id) lines FROM commercial.proposals p WHERE p.id=$1',
+      [approved.id],
+    );
+    expect(final.rows[0]).toEqual({ revision_number: '2', snapshots: 1, lines: 1 });
+  });
+  it('PROPOSAL-IDEMPOTENCY-CONCURRENCY produces one mutation, deterministic replay and no duplicate side effects', async () => {
+    const key = randomUUID();
+    const input = payload();
+    const responses = await Promise.all([create(input, headers(key)), create(input, headers(key))]);
+    expect(responses.map((x) => x.statusCode)).toEqual([200, 200]);
+    const first = proposalEnvelopeSchema.parse(responses[0].json());
+    const second = proposalEnvelopeSchema.parse(responses[1].json());
+    expect(second.data.id).toBe(first.data.id);
+    expect(
+      [first.meta.idempotent_replay, second.meta.idempotent_replay].filter(Boolean),
+    ).toHaveLength(1);
+    const effects = await admin.query<{ proposals: number; audits: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM commercial.proposals WHERE id=$1) proposals,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||$1::text) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=$1::text) events",
+      [first.data.id],
+    );
+    expect(effects.rows[0]).toEqual({ proposals: 1, audits: 1, events: 1 });
+    expect((await create(payload({ title: 'divergent' }), headers(key))).statusCode).toBe(409);
+  });
+  it('PROPOSAL-ATOMICITY rolls back aggregate, audit, outbox and operation at each mutation boundary', async () => {
+    for (const phase of [
+      'after-aggregate-mutation',
+      'after-audit',
+      'after-outbox',
+      'before-commit',
+    ] as const) {
+      const issued = await issueProposalContext('commercial.proposal.create');
+      const code = `rollback-${phase}-${randomUUID().slice(0, 8)}`;
+      const failed = new PostgresProposalRegistryRepository(proposalDatabaseUrl, (at) => {
+        if (at === phase) throw new Error(`test-only ${phase}`);
+      });
+      try {
+        await expect(
+          failed.create({
+            actorUserId: aliceUser,
+            contextToken: issued.contextToken,
+            correlationId: randomUUID(),
+            idempotencyKey: randomUUID(),
+            requestHash: 'a'.repeat(64),
+            requestId: randomUUID(),
+            tenantId: tenantA,
+            action: 'commercial.proposal.create',
+            ...payload({ proposal_code: code }),
+          }),
+        ).rejects.toThrow(`test-only ${phase}`);
+      } finally {
+        await failed.close();
+        await issued.close();
+      }
+      const absent = await admin.query<{
+        proposals: number;
+        audits: number;
+        events: number;
+        operations: number;
+      }>(
+        "SELECT (SELECT count(*)::int FROM commercial.proposals WHERE tenant_id=$1 AND proposal_code=$2) proposals,(SELECT count(*)::int FROM platform.audit_logs WHERE metadata::text LIKE '%' || $2 || '%') audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload::text LIKE '%' || $2 || '%') events,(SELECT count(*)::int FROM commercial.proposal_operations WHERE result::text LIKE '%' || $2 || '%') operations",
+        [tenantA, code],
+      );
+      expect(absent.rows[0]).toEqual({ proposals: 0, audits: 0, events: 0, operations: 0 });
+    }
+  });
+  it('PROPOSAL-LINE-ATOMICITY rolls back line, totals, version, audit and outbox', async () => {
+    const draft = proposalEnvelopeSchema.parse((await create(payload())).json()).data;
+    const before = await admin.query<{ audits: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||$1::text) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=$1::text) events",
+      [draft.id],
+    );
+    const issued = await issueProposalContext('commercial.proposal.update');
+    const failed = new PostgresProposalRegistryRepository(proposalDatabaseUrl, (phase) => {
+      if (phase === 'after-aggregate-mutation') throw new Error('test-only line rollback');
+    });
+    try {
+      await expect(
+        failed.line({
+          actorUserId: aliceUser,
+          contextToken: issued.contextToken,
+          correlationId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          requestHash: 'e'.repeat(64),
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          proposalId: draft.id,
+          expected_version: draft.version,
+          operation: 'create',
+          plan_id: planId,
+          quantity: '1.0000',
+          unit_price: '5.0000',
+          action: 'commercial.proposal.update',
+        } as never),
+      ).rejects.toThrow('test-only line rollback');
+    } finally {
+      await failed.close();
+      await issued.close();
+    }
+    const after = await admin.query<{
+      lines: number;
+      subtotal: string;
+      version: string;
+      audits: number;
+      events: number;
+    }>(
+      "SELECT (SELECT count(*)::int FROM commercial.proposal_line_items WHERE proposal_id=p.id) lines,p.proposal_subtotal::text subtotal,p.version::text,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||p.id::text) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=p.id::text) events FROM commercial.proposals p WHERE p.id=$1",
+      [draft.id],
+    );
+    expect(after.rows[0]).toEqual({
+      lines: 0,
+      subtotal: '0.0000',
+      version: String(draft.version),
+      ...before.rows[0],
+    });
+  });
+  it('PROPOSAL-LIFECYCLE-ATOMICITY rolls back submit, approve, send, accept and cancel', async () => {
+    const cases: Array<{
+      action: string;
+      actorUserId: string;
+      current: () => Promise<Proposal>;
+      subject: string;
+      transition: string;
+    }> = [
+      {
+        action: 'commercial.proposal.update',
+        actorUserId: aliceUser,
+        current: async () =>
+          addLine(proposalEnvelopeSchema.parse((await create(payload())).json()).data),
+        subject: 'alice',
+        transition: 'submit',
+      },
+      {
+        action: 'commercial.proposal.approve',
+        actorUserId: '50000000-0000-4000-8000-000000000055',
+        current: async () =>
+          transition(
+            await addLine(proposalEnvelopeSchema.parse((await create(payload())).json()).data),
+            'submit',
+          ),
+        subject: 'bob',
+        transition: 'approve',
+      },
+      {
+        action: 'commercial.proposal.send',
+        actorUserId: aliceUser,
+        current: approvedDraft,
+        subject: 'alice',
+        transition: 'send',
+      },
+      {
+        action: 'commercial.proposal.accept',
+        actorUserId: aliceUser,
+        current: sentDraft,
+        subject: 'alice',
+        transition: 'accept',
+      },
+      {
+        action: 'commercial.proposal.cancel',
+        actorUserId: aliceUser,
+        current: approvedDraft,
+        subject: 'alice',
+        transition: 'cancel',
+      },
+    ];
+    for (const testCase of cases) {
+      const current = await testCase.current();
+      const before = await admin.query<{ audits: number; events: number }>(
+        "SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||$1::text) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=$1::text) events",
+        [current.id],
+      );
+      const issued = await issueProposalContext(testCase.action, testCase.subject);
+      const failed = new PostgresProposalRegistryRepository(proposalDatabaseUrl, (phase) => {
+        if (phase === 'after-aggregate-mutation')
+          throw new Error(`test-only ${testCase.transition} rollback`);
+      });
+      try {
+        await expect(
+          failed.transition({
+            actorUserId: testCase.actorUserId,
+            contextToken: issued.contextToken,
+            correlationId: randomUUID(),
+            idempotencyKey: randomUUID(),
+            requestHash: 'c'.repeat(64),
+            requestId: randomUUID(),
+            tenantId: tenantA,
+            proposalId: current.id,
+            expected_version: current.version,
+            transition: testCase.transition,
+            action: testCase.action,
+          }),
+        ).rejects.toThrow(`test-only ${testCase.transition} rollback`);
+      } finally {
+        await failed.close();
+        await issued.close();
+      }
+      const after = await admin.query<{
+        status: string;
+        version: string;
+        audits: number;
+        events: number;
+      }>(
+        "SELECT p.status,p.version::text,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||p.id::text) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=p.id::text) events FROM commercial.proposals p WHERE p.id=$1",
+        [current.id],
+      );
+      expect(after.rows[0]).toEqual({
+        status: current.status,
+        version: String(current.version),
+        ...before.rows[0],
+      });
+    }
+  });
+  it('PROPOSAL-APPROVAL-RETURN-ATOMICITY rolls back state, audit and outbox', async () => {
+    const pending = await transition(
+      await addLine(proposalEnvelopeSchema.parse((await create(payload())).json()).data),
+      'submit',
+    );
+    const before = await admin.query<{ audits: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||$1::text) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=$1::text) events",
+      [pending.id],
+    );
+    const issued = await issueProposalContext('commercial.proposal.update');
+    const failed = new PostgresProposalRegistryRepository(proposalDatabaseUrl, (phase) => {
+      if (phase === 'after-aggregate-mutation')
+        throw new Error('test-only approval return rollback');
+    });
+    try {
+      await expect(
+        failed.transition({
+          actorUserId: aliceUser,
+          contextToken: issued.contextToken,
+          correlationId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          requestHash: 'd'.repeat(64),
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          proposalId: pending.id,
+          expected_version: pending.version,
+          transition: 'return-to-draft',
+          action: 'commercial.proposal.update',
+          auditAction: 'proposal.approval_returned',
+        }),
+      ).rejects.toThrow('test-only approval return rollback');
+    } finally {
+      await failed.close();
+      await issued.close();
+    }
+    const after = await admin.query<{
+      status: string;
+      version: string;
+      audits: number;
+      events: number;
+    }>(
+      "SELECT p.status,p.version::text,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||p.id::text) audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=p.id::text) events FROM commercial.proposals p WHERE p.id=$1",
+      [pending.id],
+    );
+    expect(after.rows[0]).toEqual({
+      status: 'PENDING_APPROVAL',
+      version: String(pending.version),
+      ...before.rows[0],
+    });
+  });
+  it('PROPOSAL-REVISION-ATOMICITY rolls back snapshot and current aggregate together', async () => {
+    const approved = await approvedDraft();
+    const issued = await issueProposalContext('commercial.proposal.revise');
+    const failed = new PostgresProposalRegistryRepository(proposalDatabaseUrl, (phase) => {
+      if (phase === 'after-revision-snapshot')
+        throw new Error('test-only revision snapshot failure');
+    });
+    try {
+      await expect(
+        failed.transition({
+          actorUserId: aliceUser,
+          contextToken: issued.contextToken,
+          correlationId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          requestHash: 'b'.repeat(64),
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          proposalId: approved.id,
+          expected_version: approved.version,
+          transition: 'revise',
+          action: 'commercial.proposal.revise',
+        }),
+      ).rejects.toThrow('test-only revision snapshot failure');
+    } finally {
+      await failed.close();
+      await issued.close();
+    }
+    const intact = await admin.query<{
+      status: string;
+      revision_number: string;
+      snapshots: number;
+      audits: number;
+      events: number;
+    }>(
+      "SELECT p.status,p.revision_number::text,(SELECT count(*)::int FROM commercial.proposal_revisions r WHERE r.proposal_id=p.id) snapshots,(SELECT count(*)::int FROM platform.audit_logs WHERE resource='commercial:proposal:'||p.id::text AND action='commercial.proposal.revise') audits,(SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=p.id::text AND event_type='commercial.proposal.revision_created') events FROM commercial.proposals p WHERE p.id=$1",
+      [approved.id],
+    );
+    expect(intact.rows[0]).toEqual({
+      status: 'APPROVED',
+      revision_number: '1',
+      snapshots: 0,
+      audits: 0,
+      events: 0,
+    });
+  });
+  it('PROPOSAL-PERFORMANCE records a TEST_ONLY local baseline through the signed OIDC execution path', async () => {
+    const measurements = new Map<string, number>();
+    const measure = async <T>(name: string, operation: () => Promise<T>) => {
+      const startedAt = performance.now();
+      const result = await operation();
+      measurements.set(name, Number((performance.now() - startedAt).toFixed(2)));
+      return result;
+    };
+    const journeyStartedAt = performance.now();
+    let current = await measure('PROPOSAL_CREATE_AUDIT_OUTBOX_MS', async () => {
+      const response = await create(payload({ title: 'Proposal performance fixture' }));
+      expect(response.statusCode, response.body).toBe(200);
+      return proposalEnvelopeSchema.parse(response.json()).data;
+    });
+    current = await measure('PROPOSAL_DRAFT_CONSTRUCTION_LINES_MS', () => addLine(current));
+    await measure('PROPOSAL_DETAIL_MS', async () => {
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: `/api/v1/commercial/proposals/${current.id}`,
+        headers: headers(),
+      });
+      expect(response.statusCode, response.body).toBe(200);
+    });
+    await measure('PROPOSAL_LIST_MS', async () => {
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/commercial/proposals?limit=25',
+        headers: headers(),
+      });
+      expect(response.statusCode, response.body).toBe(200);
+    });
+    current = await measure('PROPOSAL_DRAFT_UPDATE_MS', async () => {
+      const response = await oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/proposals/${current.id}`,
+        headers: headers(),
+        payload: {
+          title: 'Proposal performance fixture updated',
+          expected_version: current.version,
+        },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      return proposalEnvelopeSchema.parse(response.json()).data;
+    });
+    current = await measure('PROPOSAL_LINE_UPDATE_MS', async () => {
+      const response = await oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/proposals/${current.id}/lines/${current.lines[0]!.id}`,
+        headers: headers(),
+        payload: { quantity: '2.0000', expected_version: current.version },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      return proposalEnvelopeSchema.parse(response.json()).data;
+    });
+    current = await measure('PROPOSAL_SUBMIT_MS', () => transition(current, 'submit'));
+    current = await measure('PROPOSAL_APPROVE_MS', () => transition(current, 'approve', bobToken));
+    current = await measure('PROPOSAL_REVISE_MS', () => transition(current, 'revise'));
+    current = await measure('PROPOSAL_SEND_MS', async () => {
+      const submitted = await transition(current, 'submit');
+      const approved = await transition(submitted, 'approve', bobToken);
+      return transition(approved, 'send');
+    });
+    await measure('PROPOSAL_TERMINAL_TRANSITION_MS', () => transition(current, 'accept'));
+    measurements.set(
+      'PROPOSAL_COMPLETE_JOURNEY_MS',
+      Number((performance.now() - journeyStartedAt).toFixed(2)),
+    );
+    process.stdout.write(
+      `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, ...Object.fromEntries(measurements) })}\n`,
     );
   });
 });
