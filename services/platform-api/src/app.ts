@@ -5,6 +5,10 @@ import {
   customerEnvelopeSchema,
   customerListEnvelopeSchema,
   customerUpdateSchema,
+  leadCreateSchema,
+  leadEnvelopeSchema,
+  leadListEnvelopeSchema,
+  leadUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -42,7 +46,9 @@ import {
 } from './postgres-platform-context.js';
 import { PostgresTenantAdminRepository } from './postgres-tenant-administration.js';
 import { PostgresCustomerRepository } from './postgres-customer-registry.js';
+import { PostgresLeadRepository } from './postgres-lead-registry.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
+import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import {
   TenantAdministrationFailure,
   TenantAdministrationService,
@@ -63,6 +69,7 @@ export async function buildApp(
     readonly platformContextService?: PlatformContextService;
     readonly tenantAdministrationService?: TenantAdministrationService;
     readonly customerRegistryService?: CustomerRegistryService;
+    readonly leadRegistryService?: LeadRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -83,6 +90,8 @@ export async function buildApp(
   let tenantAdminRepository: PostgresTenantAdminRepository | undefined;
   let customerRepository: PostgresCustomerRepository | undefined;
   let customerRegistryService = options.customerRegistryService;
+  let leadRepository: PostgresLeadRepository | undefined;
+  let leadRegistryService = options.leadRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -139,6 +148,16 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.leadDatabaseUrl !== undefined) {
+      leadRepository = new PostgresLeadRepository(configuration.leadDatabaseUrl);
+      leadRegistryService = new LeadRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        leadRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -147,6 +166,7 @@ export async function buildApp(
         securityAuditRepository?.close(),
         tenantAdminRepository?.close(),
         customerRepository?.close(),
+        leadRepository?.close(),
       ]);
     });
   }
@@ -879,6 +899,274 @@ export async function buildApp(
         );
       } catch (error) {
         if (error instanceof CustomerRegistryFailure) return customerError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+
+  const leadError = (
+    error: LeadRegistryFailure,
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'NOT_FOUND'
+          ? 404
+          : error.code === 'STALE_VERSION' || error.code === 'IDEMPOTENCY_CONFLICT'
+            ? 409
+            : 403;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  const leadUnavailable = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'LEAD_REGISTRY_NOT_CONFIGURED',
+          message: 'Lead Registry dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const leadTenant = customerTenant;
+  const leadSchema = {
+    ...customerRouteSchema,
+    headers: {
+      type: 'object',
+      required: ['authorization', 'x-acs-tenant-id'],
+      properties: {
+        authorization: { type: 'string' },
+        'x-acs-tenant-id': { type: 'string', format: 'uuid' },
+        'idempotency-key': { type: 'string', format: 'uuid' },
+      },
+    },
+  } as const;
+  app.post(
+    '/api/v1/commercial/leads',
+    {
+      schema: {
+        ...leadSchema,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['display_name'],
+          properties: {
+            display_name: { type: 'string', minLength: 1, maxLength: 160 },
+            source: { type: ['string', 'null'], minLength: 1, maxLength: 80 },
+            contact_name: { type: ['string', 'null'], minLength: 1, maxLength: 160 },
+            contact_email: { type: ['string', 'null'], format: 'email', maxLength: 254 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!leadRegistryService) return leadUnavailable(request, reply);
+      const tenant = leadTenant(request);
+      const key = request.headers['idempotency-key'];
+      const body = leadCreateSchema.safeParse(request.body);
+      if (
+        tenant?.success !== true ||
+        typeof key !== 'string' ||
+        !uuidSchema.safeParse(key).success ||
+        !body.success
+      )
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Valid tenant, idempotency key and lead are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return leadEnvelopeSchema.parse(
+          await leadRegistryService.create(
+            request.headers.authorization,
+            tenant.data,
+            key,
+            body.data,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof LeadRegistryFailure) return leadError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.get(
+    '/api/v1/commercial/leads',
+    {
+      schema: {
+        ...leadSchema,
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+            cursor: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!leadRegistryService) return leadUnavailable(request, reply);
+      const tenant = leadTenant(request);
+      const query = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          cursor: z.uuid().optional(),
+        })
+        .strict()
+        .safeParse(request.query);
+      if (tenant?.success !== true || !query.success)
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Valid tenant and pagination are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return leadListEnvelopeSchema.parse(
+          await leadRegistryService.list(
+            request.headers.authorization,
+            tenant.data,
+            query.data.limit,
+            query.data.cursor,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof LeadRegistryFailure) return leadError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.get(
+    '/api/v1/commercial/leads/:leadId',
+    {
+      schema: {
+        ...leadSchema,
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['leadId'],
+          properties: { leadId: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!leadRegistryService) return leadUnavailable(request, reply);
+      const tenant = leadTenant(request);
+      const leadId = uuidSchema.safeParse((request.params as { leadId?: string }).leadId);
+      if (tenant?.success !== true || !leadId.success)
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Valid tenant and lead are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return leadEnvelopeSchema.parse(
+          await leadRegistryService.get(
+            request.headers.authorization,
+            tenant.data,
+            leadId.data,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof LeadRegistryFailure) return leadError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.patch(
+    '/api/v1/commercial/leads/:leadId',
+    {
+      schema: {
+        ...leadSchema,
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['leadId'],
+          properties: { leadId: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['expected_version'],
+          properties: {
+            display_name: { type: 'string', minLength: 1, maxLength: 160 },
+            source: { type: ['string', 'null'], minLength: 1, maxLength: 80 },
+            contact_name: { type: ['string', 'null'], minLength: 1, maxLength: 160 },
+            contact_email: { type: ['string', 'null'], format: 'email', maxLength: 254 },
+            status: { type: 'string', enum: ['NEW', 'QUALIFIED', 'DISQUALIFIED'] },
+            expected_version: { type: 'integer', minimum: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!leadRegistryService) return leadUnavailable(request, reply);
+      const tenant = leadTenant(request);
+      const key = request.headers['idempotency-key'];
+      const leadId = uuidSchema.safeParse((request.params as { leadId?: string }).leadId);
+      const body = leadUpdateSchema.safeParse(request.body);
+      if (
+        tenant?.success !== true ||
+        !leadId.success ||
+        typeof key !== 'string' ||
+        !uuidSchema.safeParse(key).success ||
+        !body.success
+      )
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Valid tenant, lead, idempotency key and update are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return leadEnvelopeSchema.parse(
+          await leadRegistryService.update(
+            request.headers.authorization,
+            tenant.data,
+            leadId.data,
+            key,
+            body.data,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof LeadRegistryFailure) return leadError(error, request, reply);
         throw error;
       }
     },

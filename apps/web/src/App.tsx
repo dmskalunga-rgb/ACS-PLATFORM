@@ -6,6 +6,7 @@ import {
 } from './context-client-configuration.js';
 import { TenantAdministrationPanel } from './TenantAdministration.js';
 import { CustomerRegistryPanel } from './CustomerRegistry.js';
+import { LeadRegistryPanel } from './LeadRegistry.js';
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -220,6 +221,17 @@ export function App({
         )}
         {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
           <CustomerRegistryPanel
+            apiBaseUrl={apiBaseUrl}
+            tenantId={contextConfiguration.tenantId}
+            authorization={
+              contextConfiguration.accessToken === undefined
+                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
+                : `Bearer ${contextConfiguration.accessToken}`
+            }
+          />
+        )}
+        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
+          <LeadRegistryPanel
             apiBaseUrl={apiBaseUrl}
             tenantId={contextConfiguration.tenantId}
             authorization={

@@ -20,3 +20,4 @@ the decision becomes repository policy only after controlled review and merge.
 | ADR-0012 | Opaque transaction-bound tenant grants     |
 | ADR-0013 | Production OIDC/JWT authentication         |
 | ADR-0015 | Tenant-scoped Commercial Customer Registry |
+| ADR-0016 | Tenant-scoped Commercial Lead Registry     |
