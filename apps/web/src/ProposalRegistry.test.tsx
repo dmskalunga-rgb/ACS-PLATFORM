@@ -192,7 +192,7 @@ describe('Proposal Registry UI acceptance matrix', () => {
     install([list(), response({ ...proposal, status: 'ACCEPTED' })]);
     render(panel());
     expect(await screen.findByLabelText('Proposal code')).toBeRequired();
-    await userEvent.click(screen.getByRole('button', { name: 'Proposal A' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Proposal A' }));
     expect(await screen.findByText('This terminal proposal is immutable.')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Edit proposal' })).toBeNull();
   });
