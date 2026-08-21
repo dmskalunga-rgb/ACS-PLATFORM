@@ -1,6 +1,6 @@
 # ACS Phase 2 Lead Registry Evidence
 
-Status: `IMPLEMENTED_LOCAL_VERIFIED`
+Status: `VERIFIED_AND_INTEGRATED`
 
 ## Scope
 
@@ -27,11 +27,50 @@ independent and is not an authority shortcut for Lead tests.
 | Web accessibility-oriented component tests                                         | `SUCCESS` — 16/16 web tests |
 | Typecheck, production web build, formatting                                        | `SUCCESS`                   |
 
-No remote run exists for this uncommitted local HEAD. Remote CI evidence must be collected only
-after authorized publication.
+## Branch remote validation
+
+The authorized Lead source SHA `0003c318666e40ab1c18dd14e6a58436300174d6` was published and
+validated before PR creation. The following runs completed with `SUCCESS` on that exact source
+SHA:
+
+- Repository validation `32436891465`;
+- Phase 2 Lead Registry validation `32436867520`;
+- Phase 2 Customer Registry validation `32436867459`;
+- Phase 1 platform multi-tenancy validation `32436867469`;
+- Phase zero engineering validation `32436867470`.
+
+## Pull request validation
+
+PR [#9](https://github.com/dmskalunga-rgb/ACS-PLATFORM/pull/9) validated the same source SHA.
+Its required PR runs completed with `SUCCESS`:
+
+- Repository validation `32437108230`;
+- Phase 1 platform multi-tenancy validation `32437108254`;
+- Phase 2 Customer Registry validation `32437108314`;
+- Phase 2 Lead Registry validation `32437108504`;
+- Phase zero engineering validation `32437108325`.
+
+## Integration and post-merge validation
+
+PR #9 was integrated into `develop` with merge commit
+`bcc19d27a724884b7451b2ca90118adb194c164d`. Its parents are the authorized pre-merge
+`develop` SHA `7c867872d3a25a054909f6562a9d6755a5f109ea` and Lead source SHA
+`0003c318666e40ab1c18dd14e6a58436300174d6`.
+
+The post-merge `push` workflows all completed with `SUCCESS` on
+`develop@bcc19d27a724884b7451b2ca90118adb194c164d`:
+
+- Repository validation `32437469407`;
+- Phase 2 Lead Registry validation `32437469411`;
+- Phase 2 Customer Registry validation `32437469515`;
+- Phase 1 platform multi-tenancy validation `32437469547`;
+- Phase zero engineering validation `32437469514`.
 
 ## Remaining governance boundaries
 
-ADR-0016 disposition, owners/approvers, retention periods, production broker and IdP/client
-registration, SLO thresholds, QG-18–QG-22, baseline custody, and individual ACS-REQ completeness
-remain open. Phase 2 scope remains limited to authorized vertical slices.
+ADR-0016 remains `PROPOSED`. Owners/approvers, retention periods, production broker and IdP/client
+registration, acr/amr production mapping, SLO thresholds, QG-18–QG-22, baseline custody,
+ECOM/EDIM/EDOLM completeness, individual ACS-REQ completeness and commit-signing enforcement
+remain open. Customer Registry and Lead Registry are `VERIFIED_AND_INTEGRATED`; the commercial
+domain disposition remains `INCOMPLETE`. A third Phase 2 vertical slice, production, release,
+deployment and main integration remain `NOT_AUTHORIZED`.
