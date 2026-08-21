@@ -11,6 +11,9 @@ import {
   planListEnvelopeSchema,
   partnerEnvelopeSchema,
   partnerListEnvelopeSchema,
+  opportunityEnvelopeSchema,
+  opportunityListEnvelopeSchema,
+  type Opportunity,
   type Partner,
   tenantAdministrationSchema,
 } from '@acs/contracts';
@@ -18,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
 import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
 import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.js';
+import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-registry.js';
 import type { PlatformConfiguration } from './config.js';
 
 const { Client } = pg;
@@ -33,6 +37,7 @@ const requiredEnvironment = {
   lead: process.env.ACS_LEAD_DATABASE_URL,
   plan: process.env.ACS_PLAN_DATABASE_URL,
   partner: process.env.ACS_PARTNER_DATABASE_URL,
+  opportunity: process.env.ACS_OPPORTUNITY_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -53,6 +58,7 @@ const configuration: PlatformConfiguration = {
   leadDatabaseUrl: requiredEnvironment.lead as string,
   planDatabaseUrl: requiredEnvironment.plan as string,
   partnerDatabaseUrl: requiredEnvironment.partner as string,
+  opportunityDatabaseUrl: requiredEnvironment.opportunity as string,
   webOrigin: 'http://localhost:5173',
 };
 
@@ -1937,3 +1943,583 @@ describe.sequential('Plan Catalog acceptance matrix', () => {
 });
 import { createServer, type Server } from 'node:http';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+
+describe.sequential('Opportunity Registry signed OIDC acceptance matrix', () => {
+  let accepted: Opportunity;
+  let tenantBOpportunity: Opportunity;
+  let references: {
+    customer: string;
+    lead: string;
+    partner: string;
+    plan: string;
+    foreignCustomer: string;
+    foreignLead: string;
+    foreignPartner: string;
+    foreignPlan: string;
+  };
+  const aliceMembership = '30000000-0000-4000-8000-000000000055';
+  const charlieMembership = '30000000-0000-4000-8000-000000000088';
+  const headers = (key = randomUUID(), tenant = tenantA, token = oidcToken) => ({
+    authorization: `Bearer ${token}`,
+    'x-acs-tenant-id': tenant,
+    'idempotency-key': key,
+  });
+  const createPayload = (
+    suffix = randomUUID().slice(0, 8),
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> => ({
+    opportunity_code: `opp-${suffix}`,
+    owner_membership_id: aliceMembership,
+    title: 'OIDC Opportunity acceptance',
+    ...overrides,
+  });
+  const create = async (
+    payload: Record<string, unknown> = createPayload(),
+    requestHeaders: Record<string, string> = headers(),
+  ) =>
+    oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/opportunities',
+      headers: requestHeaders,
+      payload,
+    });
+  const detail = (id: string, requestHeaders: Record<string, string> = headers()) =>
+    oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/opportunities/${id}`,
+      headers: requestHeaders,
+    });
+  const patch = (
+    id: string,
+    payload: Record<string, unknown>,
+    requestHeaders: Record<string, string> = headers(),
+  ) =>
+    oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/opportunities/${id}`,
+      headers: requestHeaders,
+      payload,
+    });
+
+  beforeAll(async () => {
+    const fixture = async (tenantId: string, actorId: string) => {
+      const suffix = randomUUID().slice(0, 8);
+      const [customer, lead, partner, plan] = await Promise.all([
+        admin.query<{ id: string }>(
+          "INSERT INTO commercial.customers(tenant_id,display_name,reference_code,created_by,updated_by) VALUES($1,'Opportunity fixture',$2,$3,$3) RETURNING id",
+          [tenantId, `opp-${suffix}`, actorId],
+        ),
+        admin.query<{ id: string }>(
+          "INSERT INTO commercial.leads(tenant_id,display_name,source,created_by,updated_by) VALUES($1,'Opportunity fixture','e2e',$2,$2) RETURNING id",
+          [tenantId, actorId],
+        ),
+        admin.query<{ id: string }>(
+          "INSERT INTO commercial.partners(tenant_id,partner_code,display_name,created_by,updated_by) VALUES($1,$2,'Opportunity fixture',$3,$3) RETURNING id",
+          [tenantId, `opp-${suffix}`, actorId],
+        ),
+        admin.query<{ id: string }>(
+          "INSERT INTO commercial.plans(tenant_id,plan_code,name,created_by,updated_by) VALUES($1,$2,'Opportunity fixture',$3,$3) RETURNING id",
+          [tenantId, `opp-${suffix}`, actorId],
+        ),
+      ]);
+      return [customer.rows[0]!.id, lead.rows[0]!.id, partner.rows[0]!.id, plan.rows[0]!.id];
+    };
+    const first = [
+      ...(await fixture(tenantA, '40000000-0000-4000-8000-000000000044')),
+      ...(await fixture(tenantB, '60000000-0000-4000-8000-000000000066')),
+    ];
+    references = {
+      customer: first[0]!,
+      lead: first[1]!,
+      partner: first[2]!,
+      plan: first[3]!,
+      foreignCustomer: first[4]!,
+      foreignLead: first[5]!,
+      foreignPartner: first[6]!,
+      foreignPlan: first[7]!,
+    };
+  });
+
+  it('OPP-POS-001 create Opportunity', async () => {
+    const r = await create();
+    expect(r.statusCode, r.body).toBe(200);
+    accepted = opportunityEnvelopeSchema.parse(r.json()).data;
+  });
+  it('OPP-POS-002 list own-tenant Opportunities', async () => {
+    const r = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/opportunities?limit=100',
+      headers: headers(),
+    });
+    expect(opportunityListEnvelopeSchema.parse(r.json()).data).toContainEqual(
+      expect.objectContaining({ id: accepted.id }),
+    );
+  });
+  it('OPP-POS-003 get Opportunity detail', async () =>
+    expect((await detail(accepted.id)).statusCode).toBe(200));
+  it('OPP-POS-004 update ordinary mutable business field', async () => {
+    const r = await patch(accepted.id, {
+      title: 'OIDC Opportunity updated',
+      expected_version: accepted.version,
+    });
+    expect(r.statusCode).toBe(200);
+    accepted = opportunityEnvelopeSchema.parse(r.json()).data;
+  });
+  it.each([
+    ['OPP-POS-005 assign valid Customer reference', 'customer_id', () => references.customer],
+    ['OPP-POS-006 assign valid Lead reference', 'lead_id', () => references.lead],
+    ['OPP-POS-007 assign valid Partner reference', 'partner_id', () => references.partner],
+    ['OPP-POS-008 assign valid Plan reference', 'plan_id', () => references.plan],
+  ])('%s', async (_label, field, value) => {
+    const r = await patch(accepted.id, { [field]: value(), expected_version: accepted.version });
+    expect(r.statusCode, r.body).toBe(200);
+    accepted = opportunityEnvelopeSchema.parse(r.json()).data;
+  });
+  it('OPP-POS-009 create/update with no optional relationship', async () => {
+    const r = await create(
+      createPayload(randomUUID().slice(0, 8), {
+        customer_id: null,
+        lead_id: null,
+        partner_id: null,
+        plan_id: null,
+      }),
+    );
+    expect(r.statusCode).toBe(200);
+  });
+  it.each([
+    ['OPP-POS-010 probability 0 accepted', 0],
+    ['OPP-POS-011 probability 100 accepted', 100],
+  ])('%s', async (_label, probability_percent) => {
+    const r = await create(createPayload(randomUUID().slice(0, 8), { probability_percent }));
+    expect(r.statusCode).toBe(200);
+  });
+  it('OPP-POS-012 expected_close_date accepted', async () =>
+    expect(
+      (await create(createPayload(randomUUID().slice(0, 8), { expected_close_date: '2027-01-15' })))
+        .statusCode,
+    ).toBe(200));
+  it('OPP-POS-013 valid owner membership accepted', async () =>
+    expect(
+      (
+        await create(
+          createPayload(randomUUID().slice(0, 8), { owner_membership_id: aliceMembership }),
+        )
+      ).statusCode,
+    ).toBe(200));
+  it.each([
+    ['OPP-POS-014 legal QUALIFICATION → DISCOVERY', 'QUALIFICATION', 'DISCOVERY'],
+    ['OPP-POS-015 legal DISCOVERY → PROPOSAL', 'DISCOVERY', 'PROPOSAL'],
+    ['OPP-POS-016 legal PROPOSAL → NEGOTIATION', 'PROPOSAL', 'NEGOTIATION'],
+    ['OPP-POS-017 legal NEGOTIATION → WON', 'NEGOTIATION', 'WON'],
+    ['OPP-POS-018 active stage → LOST where DoR permits', 'DISCOVERY', 'LOST'],
+  ])('%s', async (_label, start, next) => {
+    const created = await create(createPayload(randomUUID().slice(0, 8)));
+    let entity = opportunityEnvelopeSchema.parse(created.json()).data;
+    const path = ['QUALIFICATION', 'DISCOVERY', 'PROPOSAL', 'NEGOTIATION'];
+    for (const stage of path.slice(1, path.indexOf(start) + 1)) {
+      const r = await patch(entity.id, { stage, expected_version: entity.version });
+      entity = opportunityEnvelopeSchema.parse(r.json()).data;
+    }
+    const r = await patch(entity.id, { stage: next, expected_version: entity.version });
+    expect(r.statusCode, r.body).toBe(200);
+  });
+  it('OPP-POS-019 same-request idempotent replay', async () => {
+    const key = randomUUID(),
+      payload = createPayload();
+    const a = await create(payload, headers(key));
+    const b = await create(payload, headers(key));
+    expect(opportunityEnvelopeSchema.parse(b.json()).meta.idempotent_replay).toBe(true);
+    expect(opportunityEnvelopeSchema.parse(a.json()).data.id).toBe(
+      opportunityEnvelopeSchema.parse(b.json()).data.id,
+    );
+  });
+  it('OPP-POS-020 valid optimistic-concurrency update', async () => {
+    const r = await patch(accepted.id, {
+      probability_percent: 75,
+      expected_version: accepted.version,
+    });
+    expect(r.statusCode).toBe(200);
+    accepted = opportunityEnvelopeSchema.parse(r.json()).data;
+  });
+
+  it.each([
+    [
+      'OPP-NEG-001 unauthenticated create',
+      () =>
+        create(createPayload(), { 'x-acs-tenant-id': tenantA, 'idempotency-key': randomUUID() }),
+      401,
+    ],
+    [
+      'OPP-NEG-002 unauthenticated list',
+      () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/opportunities',
+          headers: { 'x-acs-tenant-id': tenantA },
+        }),
+      401,
+    ],
+    [
+      'OPP-NEG-003 unauthenticated detail',
+      () => detail(accepted.id, { 'x-acs-tenant-id': tenantA }),
+      401,
+    ],
+    [
+      'OPP-NEG-004 unauthenticated update',
+      () =>
+        patch(
+          accepted.id,
+          { title: 'Denied', expected_version: accepted.version },
+          { 'x-acs-tenant-id': tenantA, 'idempotency-key': randomUUID() },
+        ),
+      401,
+    ],
+    [
+      'OPP-NEG-005 missing create permission',
+      async () =>
+        create(createPayload(), headers(randomUUID(), tenantC, await signedOidcToken('bob'))),
+      403,
+    ],
+    [
+      'OPP-NEG-006 missing read permission',
+      async () =>
+        oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/opportunities',
+          headers: headers(randomUUID(), tenantC, await signedOidcToken('bob')),
+        }),
+      403,
+    ],
+    [
+      'OPP-NEG-007 missing update permission',
+      async () =>
+        patch(
+          accepted.id,
+          { title: 'Denied', expected_version: accepted.version },
+          headers(randomUUID(), tenantC, await signedOidcToken('bob')),
+        ),
+      403,
+    ],
+    [
+      'OPP-NEG-008 tenant injection',
+      () => create({ ...createPayload(), tenant_id: tenantB }, headers()),
+      400,
+    ],
+    [
+      'OPP-NEG-009 unknown field',
+      () => create({ ...createPayload(), unknown_field: true }, headers()),
+      400,
+    ],
+    [
+      'OPP-NEG-010 mass assignment',
+      () =>
+        patch(
+          accepted.id,
+          {
+            tenant_id: tenantB,
+            version: 999,
+            created_at: '2026-01-01T00:00:00Z',
+            expected_version: accepted.version,
+          },
+          headers(),
+        ),
+      400,
+    ],
+    [
+      'OPP-NEG-012 cross-tenant detail',
+      async () =>
+        detail(accepted.id, headers(randomUUID(), tenantB, await signedOidcToken('charlie'))),
+      404,
+    ],
+    [
+      'OPP-NEG-013 cross-tenant PATCH',
+      async () =>
+        patch(
+          accepted.id,
+          { title: 'Escape', expected_version: accepted.version },
+          headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+        ),
+      404,
+    ],
+    [
+      'OPP-NEG-019 invalid/ineligible membership',
+      () => create(createPayload(randomUUID().slice(0, 8), { owner_membership_id: randomUUID() })),
+      400,
+    ],
+    [
+      'OPP-NEG-020 genuine foreign-tenant membership',
+      () =>
+        create(createPayload(randomUUID().slice(0, 8), { owner_membership_id: charlieMembership })),
+      400,
+    ],
+    [
+      'OPP-NEG-021 invalid stage value',
+      () => patch(accepted.id, { stage: 'INVALID', expected_version: accepted.version }, headers()),
+      400,
+    ],
+    [
+      'OPP-NEG-022 illegal transition',
+      () => patch(accepted.id, { stage: 'WON', expected_version: accepted.version }, headers()),
+      409,
+    ],
+    [
+      'OPP-NEG-025 stale version',
+      () => patch(accepted.id, { title: 'Stale', expected_version: 1 }, headers()),
+      409,
+    ],
+    [
+      'OPP-NEG-030 DELETE unavailable',
+      () =>
+        oidcApp.inject({
+          method: 'DELETE',
+          url: `/api/v1/commercial/opportunities/${accepted.id}`,
+          headers: headers(),
+        }),
+      404,
+    ],
+  ])('%s', async (_label, request, status) => expect((await request()).statusCode).toBe(status));
+
+  it('OPP-NEG-011 cross-tenant list isolation', async () => {
+    const created = await create(
+      { ...createPayload(randomUUID().slice(0, 8), { owner_membership_id: charlieMembership }) },
+      headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+    );
+    tenantBOpportunity = opportunityEnvelopeSchema.parse(created.json()).data;
+    const list = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/opportunities?limit=100',
+      headers: headers(),
+    });
+    expect(
+      opportunityListEnvelopeSchema
+        .parse(list.json())
+        .data.some((v) => v.id === tenantBOpportunity.id),
+    ).toBe(false);
+  });
+  it('OPP-NEG-014 BOLA/IDOR using genuine foreign Opportunity ID', async () =>
+    expect((await detail(tenantBOpportunity.id)).statusCode).toBe(404));
+  it.each([
+    ['OPP-NEG-015 Tenant B Customer', 'customer_id', () => references.foreignCustomer],
+    ['OPP-NEG-016 Tenant B Lead', 'lead_id', () => references.foreignLead],
+    ['OPP-NEG-017 Tenant B Partner', 'partner_id', () => references.foreignPartner],
+    ['OPP-NEG-018 Tenant B Plan', 'plan_id', () => references.foreignPlan],
+  ])('%s', async (_label, field, value) =>
+    expect(
+      (await create(createPayload(randomUUID().slice(0, 8), { [field]: value() }))).statusCode,
+    ).toBe(400),
+  );
+  it('OPP-NEG-023 mutation/reopen after WON', async () => {
+    const created = opportunityEnvelopeSchema.parse((await create()).json()).data;
+    let entity = created;
+    for (const stage of ['DISCOVERY', 'PROPOSAL', 'NEGOTIATION', 'WON'])
+      entity = opportunityEnvelopeSchema.parse(
+        (await patch(entity.id, { stage, expected_version: entity.version })).json(),
+      ).data;
+    expect(
+      (await patch(entity.id, { stage: 'DISCOVERY', expected_version: entity.version })).statusCode,
+    ).toBe(409);
+  });
+  it('OPP-NEG-024 mutation/reopen after LOST', async () => {
+    const entity = opportunityEnvelopeSchema.parse((await create()).json()).data;
+    const lost = opportunityEnvelopeSchema.parse(
+      (await patch(entity.id, { stage: 'LOST', expected_version: entity.version })).json(),
+    ).data;
+    expect(
+      (await patch(lost.id, { title: 'Reopen', expected_version: lost.version })).statusCode,
+    ).toBe(409);
+  });
+  it('OPP-NEG-026 normalized opportunity-code uniqueness is database-enforced', async () => {
+    const code = `OPP-ALPHA-${randomUUID().slice(0, 6)}`;
+    expect((await create(createPayload(code))).statusCode).toBe(200);
+    expect((await create(createPayload(code.toLowerCase()))).statusCode).toBe(409);
+  });
+  it('OPP-NEG-027 tenant-scoped code uniqueness permits genuine Tenant B identity', async () => {
+    const code = `OPP-SHARED-${randomUUID().slice(0, 6)}`;
+    const a = opportunityEnvelopeSchema.parse((await create(createPayload(code))).json()).data;
+    const b = opportunityEnvelopeSchema.parse(
+      (
+        await create(
+          { ...createPayload(code.toLowerCase(), { owner_membership_id: charlieMembership }) },
+          headers(randomUUID(), tenantB, await signedOidcToken('charlie')),
+        )
+      ).json(),
+    ).data;
+    expect(a.id).not.toBe(b.id);
+    expect((await detail(b.id)).statusCode).toBe(404);
+  });
+  it('OPP-NEG-028 same key materially different request conflicts', async () => {
+    const key = randomUUID();
+    expect((await create(createPayload(), headers(key))).statusCode).toBe(200);
+    expect((await create(createPayload(), headers(key))).statusCode).toBe(409);
+  });
+  it('OPP-NEG-029 same key same canonical request replays without duplicate', async () => {
+    const key = randomUUID(),
+      payload = createPayload();
+    const first = opportunityEnvelopeSchema.parse(
+      (await create(payload, headers(key))).json(),
+    ).data;
+    const replay = opportunityEnvelopeSchema.parse((await create(payload, headers(key))).json());
+    expect(replay.data.id).toBe(first.id);
+    expect(replay.meta.idempotent_replay).toBe(true);
+  });
+  it('OPP-NEG-031 direct least-privilege DB role cannot escape Tenant A', async () => {
+    const issued = await admin.query<{ context_token: string }>(
+      "SELECT context_token FROM platform.issue_tenant_context($1,$2::uuid,'commercial.opportunity.read')",
+      ['["https://issuer.acs.test","alice"]', tenantA],
+    );
+    const connection = new Client({ connectionString: requiredEnvironment.opportunity as string });
+    try {
+      await connection.connect();
+      await connection.query('BEGIN');
+      await connection.query('SELECT * FROM platform.activate_tenant_context($1::uuid,$2)', [
+        issued.rows[0]!.context_token,
+        'commercial.opportunity.read',
+      ]);
+      const foreign = await connection.query(
+        'SELECT id FROM commercial.opportunities WHERE id=$1',
+        [tenantBOpportunity.id],
+      );
+      expect(foreign.rowCount).toBe(0);
+      await connection.query('ROLLBACK');
+    } finally {
+      await connection.end();
+    }
+  });
+  it('OPP-NEG-032 FORCE RLS is enabled and effective', async () => {
+    const r = await admin.query<{ rls: boolean; force: boolean }>(
+      "SELECT relrowsecurity AS rls,relforcerowsecurity AS force FROM pg_class WHERE oid='commercial.opportunities'::regclass",
+    );
+    expect(r.rows[0]).toEqual({ rls: true, force: true });
+  });
+  it('OPP-NEG-033 runtime role has no superuser, bypass, or table ownership', async () => {
+    const r = await admin.query<{ superuser: boolean; bypass: boolean; owns: boolean }>(
+      "SELECT r.rolsuper AS superuser,r.rolbypassrls AS bypass,c.relowner=r.oid AS owns FROM pg_roles r CROSS JOIN pg_class c WHERE r.rolname='acs_phase2_opportunity_registry' AND c.oid='commercial.opportunities'::regclass",
+    );
+    expect(r.rows[0]).toEqual({ superuser: false, bypass: false, owns: false });
+  });
+  it('OPP-NEG-034 audit evidence is redacted and includes required outcomes', async () => {
+    const r = await admin.query(
+      'SELECT action,outcome,metadata FROM platform.audit_logs WHERE resource=$1',
+      [`commercial:opportunity:${accepted.id}`],
+    );
+    expect(JSON.stringify(r.rows)).not.toMatch(
+      /authorization|bearer|jwt|token|password|currency|financial/i,
+    );
+    expect(r.rows.length).toBeGreaterThan(0);
+  });
+  it('OPP-NEG-035 event/outbox payload is redacted and contract-safe', async () => {
+    const r = await admin.query<{ event_type: string; payload: unknown; tenant_id: string }>(
+      "SELECT event_type,payload,tenant_id FROM platform.domain_events WHERE payload->>'id'=$1",
+      [accepted.id],
+    );
+    expect(r.rows.map((v) => v.event_type)).toContain('commercial.opportunity.created');
+    expect(JSON.stringify(r.rows)).not.toMatch(
+      /authorization|bearer|jwt|token|password|currency|customer.*email|lead.*email/i,
+    );
+    expect(r.rows.every((v) => v.tenant_id === tenantA)).toBe(true);
+  });
+  it('OPPORTUNITY-CONCURRENCY permits one writer and rejects the stale writer', async () => {
+    const writes = await Promise.all(
+      ['A', 'B'].map((title) => patch(accepted.id, { title, expected_version: accepted.version })),
+    );
+    expect(writes.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+    accepted = opportunityEnvelopeSchema.parse(
+      writes.find((r) => r.statusCode === 200)!.json(),
+    ).data;
+  });
+  it('OPPORTUNITY-ATOMICITY rolls back Opportunity, audit, outbox and idempotency', async () => {
+    const issued = await admin.query<{ context_token: string }>(
+      "SELECT context_token FROM platform.issue_tenant_context($1,$2::uuid,'commercial.opportunity.create')",
+      ['["https://issuer.acs.test","alice"]', tenantA],
+    );
+    const code = `rollback-${randomUUID().slice(0, 8)}`;
+    const failed = new PostgresOpportunityRegistryRepository(
+      requiredEnvironment.opportunity as string,
+      () => {
+        throw new Error('test-only controlled transaction failure');
+      },
+    );
+    try {
+      await expect(
+        failed.create({
+          actorUserId: '40000000-0000-4000-8000-000000000044',
+          contextToken: issued.rows[0]!.context_token,
+          correlationId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          requestHash: 'a'.repeat(64),
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          ...createPayload(code),
+        } as never),
+      ).rejects.toThrow('test-only controlled transaction failure');
+    } finally {
+      await failed.close();
+    }
+    const r = await admin.query<{
+      opportunities: number;
+      audit: number;
+      events: number;
+      operations: number;
+    }>(
+      "SELECT (SELECT count(*)::int FROM commercial.opportunities WHERE tenant_id=$1 AND opportunity_code=$2) opportunities,(SELECT count(*)::int FROM platform.audit_logs WHERE resource LIKE 'commercial:opportunity:%' AND metadata::text LIKE '%' || $2 || '%') audit,(SELECT count(*)::int FROM platform.domain_events WHERE payload::text LIKE '%' || $2 || '%') events,(SELECT count(*)::int FROM commercial.opportunity_operations WHERE result::text LIKE '%' || $2 || '%') operations",
+      [tenantA, code],
+    );
+    expect(r.rows[0]).toEqual({ opportunities: 0, audit: 0, events: 0, operations: 0 });
+  });
+  it('OPPORTUNITY-PERFORMANCE records a local baseline through the signed OIDC execution path', async () => {
+    const journeyStartedAt = performance.now();
+    const createStartedAt = performance.now();
+    const created = await create(
+      createPayload(`performance-${randomUUID().slice(0, 8)}`, {
+        title: 'Opportunity performance fixture',
+      }),
+    );
+    expect(created.statusCode, created.body).toBe(200);
+    let opportunity = opportunityEnvelopeSchema.parse(created.json()).data;
+    const createMilliseconds = performance.now() - createStartedAt;
+
+    const detailStartedAt = performance.now();
+    const detailResponse = await detail(opportunity.id);
+    expect(opportunityEnvelopeSchema.parse(detailResponse.json()).data.id).toBe(opportunity.id);
+    const detailMilliseconds = performance.now() - detailStartedAt;
+
+    const listStartedAt = performance.now();
+    const listResponse = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/opportunities?limit=100',
+      headers: headers(),
+    });
+    expect(opportunityListEnvelopeSchema.parse(listResponse.json()).data).toContainEqual(
+      expect.objectContaining({ id: opportunity.id }),
+    );
+    const listMilliseconds = performance.now() - listStartedAt;
+
+    const updateStartedAt = performance.now();
+    const updateResponse = await patch(opportunity.id, {
+      expected_version: opportunity.version,
+      title: 'Opportunity performance fixture updated',
+    });
+    expect(updateResponse.statusCode, updateResponse.body).toBe(200);
+    opportunity = opportunityEnvelopeSchema.parse(updateResponse.json()).data;
+    const updateMilliseconds = performance.now() - updateStartedAt;
+
+    const transitionStartedAt = performance.now();
+    const transitionResponse = await patch(opportunity.id, {
+      expected_version: opportunity.version,
+      stage: 'DISCOVERY',
+    });
+    expect(transitionResponse.statusCode, transitionResponse.body).toBe(200);
+    opportunity = opportunityEnvelopeSchema.parse(transitionResponse.json()).data;
+    expect(opportunity.stage).toBe('DISCOVERY');
+    const transitionMilliseconds = performance.now() - transitionStartedAt;
+
+    const evidence = await admin.query<{ audits: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM platform.audit_logs WHERE resource=$1) audits, (SELECT count(*)::int FROM platform.domain_events WHERE payload->>'id'=$2) events",
+      [`commercial:opportunity:${opportunity.id}`, opportunity.id],
+    );
+    expect(evidence.rows[0]).toEqual({ audits: 3, events: 3 });
+    process.stdout.write(
+      `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, OPPORTUNITY_CREATE_WITH_AUDIT_OUTBOX_MS: Number(createMilliseconds.toFixed(2)), OPPORTUNITY_DETAIL_MS: Number(detailMilliseconds.toFixed(2)), OPPORTUNITY_LIST_MS: Number(listMilliseconds.toFixed(2)), OPPORTUNITY_UPDATE_WITH_AUDIT_OUTBOX_MS: Number(updateMilliseconds.toFixed(2)), OPPORTUNITY_STAGE_TRANSITION_MS: Number(transitionMilliseconds.toFixed(2)), OPPORTUNITY_COMPLETE_JOURNEY_MS: Number((performance.now() - journeyStartedAt).toFixed(2)) })}\n`,
+    );
+  });
+});

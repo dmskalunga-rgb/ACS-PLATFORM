@@ -1,4 +1,4 @@
-name: Phase 2 Partner Registry validation
+name: Phase 2 Opportunity Registry validation
 
 on:
   pull_request:
@@ -12,8 +12,8 @@ env:
   NODE_VERSION: 24.19.0
 
 jobs:
-  partner-quality:
-    name: Partner Registry quality, contracts, UI and build
+  opportunity-quality:
+    name: Opportunity Registry quality, contracts, UI and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -26,8 +26,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-  partner-postgresql-e2e:
-    name: Partner OIDC, authorization, FORCE RLS, audit and event E2E
+
+  opportunity-postgresql-e2e:
+    name: Opportunity OIDC, authorization, FORCE RLS, audit and event E2E
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -68,8 +69,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:validate
       - run: pnpm --filter @acs/platform-api... build
+      - run: pnpm test:opportunity-registry:e2e
       - run: pnpm test:partner-registry:e2e
       - run: pnpm test:plan-catalog:e2e
       - run: pnpm test:lead-registry:e2e
       - run: pnpm test:phase2:e2e
+      - run: pnpm test:phase1:e2e
       - run: pnpm test:event-foundation:e2e
