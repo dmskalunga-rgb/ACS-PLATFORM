@@ -22,6 +22,7 @@ const configurationSchema = z.object({
   ACS_TENANT_ADMIN_DATABASE_URL: z.url().optional(),
   ACS_CUSTOMER_DATABASE_URL: z.url().optional(),
   ACS_LEAD_DATABASE_URL: z.url().optional(),
+  ACS_PLAN_DATABASE_URL: z.url().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -40,6 +41,7 @@ export interface PlatformConfiguration {
   readonly tenantAdminDatabaseUrl?: string;
   readonly customerDatabaseUrl?: string;
   readonly leadDatabaseUrl?: string;
+  readonly planDatabaseUrl?: string;
   readonly webOrigin: string;
 }
 
@@ -132,6 +134,9 @@ export function loadConfiguration(
     ...(parsed.ACS_LEAD_DATABASE_URL === undefined
       ? {}
       : { leadDatabaseUrl: parsed.ACS_LEAD_DATABASE_URL }),
+    ...(parsed.ACS_PLAN_DATABASE_URL === undefined
+      ? {}
+      : { planDatabaseUrl: parsed.ACS_PLAN_DATABASE_URL }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

@@ -59,6 +59,11 @@ const leadMigrationPath = resolve('database/migrations/20260821000000_phase2_lea
 const leadRollbackPath = resolve('database/rollbacks/20260821000000_phase2_lead_registry.sql');
 const leadTestPath = resolve('database/tests/rls/lead_registry_isolation.sql');
 const leadSeedPath = resolve('database/tests/fixtures/lead_registry_seed.sql');
+const planRolesPath = resolve('database/roles/phase2_plan_catalog_roles.sql');
+const planMigrationPath = resolve('database/migrations/20260822000000_phase2_plan_catalog.sql');
+const planRollbackPath = resolve('database/rollbacks/20260822000000_phase2_plan_catalog.sql');
+const planTestPath = resolve('database/tests/rls/plan_catalog_isolation.sql');
+const planSeedPath = resolve('database/tests/fixtures/plan_catalog_seed.sql');
 
 const testRoles = [
   'acs_phase1_auditor_login_test',
@@ -81,8 +86,10 @@ const testRoles = [
   'acs_phase0_tenant_test',
   'acs_phase2_customer_login_test',
   'acs_phase2_lead_login_test',
+  'acs_phase2_plan_login_test',
   'acs_phase2_customer_registry',
   'acs_phase2_lead_registry',
+  'acs_phase2_plan_catalog',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -102,6 +109,7 @@ try {
     "SELECT to_regclass('commercial.customers') AS relation",
   );
   if (customerRegistryExists.rows[0]?.relation !== null) {
+    await client.query(await readFile(planRollbackPath, 'utf8'));
     await client.query(await readFile(leadRollbackPath, 'utf8'));
     await client.query(await readFile(customerRollbackPath, 'utf8'));
   }
@@ -127,6 +135,8 @@ try {
   await client.query(await readFile(customerMigrationPath, 'utf8'));
   await client.query(await readFile(leadRolesPath, 'utf8'));
   await client.query(await readFile(leadMigrationPath, 'utf8'));
+  await client.query(await readFile(planRolesPath, 'utf8'));
+  await client.query(await readFile(planMigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
   );
@@ -149,11 +159,17 @@ try {
   await client.query(await readFile(phase1SeedPath, 'utf8'));
   await client.query(await readFile(customerSeedPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
+  await client.query(await readFile(planSeedPath, 'utf8'));
   await client.query(await readFile(phase1TestPath, 'utf8'));
   await client.query(await readFile(tenantAdminTestPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
   await client.query(await readFile(customerTestPath, 'utf8'));
   await client.query(await readFile(leadTestPath, 'utf8'));
+  await client.query(await readFile(planTestPath, 'utf8'));
+  await client.query(await readFile(planRollbackPath, 'utf8'));
+  await client.query(await readFile(planMigrationPath, 'utf8'));
+  await client.query(await readFile(planSeedPath, 'utf8'));
+  await client.query(await readFile(planTestPath, 'utf8'));
   await client.query(await readFile(leadRollbackPath, 'utf8'));
   await client.query(await readFile(leadMigrationPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
@@ -169,6 +185,10 @@ try {
   await client.query(await readFile(leadMigrationPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
   await client.query(await readFile(leadTestPath, 'utf8'));
+  await client.query(await readFile(planRollbackPath, 'utf8'));
+  await client.query(await readFile(planMigrationPath, 'utf8'));
+  await client.query(await readFile(planSeedPath, 'utf8'));
+  await client.query(await readFile(planTestPath, 'utf8'));
   await client.query(await readFile(eventRollbackPath, 'utf8'));
   await client.query(await readFile(eventMigrationPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
@@ -199,9 +219,11 @@ try {
     GRANT acs_phase2_customer_registry TO acs_phase2_customer_login_test;
     CREATE ROLE acs_phase2_lead_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
     GRANT acs_phase2_lead_registry TO acs_phase2_lead_login_test;
+    CREATE ROLE acs_phase2_plan_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
+    GRANT acs_phase2_plan_catalog TO acs_phase2_plan_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_CUSTOMER_AND_LEAD', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_CUSTOMER_LEAD_AND_PLAN', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();

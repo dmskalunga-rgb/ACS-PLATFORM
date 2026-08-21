@@ -1,9 +1,12 @@
-# ACS Phase 2 Plan Catalog Pre-Implementation Threat Analysis
+# ACS Phase 2 Plan Catalog Threat Analysis
 
 Status: `PRE_IMPLEMENTATION_SECURITY_PREPARATION`
 
 This document identifies required security evidence for a separately authorized
-Plan Catalog implementation. It does not claim that an implementation exists.
+Plan Catalog implementation. Local acceptance evidence now covers OIDC/JWT
+rejection, membership/permission denial, tenant isolation, strict payload
+allowlists, optimistic concurrency, redacted audit records, and minimal
+internal event payloads. This is not production or governance acceptance.
 
 | Threat                                        | Required control/evidence                                                                                       | Residual disposition            |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------- |
