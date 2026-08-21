@@ -1,0 +1,10 @@
+BEGIN;
+DELETE FROM platform.tenant_context_grants WHERE permission_key LIKE 'commercial.partner.%';
+DELETE FROM platform.role_permissions WHERE permission_key LIKE 'commercial.partner.%';
+DELETE FROM platform.membership_permissions WHERE permission_key LIKE 'commercial.partner.%';
+DROP POLICY IF EXISTS domain_events_partner_insert ON platform.domain_events;
+DROP POLICY IF EXISTS audit_logs_partner_insert ON platform.audit_logs;
+DROP TABLE IF EXISTS commercial.partner_operations;
+DROP TABLE IF EXISTS commercial.partners;
+DELETE FROM platform.permissions WHERE permission_key LIKE 'commercial.partner.%';
+COMMIT;

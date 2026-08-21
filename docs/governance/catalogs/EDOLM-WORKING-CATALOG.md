@@ -21,13 +21,18 @@ Status: `PENDING_GOVERNANCE_APPROVAL`. This does not replace normative ANX-C.
 | Commercial customer     | PostgreSQL `commercial.customers`                                       | Commercial Data Owner; named owner `PENDING_GOVERNANCE_APPROVAL`   | INTERNAL identifiers; BUSINESS registry data; optional CONFIDENTIAL_PII contact; no hard delete; retention pending approval                         | `IMPLEMENTED_REMOTE_CI_VERIFIED` |
 | Commercial lead         | PostgreSQL `commercial.leads`                                           | Commercial Data Owner; named owner `PENDING_GOVERNANCE_APPROVAL`   | INTERNAL identifiers; BUSINESS registry data; optional CONFIDENTIAL_PII contact; no hard delete; retention pending approval                         | `APPROVED_FOR_IMPLEMENTATION`    |
 | Commercial Plan Catalog | PostgreSQL `commercial.plans` and managed Plan Features                 | Commercial Data Owner; named owner `PENDING_GOVERNANCE_APPROVAL`   | INTERNAL identifiers; BUSINESS Plan/Feature master data; no PII or financial data; Plan → Plan Feature; no hard delete; retention pending approval  | `LOCAL_IMPLEMENTATION_EVIDENCED` |
-| Commercial Partner      | Future PostgreSQL `commercial.partners`                                 | Commercial Data Owner; named steward `PENDING_GOVERNANCE_APPROVAL` | INTERNAL identifiers; BUSINESS non-financial Partner master data; no PII/contact data, no relationships, no hard delete; retention pending approval | `DOR_PREPARED`                   |
+| Commercial Partner      | PostgreSQL `commercial.partners`                                        | Commercial Data Owner; named steward `PENDING_GOVERNANCE_APPROVAL` | INTERNAL identifiers; BUSINESS non-financial Partner master data; no PII/contact data, no relationships, no hard delete; retention pending approval | `LOCAL_IMPLEMENTATION_EVIDENCED` |
 
 Customer lineage is: authenticated user action → Customer API → authoritative
 `commercial.customers` row → append-only audit → canonical domain event/outbox → Event Foundation.
 Real consumers in this slice are the Customer API and Web UI. Future commercial consumers remain
 `NOT_IMPLEMENTED / FUTURE_DEPENDENCY`. Customer data is not tenant identity data and is not used by
 AI, RAG or graph processing in this slice.
+
+Partner lineage is: authenticated user action → Partner API → authoritative
+`commercial.partners` row → append-only audit → canonical domain event/outbox → Event Foundation.
+The Partner API and Web UI are local implementation evidence only; no production consumer,
+broker, relationship, contact PII, or financial processing is asserted.
 
 The probe is not an ACS domain entity. Ownership, classification, lineage, retention, deletion,
 residency, and lawful use are required before functional data delivery.

@@ -8,6 +8,7 @@ import { TenantAdministrationPanel } from './TenantAdministration.js';
 import { CustomerRegistryPanel } from './CustomerRegistry.js';
 import { LeadRegistryPanel } from './LeadRegistry.js';
 import { PlanCatalogPanel } from './PlanCatalog.js';
+import { PartnerRegistryPanel } from './PartnerRegistry.js';
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -244,6 +245,17 @@ export function App({
         )}
         {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
           <PlanCatalogPanel
+            apiBaseUrl={apiBaseUrl}
+            tenantId={contextConfiguration.tenantId}
+            authorization={
+              contextConfiguration.accessToken === undefined
+                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
+                : `Bearer ${contextConfiguration.accessToken}`
+            }
+          />
+        )}
+        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
+          <PartnerRegistryPanel
             apiBaseUrl={apiBaseUrl}
             tenantId={contextConfiguration.tenantId}
             authorization={

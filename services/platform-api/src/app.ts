@@ -17,6 +17,10 @@ import {
   planFeatureUpdateSchema,
   planListEnvelopeSchema,
   planUpdateSchema,
+  partnerCreateSchema,
+  partnerEnvelopeSchema,
+  partnerListEnvelopeSchema,
+  partnerUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -56,9 +60,11 @@ import { PostgresTenantAdminRepository } from './postgres-tenant-administration.
 import { PostgresCustomerRepository } from './postgres-customer-registry.js';
 import { PostgresLeadRepository } from './postgres-lead-registry.js';
 import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
+import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
+import { PartnerRegistryFailure, PartnerRegistryService } from './partner-registry.js';
 import {
   TenantAdministrationFailure,
   TenantAdministrationService,
@@ -81,6 +87,7 @@ export async function buildApp(
     readonly customerRegistryService?: CustomerRegistryService;
     readonly leadRegistryService?: LeadRegistryService;
     readonly planCatalogService?: PlanCatalogService;
+    readonly partnerRegistryService?: PartnerRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -105,6 +112,8 @@ export async function buildApp(
   let leadRegistryService = options.leadRegistryService;
   let planRepository: PostgresPlanCatalogRepository | undefined;
   let planCatalogService = options.planCatalogService;
+  let partnerRepository: PostgresPartnerRegistryRepository | undefined;
+  let partnerRegistryService = options.partnerRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -181,6 +190,16 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.partnerDatabaseUrl !== undefined) {
+      partnerRepository = new PostgresPartnerRegistryRepository(configuration.partnerDatabaseUrl);
+      partnerRegistryService = new PartnerRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        partnerRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -191,12 +210,17 @@ export async function buildApp(
         customerRepository?.close(),
         leadRepository?.close(),
         planRepository?.close(),
+        partnerRepository?.close(),
       ]);
     });
   }
 
   await app.register(cors, { credentials: false, origin: configuration.webOrigin });
-  await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' });
+  await app.register(rateLimit, {
+    global: true,
+    max: configuration.environment === 'test' ? 1_000 : 100,
+    timeWindow: '1 minute',
+  });
   await app.register(swagger, {
     openapi: {
       info: {
@@ -1448,6 +1472,164 @@ export async function buildApp(
       );
     } catch (error) {
       if (error instanceof PlanCatalogFailure) return planError(error, request, reply);
+      throw error;
+    }
+  });
+
+  const partnerError = (
+    error: PartnerRegistryFailure,
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply
+      .status(
+        error.code === 'UNAUTHENTICATED'
+          ? 401
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : error.code === 'STALE_VERSION' ||
+                error.code === 'IDEMPOTENCY_CONFLICT' ||
+                error.code === 'DUPLICATE_PARTNER_CODE'
+              ? 409
+              : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: error.code,
+            message: error.message,
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+  const partnerUnavailable = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'PARTNER_REGISTRY_NOT_CONFIGURED',
+          message: 'Partner Registry dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const partnerInput = (request: { headers: Record<string, unknown> }) =>
+    z.uuid().safeParse(request.headers['x-acs-tenant-id']);
+  const partnerKey = (request: { headers: Record<string, unknown> }) => {
+    const key = request.headers['idempotency-key'];
+    return typeof key === 'string' && uuidSchema.safeParse(key).success ? key : null;
+  };
+  const partnerParam = (request: { params: unknown }) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).partnerId
+        : undefined,
+    );
+  const invalidPartner = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Valid tenant, identifiers, request body and idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  app.post('/api/v1/commercial/partners', async (request, reply) => {
+    if (!partnerRegistryService) return partnerUnavailable(request, reply);
+    const tenant = partnerInput(request),
+      key = partnerKey(request),
+      body = partnerCreateSchema.safeParse(request.body);
+    if (!tenant.success || !key || !body.success) return invalidPartner(request, reply);
+    try {
+      return partnerEnvelopeSchema.parse(
+        await partnerRegistryService.create(
+          request.headers.authorization,
+          tenant.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PartnerRegistryFailure) return partnerError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/partners', async (request, reply) => {
+    if (!partnerRegistryService) return partnerUnavailable(request, reply);
+    const tenant = partnerInput(request),
+      q = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          cursor: z.uuid().optional(),
+        })
+        .strict()
+        .safeParse(request.query);
+    if (!tenant.success || !q.success) return invalidPartner(request, reply);
+    try {
+      return partnerListEnvelopeSchema.parse(
+        await partnerRegistryService.list(
+          request.headers.authorization,
+          tenant.data,
+          q.data.limit,
+          q.data.cursor,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PartnerRegistryFailure) return partnerError(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/partners/:partnerId', async (request, reply) => {
+    if (!partnerRegistryService) return partnerUnavailable(request, reply);
+    const tenant = partnerInput(request),
+      id = partnerParam(request);
+    if (!tenant.success || !id.success) return invalidPartner(request, reply);
+    try {
+      return partnerEnvelopeSchema.parse(
+        await partnerRegistryService.get(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PartnerRegistryFailure) return partnerError(error, request, reply);
+      throw error;
+    }
+  });
+  app.patch('/api/v1/commercial/partners/:partnerId', async (request, reply) => {
+    if (!partnerRegistryService) return partnerUnavailable(request, reply);
+    const tenant = partnerInput(request),
+      id = partnerParam(request),
+      key = partnerKey(request),
+      body = partnerUpdateSchema.safeParse(request.body);
+    if (!tenant.success || !id.success || !key || !body.success)
+      return invalidPartner(request, reply);
+    try {
+      return partnerEnvelopeSchema.parse(
+        await partnerRegistryService.update(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PartnerRegistryFailure) return partnerError(error, request, reply);
       throw error;
     }
   });

@@ -19,6 +19,7 @@
     "test:phase2:e2e": "pnpm --filter @acs/platform-api test:customer-registry:e2e",
     "test:lead-registry:e2e": "pnpm --filter @acs/platform-api test:lead-registry:e2e",
     "test:plan-catalog:e2e": "pnpm --filter @acs/platform-api test:plan-catalog:e2e",
+    "test:partner-registry:e2e": "pnpm --filter @acs/platform-api test:partner-registry:e2e",
     "dev": "turbo run dev --parallel",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

@@ -1,10 +1,10 @@
 # ACS Phase 2 Partner Registry Threat Analysis
 
-Status: `PRE_IMPLEMENTATION_SECURITY_PREPARATION`
+Status: `LOCAL_IMPLEMENTATION_EVIDENCE_CAPTURED`
 
-This is a future implementation acceptance plan, not implementation or
-production evidence. It applies the human-approved non-financial Partner
-boundary and does not create an acceptance claim.
+This records the local implementation evidence for the human-approved
+non-financial Partner boundary. It is not remote CI, publication, merge,
+production, or governance acceptance evidence.
 
 | Threat                                    | Required control / future evidence                                                                          | Residual disposition            |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------- |
