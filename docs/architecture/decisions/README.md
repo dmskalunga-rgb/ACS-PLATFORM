@@ -22,3 +22,4 @@ the decision becomes repository policy only after controlled review and merge.
 | ADR-0015 | Tenant-scoped Commercial Customer Registry |
 | ADR-0016 | Tenant-scoped Commercial Lead Registry     |
 | ADR-0017 | Tenant-scoped Commercial Plan Catalog      |
+| ADR-0018 | Tenant-scoped Commercial Partner Registry  |
