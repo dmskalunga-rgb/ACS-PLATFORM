@@ -1,10 +1,13 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.js';
 import { resolveContextClientConfiguration } from './context-client-configuration.js';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('FOUNDATION application shell', () => {
   it('removes development identity configuration from production', () => {
