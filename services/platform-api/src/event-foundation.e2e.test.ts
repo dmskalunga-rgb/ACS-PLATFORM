@@ -57,6 +57,12 @@ suite('Event Delivery & Operational Lifecycle PostgreSQL E2E', () => {
        VALUES($1,'platform.foundation.test_event',$2,$3,$4,jsonb_build_object('safe_value','test'))`,
       [eventId, tenantId, randomUUID(), randomUUID()],
     );
+    // The disposable database may contain a bounded commercial backlog. Make the
+    // fixture deterministically claimable without changing publisher semantics.
+    await admin.query(
+      "UPDATE platform.event_deliveries SET next_attempt_at=clock_timestamp()-interval '1 hour' WHERE event_id=$1",
+      [eventId],
+    );
     return eventId;
   }
 

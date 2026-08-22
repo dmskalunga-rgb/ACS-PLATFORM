@@ -1,0 +1,18 @@
+BEGIN;
+DELETE FROM platform.tenant_context_grants WHERE permission_key LIKE 'commercial.proposal.%';
+DELETE FROM platform.role_permissions WHERE permission_key LIKE 'commercial.proposal.%';
+DELETE FROM platform.membership_permissions WHERE permission_key LIKE 'commercial.proposal.%';
+DROP POLICY IF EXISTS domain_events_proposal_insert ON platform.domain_events;
+DROP POLICY IF EXISTS audit_logs_proposal_insert ON platform.audit_logs;
+DROP POLICY IF EXISTS proposal_plans_read ON commercial.plans;
+DROP POLICY IF EXISTS proposal_partners_read ON commercial.partners;
+DROP POLICY IF EXISTS proposal_customers_read ON commercial.customers;
+DROP POLICY IF EXISTS proposal_opportunities_read ON commercial.opportunities;
+DROP POLICY IF EXISTS proposal_memberships_read ON platform.memberships;
+DROP TABLE IF EXISTS commercial.proposal_operations;
+DROP TABLE IF EXISTS commercial.proposal_revision_line_items;
+DROP TABLE IF EXISTS commercial.proposal_revisions;
+DROP TABLE IF EXISTS commercial.proposal_line_items;
+DROP TABLE IF EXISTS commercial.proposals;
+DELETE FROM platform.permissions WHERE permission_key LIKE 'commercial.proposal.%';
+COMMIT;
