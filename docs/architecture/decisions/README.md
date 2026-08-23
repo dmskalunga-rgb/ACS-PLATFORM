@@ -27,3 +27,4 @@ the decision becomes repository policy only after controlled review and merge.
 | ADR-0020 | Tenant-scoped Commercial Proposal / Quotation (`PROPOSED`) |
 | ADR-0021 | Tenant-scoped Commercial Contract (`PROPOSED`)             |
 | ADR-0022 | Tenant-scoped Commercial Subscription (`PROPOSED`)         |
+| ADR-0023 | Tenant-scoped Commercial Entitlement (`PROPOSED`)          |
