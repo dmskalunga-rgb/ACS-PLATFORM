@@ -54,6 +54,9 @@ import {
   entitlementListEnvelopeSchema,
   entitlementTransitionSchema,
   entitlementUpdateSchema,
+  machineMeasurementIngestSchema,
+  measurementCorrectionCreateSchema,
+  measurementSourceCreateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -99,6 +102,7 @@ import { PostgresProposalRegistryRepository } from './postgres-proposal-registry
 import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
 import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
 import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
+import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -145,6 +149,11 @@ import {
   EntitlementRegistryService,
 } from './entitlement-registry.js';
 import {
+  MachineUsageIngestionService,
+  UsageMeteringFailure,
+  UsageMeteringService,
+} from './usage-metering.js';
+import {
   TenantAdministrationFailure,
   TenantAdministrationService,
 } from './tenant-administration.js';
@@ -172,6 +181,8 @@ export async function buildApp(
     readonly contractRegistryService?: ContractRegistryService;
     readonly subscriptionRegistryService?: SubscriptionRegistryService;
     readonly entitlementRegistryService?: EntitlementRegistryService;
+    readonly usageMeteringService?: UsageMeteringService;
+    readonly machineUsageIngestionService?: MachineUsageIngestionService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -208,6 +219,9 @@ export async function buildApp(
   let subscriptionRegistryService = options.subscriptionRegistryService;
   let entitlementRepository: PostgresEntitlementRegistryRepository | undefined;
   let entitlementRegistryService = options.entitlementRegistryService;
+  let usageMeteringRepository: PostgresUsageMeteringRepository | undefined;
+  let usageMeteringService = options.usageMeteringService;
+  let machineUsageIngestionService = options.machineUsageIngestionService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -354,6 +368,23 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (
+      configuration.usageMeteringDatabaseUrl !== undefined &&
+      configuration.machineContextIssuerDatabaseUrl !== undefined
+    ) {
+      usageMeteringRepository = new PostgresUsageMeteringRepository(
+        configuration.usageMeteringDatabaseUrl,
+        configuration.machineContextIssuerDatabaseUrl,
+      );
+      usageMeteringService = new UsageMeteringService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        usageMeteringRepository,
+        securityAuditRepository,
+      );
+      machineUsageIngestionService = new MachineUsageIngestionService(usageMeteringRepository);
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -370,6 +401,7 @@ export async function buildApp(
         contractRepository?.close(),
         subscriptionRepository?.close(),
         entitlementRepository?.close(),
+        usageMeteringRepository?.close(),
       ]);
     });
   }
@@ -2824,6 +2856,276 @@ export async function buildApp(
         ),
       ),
     );
+
+  const usageFailure = (
+    error: UsageMeteringFailure,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) =>
+    reply
+      .status(
+        error.code === 'UNAUTHENTICATED'
+          ? 401
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : ['STALE_VERSION', 'IDEMPOTENCY_CONFLICT', 'SOURCE_EVENT_CONFLICT'].includes(
+                  error.code,
+                )
+              ? 409
+              : ['INVALID_REFERENCE', 'INVALID_TIMESTAMP'].includes(error.code)
+                ? 400
+                : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: error.code,
+            message: error.message,
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+  const usageTenant = (request: FastifyRequest) =>
+    z.uuid().safeParse(request.headers['x-acs-tenant-id']);
+  const usageSourceId = (request: FastifyRequest) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).sourceId
+        : undefined,
+    );
+  const usageMeasurementId = (request: FastifyRequest) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).measurementId
+        : undefined,
+    );
+  const usageUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'USAGE_METERING_NOT_CONFIGURED',
+          message: 'Usage/Metering dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  app.post('/api/v1/commercial/usage/sources', async (request, reply) => {
+    if (!usageMeteringService) return usageUnavailable(request, reply);
+    const tenant = usageTenant(request),
+      body = measurementSourceCreateSchema.safeParse(request.body);
+    if (!tenant.success || !body.success) return reply.status(400).send();
+    try {
+      return await usageMeteringService.registerSource(
+        request.headers.authorization,
+        tenant.data,
+        body.data,
+        metadata(request),
+      );
+    } catch (error) {
+      if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/usage/sources', async (request, reply) => {
+    if (!usageMeteringService) return usageUnavailable(request, reply);
+    const tenant = usageTenant(request);
+    if (!tenant.success) return reply.status(400).send();
+    try {
+      return {
+        data: await usageMeteringService.listSources(
+          request.headers.authorization,
+          tenant.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/usage/sources/:sourceId', async (request, reply) => {
+    if (!usageMeteringService) return usageUnavailable(request, reply);
+    const tenant = usageTenant(request),
+      id = usageSourceId(request);
+    if (!tenant.success || !id.success) return reply.status(400).send();
+    try {
+      return {
+        data: await usageMeteringService.getSource(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
+  for (const [path, status] of [
+    ['disable', 'DISABLED'],
+    ['reactivate', 'ACTIVE'],
+    ['revoke', 'REVOKED'],
+  ] as const)
+    app.post(`/api/v1/commercial/usage/sources/:sourceId/${path}`, async (request, reply) => {
+      if (!usageMeteringService) return usageUnavailable(request, reply);
+      const tenant = usageTenant(request),
+        id = usageSourceId(request);
+      if (!tenant.success || !id.success) return reply.status(400).send();
+      try {
+        return {
+          data: await usageMeteringService.transitionSource(
+            request.headers.authorization,
+            tenant.data,
+            id.data,
+            status,
+            metadata(request),
+          ),
+          meta: { request_id: request.id, correlation_id: request.correlationId },
+        };
+      } catch (error) {
+        if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+        throw error;
+      }
+    });
+  app.post(
+    '/api/v1/commercial/usage/sources/:sourceId/rotate-credential',
+    async (request, reply) => {
+      if (!usageMeteringService) return usageUnavailable(request, reply);
+      const tenant = usageTenant(request),
+        id = usageSourceId(request);
+      if (!tenant.success || !id.success) return reply.status(400).send();
+      try {
+        return await usageMeteringService.rotateCredential(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        );
+      } catch (error) {
+        if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.post('/api/v1/commercial/usage/ingest', async (request, reply) => {
+    if (!machineUsageIngestionService) return usageUnavailable(request, reply);
+    const credentialId = request.headers['x-acs-source-credential-id'],
+      secret = request.headers['x-acs-source-credential'],
+      body = machineMeasurementIngestSchema.safeParse(request.body);
+    if (
+      typeof credentialId !== 'string' ||
+      !uuidSchema.safeParse(credentialId).success ||
+      typeof secret !== 'string' ||
+      secret.length < 32 ||
+      !body.success
+    )
+      return reply.status(400).send();
+    try {
+      return await machineUsageIngestionService.ingest(
+        credentialId,
+        secret,
+        body.data,
+        metadata(request),
+      );
+    } catch (error) {
+      if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/usage/measurements', async (request, reply) => {
+    if (!usageMeteringService) return usageUnavailable(request, reply);
+    const tenant = usageTenant(request);
+    if (!tenant.success) return reply.status(400).send();
+    try {
+      return {
+        data: await usageMeteringService.listMeasurements(
+          request.headers.authorization,
+          tenant.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/usage/measurements/:measurementId', async (request, reply) => {
+    if (!usageMeteringService) return usageUnavailable(request, reply);
+    const tenant = usageTenant(request),
+      id = usageMeasurementId(request);
+    if (!tenant.success || !id.success) return reply.status(400).send();
+    try {
+      return {
+        data: await usageMeteringService.getMeasurement(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.post(
+    '/api/v1/commercial/usage/measurements/:measurementId/corrections',
+    async (request, reply) => {
+      if (!usageMeteringService) return usageUnavailable(request, reply);
+      const tenant = usageTenant(request),
+        id = usageMeasurementId(request),
+        key = request.headers['idempotency-key'];
+      const parsed = measurementCorrectionCreateSchema.safeParse({
+        ...(typeof request.body === 'object' && request.body !== null ? request.body : {}),
+        measurement_id: id.success ? id.data : undefined,
+      });
+      if (
+        !tenant.success ||
+        !id.success ||
+        typeof key !== 'string' ||
+        !uuidSchema.safeParse(key).success ||
+        !parsed.success
+      )
+        return reply.status(400).send();
+      try {
+        return await usageMeteringService.correct(
+          request.headers.authorization,
+          tenant.data,
+          key,
+          parsed.data,
+          metadata(request),
+        );
+      } catch (error) {
+        if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+        throw error;
+      }
+    },
+  );
+  app.get('/api/v1/commercial/usage/aggregates', async (request, reply) => {
+    if (!usageMeteringService) return usageUnavailable(request, reply);
+    const tenant = usageTenant(request);
+    if (!tenant.success) return reply.status(400).send();
+    try {
+      return {
+        data: await usageMeteringService.listAggregates(
+          request.headers.authorization,
+          tenant.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId, next_cursor: null },
+      };
+    } catch (error) {
+      if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
 
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({

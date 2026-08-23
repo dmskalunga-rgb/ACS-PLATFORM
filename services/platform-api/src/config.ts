@@ -29,6 +29,8 @@ const configurationSchema = z.object({
   ACS_CONTRACT_DATABASE_URL: z.url().optional(),
   ACS_SUBSCRIPTION_DATABASE_URL: z.url().optional(),
   ACS_ENTITLEMENT_DATABASE_URL: z.url().optional(),
+  ACS_USAGE_METERING_DATABASE_URL: z.url().optional(),
+  ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL: z.url().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -54,6 +56,8 @@ export interface PlatformConfiguration {
   readonly contractDatabaseUrl?: string;
   readonly subscriptionDatabaseUrl?: string;
   readonly entitlementDatabaseUrl?: string;
+  readonly usageMeteringDatabaseUrl?: string;
+  readonly machineContextIssuerDatabaseUrl?: string;
   readonly webOrigin: string;
 }
 
@@ -167,6 +171,12 @@ export function loadConfiguration(
     ...(parsed.ACS_ENTITLEMENT_DATABASE_URL === undefined
       ? {}
       : { entitlementDatabaseUrl: parsed.ACS_ENTITLEMENT_DATABASE_URL }),
+    ...(parsed.ACS_USAGE_METERING_DATABASE_URL === undefined
+      ? {}
+      : { usageMeteringDatabaseUrl: parsed.ACS_USAGE_METERING_DATABASE_URL }),
+    ...(parsed.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL === undefined
+      ? {}
+      : { machineContextIssuerDatabaseUrl: parsed.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

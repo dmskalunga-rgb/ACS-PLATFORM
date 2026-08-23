@@ -11,3 +11,4 @@ export * from './proposal-registry.js';
 export * from './contract-registry.js';
 export * from './subscription-registry.js';
 export * from './entitlement-registry.js';
+export * from './usage-metering.js';

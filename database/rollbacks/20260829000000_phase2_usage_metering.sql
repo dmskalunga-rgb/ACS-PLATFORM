@@ -1,0 +1,18 @@
+BEGIN;
+DELETE FROM platform.machine_principal_permissions WHERE permission_key LIKE 'commercial.usage.%';
+DELETE FROM platform.tenant_context_grants WHERE permission_key LIKE 'commercial.usage.%';
+DELETE FROM platform.role_permissions WHERE permission_key LIKE 'commercial.usage.%';
+DELETE FROM platform.membership_permissions WHERE permission_key LIKE 'commercial.usage.%';
+DROP POLICY IF EXISTS usage_memberships_read ON platform.memberships;
+DROP POLICY IF EXISTS audit_logs_usage_insert ON platform.audit_logs;
+DROP POLICY IF EXISTS domain_events_usage_insert ON platform.domain_events;
+DROP POLICY IF EXISTS usage_entitlements_read ON commercial.entitlements;
+DROP POLICY IF EXISTS usage_subscriptions_read ON commercial.subscriptions;
+DROP FUNCTION IF EXISTS commercial.resolve_measurement_source_credential(uuid);
+DROP TABLE IF EXISTS commercial.usage_operations;
+DROP TABLE IF EXISTS commercial.usage_aggregates;
+DROP TABLE IF EXISTS commercial.measurement_corrections;
+DROP TABLE IF EXISTS commercial.raw_measurements;
+DROP TABLE IF EXISTS commercial.measurement_sources;
+DELETE FROM platform.permissions WHERE permission_key LIKE 'commercial.usage.%';
+COMMIT;
