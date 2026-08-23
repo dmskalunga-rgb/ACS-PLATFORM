@@ -17,7 +17,10 @@ import {
   proposalListEnvelopeSchema,
   contractEnvelopeSchema,
   contractListEnvelopeSchema,
+  subscriptionEnvelopeSchema,
+  subscriptionListEnvelopeSchema,
   type Contract,
+  type Subscription,
   type Proposal,
   type Opportunity,
   type Partner,
@@ -30,6 +33,7 @@ import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.j
 import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-registry.js';
 import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
 import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
+import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
 import { PostgresTenantContextRepository } from './postgres-platform-context.js';
 import type { PlatformConfiguration } from './config.js';
 
@@ -49,9 +53,12 @@ const requiredEnvironment = {
   opportunity: process.env.ACS_OPPORTUNITY_DATABASE_URL,
   proposal: process.env.ACS_PROPOSAL_DATABASE_URL,
   contract: process.env.ACS_CONTRACT_DATABASE_URL,
+  subscription: process.env.ACS_SUBSCRIPTION_DATABASE_URL,
 };
 
-for (const [name, value] of Object.entries(requiredEnvironment)) {
+for (const [name, value] of Object.entries(requiredEnvironment).filter(
+  ([name]) => name !== 'subscription',
+)) {
   if (value === undefined || value === '') throw new Error(`${name} E2E database URL is required.`);
 }
 const proposalDatabaseUrl = requiredEnvironment.proposal;
@@ -60,6 +67,7 @@ if (proposalDatabaseUrl === undefined || proposalDatabaseUrl === '')
 const contractDatabaseUrl = requiredEnvironment.contract;
 if (contractDatabaseUrl === undefined || contractDatabaseUrl === '')
   throw new Error('contract E2E database URL is required.');
+const subscriptionDatabaseUrl = requiredEnvironment.subscription ?? '';
 
 const configuration: PlatformConfiguration = {
   environment: 'test',
@@ -80,6 +88,7 @@ const configuration: PlatformConfiguration = {
     ? {}
     : { proposalDatabaseUrl: process.env.ACS_PROPOSAL_DATABASE_URL }),
   contractDatabaseUrl,
+  ...(subscriptionDatabaseUrl === '' ? {} : { subscriptionDatabaseUrl }),
   webOrigin: 'http://localhost:5173',
 };
 
@@ -2023,6 +2032,8 @@ describe.sequential('Opportunity Registry signed OIDC acceptance matrix', () => 
     });
 
   beforeAll(async () => {
+    if (subscriptionDatabaseUrl === '')
+      throw new Error('subscription E2E database URL is required.');
     const fixture = async (tenantId: string, actorId: string) => {
       const suffix = randomUUID().slice(0, 8);
       const [customer, lead, partner, plan] = await Promise.all([
@@ -5007,10 +5018,12 @@ describe.sequential('Contract Registry signed OIDC acceptance matrix', () => {
       status: 'APPROVED',
       revision_number: String(approved.revision_number),
     });
-    const downstream = await admin.query<{ subscriptions: string | null; invoices: string | null }>(
-      "SELECT to_regclass('commercial.subscriptions')::text subscriptions,to_regclass('commercial.invoices')::text invoices",
+    const downstream = await admin.query<{ subscriptions: string; invoices: string | null }>(
+      `SELECT (SELECT count(*) FROM commercial.subscriptions WHERE source_contract_id=$1)::text subscriptions,
+       to_regclass('commercial.invoices')::text invoices`,
+      [approved.id],
     );
-    expect(downstream.rows[0]).toEqual({ subscriptions: null, invoices: null });
+    expect(downstream.rows[0]).toEqual({ subscriptions: '0', invoices: null });
   });
 
   it('records a Contract signed-OIDC PostgreSQL baseline without asserting an SLO', async () => {
@@ -5054,6 +5067,673 @@ describe.sequential('Contract Registry signed OIDC acceptance matrix', () => {
     current = await measure('CONTRACT_REVISE_MS', () => mutate(current, 'revise'));
     process.stdout.write(
       `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, ...Object.fromEntries(timings) })}\n`,
+    );
+  });
+});
+
+describe.sequential('Subscription Registry signed OIDC acceptance matrix', () => {
+  const aliceMembership = '30000000-0000-4000-8000-000000000055';
+  const aliceUser = '40000000-0000-4000-8000-000000000044';
+  const bobMembership = '30000000-0000-4000-8000-000000000099';
+  const bobUser = '50000000-0000-4000-8000-000000000055';
+  let aliceToken: string;
+  let bobToken: string;
+  let charlieToken: string;
+  let opportunityId: string;
+  let planId: string;
+  let customerId: string;
+  let primary: Subscription;
+
+  const headers = (key = randomUUID(), tenant = tenantA, token = aliceToken) => ({
+    authorization: `Bearer ${token}`,
+    'x-acs-tenant-id': tenant,
+    'idempotency-key': key,
+  });
+  const dates = () => ({
+    effective_from: new Date(Date.now() + 86_400_000).toISOString(),
+    effective_until: new Date(Date.now() + 31 * 86_400_000).toISOString(),
+  });
+  const activeContract = async (tenant = tenantA, active = true) => {
+    const suffix = randomUUID().slice(0, 10);
+    const reference = await admin.query<{
+      opportunity_id: string;
+      plan_id: string;
+      customer_id: string;
+    }>(
+      `SELECT o.id opportunity_id,p.id plan_id,c.id customer_id FROM commercial.opportunities o
+       JOIN commercial.plans p ON p.tenant_id=o.tenant_id JOIN commercial.customers c ON c.tenant_id=o.tenant_id
+       WHERE o.tenant_id=$1 ORDER BY o.id,p.id,c.id LIMIT 1`,
+      [tenant],
+    );
+    if (!reference.rows[0]) throw new Error('Subscription source references are unavailable.');
+    const membership =
+      tenant === tenantA ? aliceMembership : '30000000-0000-4000-8000-000000000088';
+    const user = tenant === tenantA ? aliceUser : '40000000-0000-4000-8000-000000000077';
+    const proposal = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.proposals(tenant_id,proposal_code,title,opportunity_id,customer_id,owner_membership_id,created_by_membership_id,currency_code,status,valid_until,proposal_subtotal,grand_total,approved_by_membership_id,approved_at,created_by,updated_by)
+       VALUES($1,$2,'Subscription source',$3,$4,$5,$5,'USD','ACCEPTED',clock_timestamp()+interval '60 days',25,25,$5,clock_timestamp(),$6,$6) RETURNING id`,
+      [
+        tenant,
+        `SUB-SRC-${suffix}`,
+        reference.rows[0].opportunity_id,
+        reference.rows[0].customer_id,
+        membership,
+        user,
+      ],
+    );
+    const proposalLine = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.proposal_line_items(proposal_id,tenant_id,line_number,plan_id,plan_name_snapshot,description_snapshot,quantity,unit_price,line_subtotal)
+       VALUES($1,$2,1,$3,'Subscription plan snapshot','Subscription source line',1,25,25) RETURNING id`,
+      [proposal.rows[0]!.id, tenant, reference.rows[0].plan_id],
+    );
+    const contract = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.contracts(tenant_id,source_proposal_id,source_proposal_revision_number,source_proposal_code,title,opportunity_id,customer_id,owner_membership_id,created_by_membership_id,currency_code,status,effective_from,effective_until,contract_subtotal,grand_total,approved_by_membership_id,approved_at,created_by,updated_by)
+       VALUES($1,$2,1,$3,'Subscription source contract',$4,$5,$6,$6,'USD',$7,clock_timestamp(),clock_timestamp()+interval '365 days',25,25,$6,clock_timestamp(),$8,$8) RETURNING id`,
+      [
+        tenant,
+        proposal.rows[0]!.id,
+        `SUB-SRC-${suffix}`,
+        reference.rows[0].opportunity_id,
+        reference.rows[0].customer_id,
+        membership,
+        active ? 'ACTIVE' : 'APPROVED',
+        user,
+      ],
+    );
+    await admin.query(
+      `INSERT INTO commercial.contract_line_items(contract_id,tenant_id,line_number,source_proposal_line_item_id,plan_id,plan_name_snapshot,description_snapshot,quantity,unit_price,line_subtotal)
+       VALUES($1,$2,1,$3,$4,'Subscription plan snapshot','Subscription source line',1,25,25)`,
+      [contract.rows[0]!.id, tenant, proposalLine.rows[0]!.id, reference.rows[0].plan_id],
+    );
+    return contract.rows[0]!.id;
+  };
+  const createSubscription = async (key = randomUUID(), contractId?: string) => {
+    const source = contractId ?? (await activeContract());
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(key),
+      payload: { contract_id: source, ...dates() },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return {
+      subscription: subscriptionEnvelopeSchema.parse(response.json()).data,
+      response,
+      key,
+      source,
+    };
+  };
+  const transition = async (subscription: Subscription, action: string, token = aliceToken) => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${subscription.id}/${action}`,
+      headers: headers(randomUUID(), tenantA, token),
+      payload: { expected_version: subscription.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return subscriptionEnvelopeSchema.parse(response.json()).data;
+  };
+  const activeSubscription = async () => {
+    let subscription = (await createSubscription()).subscription;
+    subscription = await transition(subscription, 'request-activation');
+    return transition(subscription, 'activate', bobToken);
+  };
+  const issueContext = async (action: string) => {
+    const contexts = new PostgresTenantContextRepository(
+      requiredEnvironment.issuer as string,
+      requiredEnvironment.tenant as string,
+    );
+    const issued = await contexts.issueContext(
+      JSON.stringify(['https://issuer.acs.test', 'alice']),
+      tenantA,
+      action,
+    );
+    if (!issued) throw new Error('Canonical Subscription test context was not issued.');
+    return { ...issued, close: () => contexts.close() };
+  };
+
+  beforeAll(async () => {
+    aliceToken = await signedOidcToken('alice');
+    bobToken = await signedOidcToken('bob');
+    charlieToken = await signedOidcToken('charlie');
+    await admin.query(
+      `INSERT INTO platform.memberships(id,tenant_id,user_id,status) VALUES($1,$2,$3,'ACTIVE') ON CONFLICT DO NOTHING`,
+      [bobMembership, tenantA, bobUser],
+    );
+    await admin.query(
+      `INSERT INTO platform.membership_permissions(tenant_id,membership_id,permission_key)
+       SELECT $1,$2,permission_key FROM platform.permissions WHERE permission_key LIKE 'commercial.subscription.%' ON CONFLICT DO NOTHING`,
+      [tenantA, bobMembership],
+    );
+    const reference = await admin.query<{
+      opportunity_id: string;
+      plan_id: string;
+      customer_id: string;
+    }>(
+      `SELECT o.id opportunity_id,p.id plan_id,c.id customer_id FROM commercial.opportunities o
+       JOIN commercial.plans p ON p.tenant_id=o.tenant_id JOIN commercial.customers c ON c.tenant_id=o.tenant_id
+       WHERE o.tenant_id=$1 ORDER BY o.id,p.id,c.id LIMIT 1`,
+      [tenantA],
+    );
+    if (!reference.rows[0]) throw new Error('Subscription E2E references are unavailable.');
+    opportunityId = reference.rows[0].opportunity_id;
+    planId = reference.rows[0].plan_id;
+    customerId = reference.rows[0].customer_id;
+    expect([opportunityId, planId, customerId].every(Boolean)).toBe(true);
+  });
+
+  it('SUB-POS-001 creates a DRAFT from an ACTIVE Contract through signed OIDC', async () => {
+    primary = (await createSubscription()).subscription;
+    expect(primary).toMatchObject({ status: 'DRAFT', revision_number: 1, version: 1 });
+  });
+  it('SUB-POS-002 lists and reads only tenant-scoped Subscriptions', async () => {
+    const list = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/subscriptions?limit=100',
+      headers: headers(),
+    });
+    expect(list.statusCode, list.body).toBe(200);
+    expect(
+      subscriptionListEnvelopeSchema.parse(list.json()).data.some((item) => item.id === primary.id),
+    ).toBe(true);
+    const detail = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/subscriptions/${primary.id}`,
+      headers: headers(),
+    });
+    expect(subscriptionEnvelopeSchema.parse(detail.json()).data.id).toBe(primary.id);
+  });
+  it('SUB-POS-003 updates effective dates while DRAFT', async () => {
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/subscriptions/${primary.id}`,
+      headers: headers(),
+      payload: {
+        effective_until: new Date(Date.now() + 40 * 86_400_000).toISOString(),
+        expected_version: primary.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    primary = subscriptionEnvelopeSchema.parse(response.json()).data;
+    expect(primary.version).toBe(2);
+  });
+  it('SUB-POS-004 assigns an active same-tenant owner', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${primary.id}/assign`,
+      headers: headers(),
+      payload: { owner_membership_id: bobMembership, expected_version: primary.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    primary = subscriptionEnvelopeSchema.parse(response.json()).data;
+    expect(primary.owner_membership_id).toBe(bobMembership);
+  });
+  it('SUB-POS-005 requests activation explicitly', async () => {
+    primary = await transition(primary, 'request-activation');
+    expect(primary.status).toBe('PENDING_ACTIVATION');
+  });
+  it('SUB-POS-006 activates with creator/approver segregation', async () => {
+    primary = await transition(primary, 'activate', bobToken);
+    expect(primary.status).toBe('ACTIVE');
+  });
+  it('SUB-POS-007 suspends and resumes explicitly', async () => {
+    primary = await transition(primary, 'suspend');
+    expect(primary.status).toBe('SUSPENDED');
+    primary = await transition(primary, 'resume');
+    expect(primary.status).toBe('ACTIVE');
+  });
+  it('SUB-POS-008 renews only by extending a defined end', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${primary.id}/renew`,
+      headers: headers(),
+      payload: {
+        effective_until: new Date(Date.now() + 60 * 86_400_000).toISOString(),
+        expected_version: primary.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    primary = subscriptionEnvelopeSchema.parse(response.json()).data;
+  });
+  it('SUB-POS-009 cancels an active Subscription', async () => {
+    const value = await transition(await activeSubscription(), 'cancel');
+    expect(value.status).toBe('CANCELLED');
+  });
+  it('SUB-POS-010 terminates an active Subscription', async () => {
+    const value = await transition(await activeSubscription(), 'terminate');
+    expect(value.status).toBe('TERMINATED');
+  });
+  it('SUB-POS-011 replays the same tenant-scoped idempotent request', async () => {
+    const key = randomUUID();
+    const source = await activeContract();
+    const effective = dates();
+    const first = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(key),
+      payload: { contract_id: source, ...effective },
+    });
+    const second = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(key),
+      payload: { contract_id: source, ...effective },
+    });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(second.statusCode, second.body).toBe(200);
+    expect(subscriptionEnvelopeSchema.parse(second.json()).meta.idempotent_replay).toBe(true);
+  });
+  it('SUB-POS-012 records immutable history, audit and outbox together', async () => {
+    const evidence = await admin.query<{ revisions: string; audits: string; events: string }>(
+      `SELECT (SELECT count(*) FROM commercial.subscription_revisions WHERE subscription_id=$1)::text revisions,
+       (SELECT count(*) FROM platform.audit_logs WHERE resource=$2)::text audits,
+       (SELECT count(*) FROM platform.domain_events WHERE payload->>'id'=$1::text)::text events`,
+      [primary.id, `commercial:subscription:${primary.id}`],
+    );
+    expect(Number(evidence.rows[0]!.revisions)).toBeGreaterThanOrEqual(6);
+    expect(Number(evidence.rows[0]!.audits)).toBeGreaterThanOrEqual(6);
+    expect(Number(evidence.rows[0]!.events)).toBeGreaterThanOrEqual(6);
+  });
+
+  it('SUB-NEG-001 rejects missing authentication', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/subscriptions/${primary.id}`,
+      headers: { 'x-acs-tenant-id': tenantA },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+  it('SUB-NEG-002 denies a member without Subscription permission', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/subscriptions/${primary.id}`,
+      headers: headers(randomUUID(), tenantA, charlieToken),
+    });
+    expect(response.statusCode).toBe(403);
+  });
+  it('SUB-NEG-003 rejects tenant-header spoofing', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/subscriptions/${primary.id}`,
+      headers: headers(randomUUID(), tenantB),
+    });
+    expect([403, 404]).toContain(response.statusCode);
+  });
+  it('SUB-NEG-004 does not create from a foreign-tenant Contract', async () => {
+    const foreignReference = await admin.query<{ id: string }>(
+      'SELECT id FROM commercial.contracts WHERE tenant_id=$1 LIMIT 1',
+      [tenantB],
+    );
+    const foreign = foreignReference.rows[0]?.id ?? randomUUID();
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(),
+      payload: { contract_id: foreign, ...dates() },
+    });
+    expect([400, 404]).toContain(response.statusCode);
+  });
+  it('SUB-NEG-005 rejects a non-ACTIVE Contract', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(),
+      payload: { contract_id: await activeContract(tenantA, false), ...dates() },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-006 prevents duplicate current Subscription creation', async () => {
+    const source = await activeContract();
+    await createSubscription(randomUUID(), source);
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(),
+      payload: { contract_id: source, ...dates() },
+    });
+    expect(response.statusCode).toBe(409);
+  });
+  it('SUB-NEG-007 rejects mass-assignment fields', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(),
+      payload: {
+        contract_id: await activeContract(),
+        tenant_id: tenantB,
+        status: 'ACTIVE',
+        ...dates(),
+      },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-008 rejects inverted effective dates', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(),
+      payload: {
+        contract_id: await activeContract(),
+        effective_from: new Date(Date.now() + 20_000).toISOString(),
+        effective_until: new Date(Date.now() + 10_000).toISOString(),
+      },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-009 rejects stale expected_version', async () => {
+    const current = (await createSubscription()).subscription;
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/subscriptions/${current.id}`,
+      headers: headers(),
+      payload: { effective_until: dates().effective_until, expected_version: current.version + 1 },
+    });
+    expect(response.statusCode).toBe(409);
+  });
+  it('SUB-NEG-010 rejects invalid lifecycle transitions', async () => {
+    const current = (await createSubscription()).subscription;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${current.id}/suspend`,
+      headers: headers(),
+      payload: { expected_version: current.version },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-011 enforces creator/activator segregation', async () => {
+    let current = (await createSubscription()).subscription;
+    current = await transition(current, 'request-activation');
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${current.id}/activate`,
+      headers: headers(),
+      payload: { expected_version: current.version },
+    });
+    expect(response.statusCode).toBe(403);
+  });
+  it('SUB-NEG-012 rejects a foreign-tenant owner', async () => {
+    const current = (await createSubscription()).subscription;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${current.id}/assign`,
+      headers: headers(),
+      payload: {
+        owner_membership_id: '30000000-0000-4000-8000-000000000088',
+        expected_version: current.version,
+      },
+    });
+    expect([400, 404]).toContain(response.statusCode);
+  });
+  it('SUB-NEG-013 rejects malformed resource identifiers', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/subscriptions/not-a-uuid',
+      headers: headers(),
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-014 requires an idempotency key on mutations', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: { authorization: `Bearer ${aliceToken}`, 'x-acs-tenant-id': tenantA },
+      payload: { contract_id: await activeContract(), ...dates() },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-015 rejects divergent payload reuse', async () => {
+    const key = randomUUID();
+    const source = await activeContract();
+    const effective = dates();
+    const first = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(key),
+      payload: { contract_id: source, ...effective },
+    });
+    expect(first.statusCode, first.body).toBe(200);
+    const second = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(key),
+      payload: {
+        contract_id: source,
+        ...effective,
+        effective_until: new Date(Date.now() + 90 * 86_400_000).toISOString(),
+      },
+    });
+    expect(second.statusCode).toBe(409);
+  });
+  it('SUB-NEG-016 makes CANCELLED terminal', async () => {
+    const current = await transition(await activeSubscription(), 'cancel');
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${current.id}/resume`,
+      headers: headers(),
+      payload: { expected_version: current.version },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-017 makes TERMINATED terminal', async () => {
+    const current = await transition(await activeSubscription(), 'terminate');
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/subscriptions/${current.id}/request-activation`,
+      headers: headers(),
+      payload: { expected_version: current.version },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('SUB-NEG-018 preserves FORCE RLS against an untrusted direct session', async () => {
+    const direct = new Client({ connectionString: subscriptionDatabaseUrl });
+    await direct.connect();
+    const rows = await direct.query('SELECT id FROM commercial.subscriptions WHERE id=$1', [
+      primary.id,
+    ]);
+    await direct.end();
+    expect(rows.rowCount).toBe(0);
+  });
+  it('SUB-NEG-019 excludes sensitive relationship data from audit and outbox', async () => {
+    const evidence = await admin.query<{ audit: string; event: string }>(
+      `SELECT coalesce((SELECT metadata::text FROM platform.audit_logs WHERE resource=$1 ORDER BY occurred_at DESC LIMIT 1),'') audit,
+       coalesce((SELECT payload::text FROM platform.domain_events WHERE payload->>'id'=$2 ORDER BY occurred_at DESC LIMIT 1),'') event`,
+      [`commercial:subscription:${primary.id}`, primary.id],
+    );
+    expect(evidence.rows[0]!.audit).not.toContain('contact');
+    expect(evidence.rows[0]!.event).not.toContain('contact');
+  });
+  it('SUB-NEG-020 rolls aggregate, history, audit and outbox back atomically', async () => {
+    const source = await activeContract();
+    const context = await issueContext('commercial.subscription.create');
+    const correlationId = randomUUID();
+    const repository = new PostgresSubscriptionRegistryRepository(
+      subscriptionDatabaseUrl,
+      (phase) => {
+        if (phase === 'after-outbox') throw new Error('TEST_ONLY_SUBSCRIPTION_FAILURE');
+      },
+    );
+    await expect(
+      repository.create({
+        actorUserId: aliceUser,
+        contextToken: context.contextToken,
+        correlationId,
+        idempotencyKey: randomUUID(),
+        requestHash: 'a'.repeat(64),
+        requestId: randomUUID(),
+        tenantId: tenantA,
+        action: 'commercial.subscription.create',
+        contract_id: source,
+        ...dates(),
+      }),
+    ).rejects.toThrow('TEST_ONLY_SUBSCRIPTION_FAILURE');
+    await repository.close();
+    await context.close();
+    expect(
+      (
+        await admin.query('SELECT 1 FROM commercial.subscriptions WHERE source_contract_id=$1', [
+          source,
+        ])
+      ).rowCount,
+    ).toBe(0);
+    expect(
+      (
+        await admin.query('SELECT 1 FROM platform.audit_logs WHERE correlation_id=$1', [
+          correlationId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+    expect(
+      (
+        await admin.query('SELECT 1 FROM platform.domain_events WHERE correlation_id=$1', [
+          correlationId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it('SUB-NEG-021 allows exactly one concurrent mutation for one version', async () => {
+    const current = (await createSubscription()).subscription;
+    const race = await Promise.all(
+      ['a', 'b'].map(() =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/subscriptions/${current.id}`,
+          headers: headers(),
+          payload: {
+            effective_until: new Date(Date.now() + 50 * 86_400_000).toISOString(),
+            expected_version: current.version,
+          },
+        }),
+      ),
+    );
+    expect(race.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+  });
+  it('SUB-NEG-022 proves all unauthorized downstream side effects remain absent', async () => {
+    const downstream = await admin.query<Record<string, string | null>>(
+      `SELECT to_regclass('commercial.entitlements')::text entitlements,to_regclass('commercial.usage_records')::text usage,
+       to_regclass('commercial.invoices')::text invoices,to_regclass('commercial.payments')::text payments,
+       to_regclass('commercial.receipts')::text receipts,to_regclass('commercial.collections')::text collections,
+       to_regclass('commercial.accounting_entries')::text accounting,to_regclass('commercial.commissions')::text commissions`,
+    );
+    expect(Object.values(downstream.rows[0]!).every((value) => value === null)).toBe(true);
+  });
+
+  it('records a Subscription signed-OIDC PostgreSQL baseline without asserting an SLO', async () => {
+    const samples = new Map<string, number[]>();
+    const record = async <T>(name: string, measured: boolean, work: () => Promise<T>) => {
+      const startedAt = performance.now();
+      const value = await work();
+      if (measured) {
+        const values = samples.get(name) ?? [];
+        values.push(performance.now() - startedAt);
+        samples.set(name, values);
+      }
+      return value;
+    };
+    const runLifecycle = async (measured: boolean) => {
+      const source = await activeContract();
+      const journeyStartedAt = performance.now();
+      let current = (
+        await record('SUBSCRIPTION_CREATE_FROM_ACTIVE_CONTRACT_MS', measured, () =>
+          createSubscription(randomUUID(), source),
+        )
+      ).subscription;
+      await record('SUBSCRIPTION_LIST_MS', measured, async () => {
+        const response = await oidcApp.inject({
+          method: 'GET',
+          url: '/api/v1/commercial/subscriptions?limit=25',
+          headers: headers(),
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        expect(subscriptionListEnvelopeSchema.parse(response.json()).data).toBeInstanceOf(Array);
+      });
+      current = await record('SUBSCRIPTION_DETAIL_MS', measured, async () => {
+        const response = await oidcApp.inject({
+          method: 'GET',
+          url: `/api/v1/commercial/subscriptions/${current.id}`,
+          headers: headers(),
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        return subscriptionEnvelopeSchema.parse(response.json()).data;
+      });
+      current = await record('SUBSCRIPTION_DRAFT_UPDATE_MS', measured, async () => {
+        const response = await oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/subscriptions/${current.id}`,
+          headers: headers(),
+          payload: {
+            effective_until: new Date(Date.now() + 40 * 86_400_000).toISOString(),
+            expected_version: current.version,
+          },
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        return subscriptionEnvelopeSchema.parse(response.json()).data;
+      });
+      current = await record('SUBSCRIPTION_OWNER_ASSIGNMENT_MS', measured, async () => {
+        const response = await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/subscriptions/${current.id}/assign`,
+          headers: headers(),
+          payload: { owner_membership_id: bobMembership, expected_version: current.version },
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        return subscriptionEnvelopeSchema.parse(response.json()).data;
+      });
+      current = await record('SUBSCRIPTION_REQUEST_ACTIVATION_MS', measured, () =>
+        transition(current, 'request-activation'),
+      );
+      current = await record('SUBSCRIPTION_ACTIVATE_MS', measured, () =>
+        transition(current, 'activate', bobToken),
+      );
+      current = await record('SUBSCRIPTION_SUSPEND_MS', measured, () =>
+        transition(current, 'suspend'),
+      );
+      current = await record('SUBSCRIPTION_RESUME_MS', measured, () =>
+        transition(current, 'resume'),
+      );
+      current = await record('SUBSCRIPTION_RENEW_MS', measured, async () => {
+        const response = await oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/subscriptions/${current.id}/renew`,
+          headers: headers(),
+          payload: {
+            effective_until: new Date(Date.now() + 60 * 86_400_000).toISOString(),
+            expected_version: current.version,
+          },
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        return subscriptionEnvelopeSchema.parse(response.json()).data;
+      });
+      current = await record('SUBSCRIPTION_TERMINAL_TRANSITION_MS', measured, () =>
+        transition(current, 'cancel'),
+      );
+      expect(current.status).toBe('CANCELLED');
+      if (measured) {
+        const values = samples.get('SUBSCRIPTION_COMPLETE_JOURNEY_MS') ?? [];
+        values.push(performance.now() - journeyStartedAt);
+        samples.set('SUBSCRIPTION_COMPLETE_JOURNEY_MS', values);
+      }
+    };
+    const summarize = (values: number[]) => {
+      const sorted = [...values].sort((left, right) => left - right);
+      const median = sorted[Math.floor(sorted.length / 2)]!;
+      return {
+        sample_count: values.length,
+        median_ms: Number(median.toFixed(2)),
+        min_ms: Number(sorted[0]!.toFixed(2)),
+        max_ms: Number(sorted.at(-1)!.toFixed(2)),
+      };
+    };
+
+    await runLifecycle(false);
+    for (let iteration = 0; iteration < 5; iteration += 1) await runLifecycle(true);
+
+    process.stdout.write(
+      `${JSON.stringify({
+        BASELINE_MEASUREMENT_NOT_SLO: true,
+        PERFORMANCE_ENVIRONMENT: 'LOCAL_DISPOSABLE_TEST_ONLY',
+        WARM_UP_COMPLETED: true,
+        ...Object.fromEntries([...samples].map(([name, values]) => [name, summarize(values)])),
+      })}\n`,
     );
   });
 });
