@@ -1,4 +1,4 @@
-name: Phase 2 Entitlement validation
+name: Phase 2 Usage Metering validation
 
 on:
   pull_request:
@@ -12,8 +12,8 @@ env:
   NODE_VERSION: 24.19.0
 
 jobs:
-  entitlement-quality:
-    name: Entitlement quality, contracts, Web and build
+  usage-metering-quality:
+    name: Usage Metering contracts, Web, quality and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -27,8 +27,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
-  entitlement-postgresql-e2e:
-    name: Entitlement OIDC, authorization, FORCE RLS, audit and event E2E
+  usage-metering-postgresql-e2e:
+    name: Usage machine identity, OIDC, FORCE RLS, atomicity and regression E2E
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -57,6 +57,8 @@ jobs:
       ACS_CONTRACT_DATABASE_URL: postgresql://acs_phase2_contract_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
       ACS_SUBSCRIPTION_DATABASE_URL: postgresql://acs_phase2_subscription_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
       ACS_ENTITLEMENT_DATABASE_URL: postgresql://acs_phase2_entitlement_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_USAGE_METERING_DATABASE_URL: postgresql://acs_phase2_usage_metering_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL: postgresql://acs_machine_context_issuer_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
       ACS_EVENT_PUBLISHER_DATABASE_URL: postgresql://acs_event_publisher_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_EVENT_CONSUMER_DATABASE_URL: postgresql://acs_event_consumer_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_EVENT_OPERATOR_DATABASE_URL: postgresql://acs_event_operator_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
@@ -73,6 +75,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:validate
       - run: pnpm --filter @acs/platform-api... build
+      - run: pnpm test:usage-metering:e2e
       - run: pnpm test:entitlement:e2e
       - run: pnpm test:subscription:e2e
       - run: pnpm test:contract:e2e
@@ -83,7 +86,7 @@ jobs:
       - run: pnpm test:lead-registry:e2e
       - run: pnpm test:phase2:e2e
 
-  entitlement-phase-one-fresh-postgresql-e2e:
+  usage-metering-phase-one-fresh-postgresql-e2e:
     name: Phase 1 and Event Foundation regressions on fresh PostgreSQL
     runs-on: ubuntu-latest
     services:
@@ -130,4 +133,5 @@ jobs:
       - run: pnpm db:validate
       - run: pnpm --filter @acs/platform-api... build
       - run: pnpm test:phase1:e2e
+      - run: pnpm test:event-foundation:e2e
       - run: pnpm test:event-foundation:e2e

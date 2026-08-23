@@ -21,6 +21,10 @@ import {
   subscriptionListEnvelopeSchema,
   entitlementEnvelopeSchema,
   entitlementListEnvelopeSchema,
+  measurementSourceRegistrationEnvelopeSchema,
+  rawMeasurementSchema,
+  measurementCorrectionSchema,
+  usageAggregateListEnvelopeSchema,
   type Contract,
   type Subscription,
   type Entitlement,
@@ -29,6 +33,7 @@ import {
   type Partner,
   tenantAdministrationSchema,
 } from '@acs/contracts';
+import { z } from 'zod';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
 import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
@@ -38,6 +43,7 @@ import { PostgresProposalRegistryRepository } from './postgres-proposal-registry
 import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
 import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
 import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
+import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
 import { PostgresTenantContextRepository } from './postgres-platform-context.js';
 import type { PlatformConfiguration } from './config.js';
 
@@ -96,6 +102,12 @@ const configuration: PlatformConfiguration = {
   contractDatabaseUrl,
   ...(subscriptionDatabaseUrl === '' ? {} : { subscriptionDatabaseUrl }),
   ...(entitlementDatabaseUrl === '' ? {} : { entitlementDatabaseUrl }),
+  ...(process.env.ACS_USAGE_METERING_DATABASE_URL === undefined
+    ? {}
+    : { usageMeteringDatabaseUrl: process.env.ACS_USAGE_METERING_DATABASE_URL }),
+  ...(process.env.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL === undefined
+    ? {}
+    : { machineContextIssuerDatabaseUrl: process.env.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL }),
   webOrigin: 'http://localhost:5173',
 };
 
@@ -153,6 +165,712 @@ beforeAll(async () => {
     .setExpirationTime('5m')
     .sign(keys.privateKey);
 });
+
+describe
+  .runIf(
+    Boolean(
+      process.env.ACS_USAGE_METERING_DATABASE_URL &&
+      process.env.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL,
+    ),
+  )
+  .sequential('Usage.Metering canonical backend acceptance matrix', () => {
+    const usageUrl = process.env.ACS_USAGE_METERING_DATABASE_URL;
+    const machineIssuerUrl = process.env.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL;
+    const ingestResponseSchema = z.object({
+      measurement: rawMeasurementSchema,
+      replay: z.boolean(),
+    });
+    const correctionResponseSchema = z.object({
+      correction: measurementCorrectionSchema,
+      replay: z.boolean(),
+    });
+    const measurementListResponseSchema = z.object({ data: z.array(rawMeasurementSchema) });
+    const sourceHeaders = (credentialId: string, credential: string) => ({
+      'x-acs-source-credential-id': credentialId,
+      'x-acs-source-credential': credential,
+    });
+    const humanHeaders = (key = randomUUID(), tenant = tenantA, token = oidcToken) => ({
+      authorization: `Bearer ${token}`,
+      'x-acs-tenant-id': tenant,
+      'idempotency-key': key,
+    });
+    const origin = async (tenant = tenantA) => {
+      const result = await admin.query<{ id: string; subscription_id: string }>(
+        "SELECT e.id,e.subscription_id FROM commercial.entitlements e JOIN commercial.subscriptions s ON s.id=e.subscription_id WHERE e.tenant_id=$1 AND e.status='ACTIVE' AND s.status='ACTIVE' LIMIT 1",
+        [tenant],
+      );
+      expect(result.rows[0]).toBeDefined();
+      return result.rows[0]!;
+    };
+    const createSource = async (label: string) => {
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/usage/sources',
+        headers: humanHeaders(),
+        payload: { name: `USG-${label}-${randomUUID()}`, descriptor: 'TEST_ONLY canonical source' },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      return measurementSourceRegistrationEnvelopeSchema.parse(response.json());
+    };
+    const ingest = async (
+      credential: { credential_id: string; credential: string },
+      overrides: Record<string, unknown> = {},
+      tenant = tenantA,
+    ) => {
+      const active = await origin(tenant);
+      return oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/usage/ingest',
+        headers: sourceHeaders(credential.credential_id, credential.credential),
+        payload: {
+          source_event_id: `USG-${randomUUID()}`,
+          entitlement_id: active.id,
+          measurement_type: 'api.request',
+          value: 3,
+          unit: 'request',
+          event_time: new Date().toISOString(),
+          schema_version: 1,
+          ...overrides,
+        },
+      });
+    };
+
+    it('USG-POS-001 accepts an ACTIVE trusted source for a same-tenant active origin', async () => {
+      const source = await createSource('POS-001');
+      const response = await ingest(source.credential);
+      expect(response.statusCode, response.body).toBe(200);
+      expect(ingestResponseSchema.parse(response.json()).replay).toBe(false);
+    });
+
+    it('USG-POS-002 resolves the commercial origin on the server', async () => {
+      const source = await createSource('POS-002');
+      const response = await ingest(source.credential, { subscription_id: randomUUID() });
+      expect(response.statusCode, response.body).toBe(400);
+    });
+
+    it('USG-POS-003 deduplicates an identical source event', async () => {
+      const source = await createSource('POS-003');
+      const event = `USG-POS-003-${randomUUID()}`;
+      const command = { source_event_id: event, event_time: new Date().toISOString() };
+      const first = await ingest(source.credential, command);
+      const replay = await ingest(source.credential, command);
+      expect(first.statusCode, first.body).toBe(200);
+      expect(replay.statusCode, replay.body).toBe(200);
+      expect(ingestResponseSchema.parse(replay.json()).replay).toBe(true);
+      const count = await admin.query<{ value: string }>(
+        'SELECT count(*)::text value FROM commercial.raw_measurements WHERE source_id=$1 AND source_event_id=$2',
+        [source.data.id, event],
+      );
+      expect(Number(count.rows[0]!.value)).toBe(1);
+    });
+
+    it('USG-POS-004 replays a human correction idempotently', async () => {
+      const source = await createSource('POS-004');
+      const accepted = await ingest(source.credential);
+      const measurement = ingestResponseSchema.parse(accepted.json()).measurement;
+      const key = randomUUID();
+      const payload = {
+        reason: 'TEST_ONLY correction replay',
+        compensating_value: -1,
+        unit: 'request',
+        expected_version: 1,
+      };
+      const first = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/measurements/${measurement.id}/corrections`,
+        headers: humanHeaders(key),
+        payload,
+      });
+      const replay = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/measurements/${measurement.id}/corrections`,
+        headers: humanHeaders(key),
+        payload,
+      });
+      expect(first.statusCode, first.body).toBe(200);
+      expect(replay.statusCode, replay.body).toBe(200);
+      expect(correctionResponseSchema.parse(replay.json()).replay).toBe(true);
+    });
+
+    it('USG-POS-005 preserves distinct UTC raw timestamps', async () => {
+      const source = await createSource('POS-005');
+      const eventTime = new Date(Date.now() - 60_000).toISOString();
+      const response = await ingest(source.credential, { event_time: eventTime });
+      const measurement = ingestResponseSchema.parse(response.json()).measurement;
+      expect(measurement.event_time).toBe(eventTime);
+      expect(measurement.received_at).not.toBe(measurement.event_time);
+      expect(measurement.processed_at).not.toBe(measurement.event_time);
+    });
+
+    it('USG-POS-006 creates an append-only correction without changing the raw fact', async () => {
+      const source = await createSource('POS-006');
+      const accepted = await ingest(source.credential);
+      const measurement = ingestResponseSchema.parse(accepted.json()).measurement;
+      const correction = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/measurements/${measurement.id}/corrections`,
+        headers: humanHeaders(),
+        payload: {
+          reason: 'TEST_ONLY append-only',
+          compensating_value: -2,
+          unit: 'request',
+          expected_version: 1,
+        },
+      });
+      expect(correction.statusCode, correction.body).toBe(200);
+      expect(correctionResponseSchema.parse(correction.json()).correction.status).toBe('APPLIED');
+      const raw = await admin.query<{ value: string }>(
+        'SELECT value::text value FROM commercial.raw_measurements WHERE id=$1',
+        [measurement.id],
+      );
+      expect(raw.rows[0]!.value).toBe('3');
+    });
+
+    it('USG-POS-007 derives hourly and daily aggregates from history', async () => {
+      const source = await createSource('POS-007');
+      await ingest(source.credential, { value: 5 });
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/commercial/usage/aggregates',
+        headers: humanHeaders(),
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      const aggregates = usageAggregateListEnvelopeSchema.parse(response.json()).data;
+      expect(aggregates.some((row) => row.time_bucket === 'HOURLY')).toBe(true);
+      expect(aggregates.some((row) => row.time_bucket === 'DAILY')).toBe(true);
+    });
+
+    it('USG-POS-008 reads same-tenant measurements through signed OIDC', async () => {
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/commercial/usage/measurements',
+        headers: humanHeaders(),
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(measurementListResponseSchema.parse(response.json()).data).toBeInstanceOf(Array);
+    });
+
+    it('USG-POS-009 commits machine audit and outbox evidence atomically', async () => {
+      const source = await createSource('POS-009');
+      const response = await ingest(source.credential);
+      const measurement = ingestResponseSchema.parse(response.json()).measurement;
+      const evidence = await admin.query<{ audit: string; event: string }>(
+        `SELECT (SELECT count(*) FROM platform.audit_logs WHERE metadata->>'measurement_id'=$1)::text audit,
+       (SELECT count(*) FROM platform.domain_events WHERE payload->>'id'=$1 AND event_type='commercial.usage.measurement.accepted')::text event`,
+        [measurement.id],
+      );
+      expect(Number(evidence.rows[0]!.audit)).toBe(1);
+      expect(Number(evidence.rows[0]!.event)).toBe(1);
+    });
+
+    it('USG-POS-010 serializes concurrent identical ingestion', async () => {
+      const source = await createSource('POS-010');
+      const event = `USG-POS-010-${randomUUID()}`;
+      const command = { source_event_id: event, event_time: new Date().toISOString() };
+      const responses = await Promise.all(
+        Array.from({ length: 4 }, () => ingest(source.credential, command)),
+      );
+      expect(responses.every((response) => response.statusCode === 200)).toBe(true);
+      const count = await admin.query<{ value: string }>(
+        'SELECT count(*)::text value FROM commercial.raw_measurements WHERE source_id=$1 AND source_event_id=$2',
+        [source.data.id, event],
+      );
+      expect(Number(count.rows[0]!.value)).toBe(1);
+    });
+
+    it('USG-NEG-001 denies unauthenticated human reads', async () => {
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/commercial/usage/measurements',
+        headers: { 'x-acs-tenant-id': tenantA },
+      });
+      expect(response.statusCode, response.body).toBe(401);
+    });
+
+    it('USG-NEG-002 denies an unknown machine credential', async () => {
+      const response = await ingest({ credential_id: randomUUID(), credential: 'x'.repeat(43) });
+      expect(response.statusCode, response.body).toBe(401);
+    });
+
+    it('USG-NEG-003 rejects a tenant field supplied in the machine payload', async () => {
+      const source = await createSource('NEG-003');
+      const response = await ingest(source.credential, { tenant_id: tenantB });
+      expect(response.statusCode, response.body).toBe(400);
+    });
+
+    it('USG-NEG-004 denies a cross-tenant Entitlement substitution', async () => {
+      const local = await origin();
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/usage/ingest',
+        headers: sourceHeaders(
+          '82000000-0000-4000-8000-000000000022',
+          'ACS_USAGE_TEST_ONLY_SOURCE_B',
+        ),
+        payload: {
+          source_event_id: `USG-NEG-004-${randomUUID()}`,
+          entitlement_id: local.id,
+          measurement_type: 'api.request',
+          value: 1,
+          unit: 'request',
+          event_time: new Date().toISOString(),
+          schema_version: 1,
+        },
+      });
+      expect(response.statusCode, response.body).toBe(400);
+    });
+
+    it('USG-NEG-005 denies an unknown commercial origin', async () => {
+      const source = await createSource('NEG-005');
+      const response = await ingest(source.credential, { entitlement_id: randomUUID() });
+      expect(response.statusCode, response.body).toBe(400);
+    });
+
+    it('USG-NEG-006 rejects an invalid schema version', async () => {
+      const source = await createSource('NEG-006');
+      const response = await ingest(source.credential, { schema_version: 0 });
+      expect(response.statusCode, response.body).toBe(400);
+    });
+
+    it('USG-NEG-007 rejects future and late timestamps', async () => {
+      const source = await createSource('NEG-007');
+      const future = await ingest(source.credential, {
+        event_time: new Date(Date.now() + 301_000).toISOString(),
+      });
+      const late = await ingest(source.credential, {
+        event_time: new Date(Date.now() - 30 * 86_400_000 - 1_000).toISOString(),
+      });
+      expect(future.statusCode, future.body).toBe(400);
+      expect(late.statusCode, late.body).toBe(400);
+    });
+
+    it('USG-NEG-008 rejects a divergent replay without a second fact', async () => {
+      const source = await createSource('NEG-008');
+      const event = `USG-NEG-008-${randomUUID()}`;
+      await ingest(source.credential, { source_event_id: event, value: 1 });
+      const conflict = await ingest(source.credential, { source_event_id: event, value: 2 });
+      expect(conflict.statusCode, conflict.body).toBe(409);
+    });
+
+    it('USG-NEG-009 denies a correction in a foreign tenant', async () => {
+      const source = await createSource('NEG-009');
+      const accepted = await ingest(source.credential);
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/measurements/${ingestResponseSchema.parse(accepted.json()).measurement.id}/corrections`,
+        headers: humanHeaders(randomUUID(), tenantB),
+        payload: {
+          reason: 'foreign',
+          compensating_value: -1,
+          unit: 'request',
+          expected_version: 1,
+        },
+      });
+      expect(response.statusCode, response.body).toBe(403);
+    });
+
+    it('USG-NEG-010 serializes concurrent correction idempotency', async () => {
+      const source = await createSource('NEG-010');
+      const accepted = await ingest(source.credential);
+      const key = randomUUID(),
+        payload = {
+          reason: 'concurrent',
+          compensating_value: -1,
+          unit: 'request',
+          expected_version: 1,
+        };
+      const responses = await Promise.all(
+        Array.from({ length: 3 }, () =>
+          oidcApp.inject({
+            method: 'POST',
+            url: `/api/v1/commercial/usage/measurements/${ingestResponseSchema.parse(accepted.json()).measurement.id}/corrections`,
+            headers: humanHeaders(key),
+            payload,
+          }),
+        ),
+      );
+      expect(responses.every((response) => response.statusCode === 200)).toBe(true);
+      expect(
+        responses.filter(
+          (response) => correctionResponseSchema.parse(response.json()).replay === false,
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('USG-NEG-011 keeps the least-privilege runtime subject to FORCE RLS', async () => {
+      const client = new pg.Client({ connectionString: usageUrl });
+      await client.connect();
+      await expect(
+        client.query('SELECT count(*) FROM commercial.raw_measurements'),
+      ).resolves.toBeDefined();
+      const visible = await client.query<{ value: string }>(
+        'SELECT count(*)::text value FROM commercial.raw_measurements',
+      );
+      await client.end();
+      expect(Number(visible.rows[0]!.value)).toBe(0);
+    });
+
+    it('USG-NEG-012 rolls back raw, audit, outbox and deduplication on TEST_ONLY failure', async () => {
+      const source = await createSource('NEG-012');
+      const event = `USG-NEG-012-${randomUUID()}`;
+      const repository = new PostgresUsageMeteringRepository(
+        usageUrl!,
+        machineIssuerUrl!,
+        (phase) => {
+          if (phase === 'after-audit') throw new Error('TEST_ONLY_USAGE_FAILURE');
+        },
+      );
+      const identity = await repository.authenticateSource(
+        source.credential.credential_id,
+        source.credential.credential,
+      );
+      const active = await origin();
+      await expect(
+        repository.ingest(
+          identity,
+          {
+            source_event_id: event,
+            entitlement_id: active.id,
+            measurement_type: 'api.request',
+            value: 1,
+            unit: 'request',
+            event_time: new Date().toISOString(),
+            schema_version: 1,
+          },
+          { correlationId: randomUUID(), requestId: randomUUID() },
+        ),
+      ).rejects.toThrow('TEST_ONLY_USAGE_FAILURE');
+      await repository.close();
+      const remaining = await admin.query<{ value: string }>(
+        'SELECT count(*)::text value FROM commercial.raw_measurements WHERE source_event_id=$1',
+        [event],
+      );
+      expect(Number(remaining.rows[0]!.value)).toBe(0);
+    });
+
+    it('USG-NEG-013 denies raw update and delete to the runtime role', async () => {
+      const client = new pg.Client({ connectionString: usageUrl });
+      await client.connect();
+      await expect(
+        client.query("UPDATE commercial.raw_measurements SET status='REJECTED'"),
+      ).rejects.toThrow();
+      await expect(client.query('DELETE FROM commercial.raw_measurements')).rejects.toThrow();
+      await client.end();
+    });
+
+    it('USG-NEG-014 keeps credentials and hashes out of audit and outbox payloads', async () => {
+      const source = await createSource('NEG-014');
+      const response = await ingest(source.credential);
+      const measurement = ingestResponseSchema.parse(response.json()).measurement;
+      const evidence = await admin.query<{ audit: string; event: string }>(
+        `SELECT (SELECT metadata::text FROM platform.audit_logs WHERE metadata->>'measurement_id'=$1 LIMIT 1) audit,
+       (SELECT payload::text FROM platform.domain_events WHERE payload->>'id'=$1 AND event_type='commercial.usage.measurement.accepted' LIMIT 1) event`,
+        [measurement.id],
+      );
+      expect(evidence.rows[0]!.audit).not.toContain(source.credential.credential);
+      expect(evidence.rows[0]!.event).not.toContain(source.credential.credential);
+    });
+
+    it('USG-NEG-015 preserves the non-financial firewall', async () => {
+      const forbidden = await admin.query<{ value: string }>(
+        "SELECT count(*)::text value FROM information_schema.tables WHERE table_schema='commercial' AND table_name IN ('ratings','billing','invoices','payments','receipts','collections','accounting','commissions')",
+      );
+      expect(Number(forbidden.rows[0]!.value)).toBe(0);
+    });
+
+    it('supplementary source lifecycle and rotation preserve deterministic terminal behavior', async () => {
+      const source = await createSource('LIFECYCLE');
+      const disabled = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/sources/${source.data.id}/disable`,
+        headers: humanHeaders(),
+      });
+      expect(disabled.statusCode, disabled.body).toBe(200);
+      expect((await ingest(source.credential)).statusCode).toBe(401);
+      const reactivated = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/sources/${source.data.id}/reactivate`,
+        headers: humanHeaders(),
+      });
+      expect(reactivated.statusCode, reactivated.body).toBe(200);
+      const rotated = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/sources/${source.data.id}/rotate-credential`,
+        headers: humanHeaders(),
+      });
+      expect(rotated.statusCode, rotated.body).toBe(200);
+      expect((await ingest(source.credential)).statusCode).toBe(401);
+      const revoke = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/sources/${source.data.id}/revoke`,
+        headers: humanHeaders(),
+      });
+      expect(revoke.statusCode, revoke.body).toBe(200);
+      const terminal = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/sources/${source.data.id}/reactivate`,
+        headers: humanHeaders(),
+      });
+      expect(terminal.statusCode, terminal.body).toBe(403);
+    });
+
+    it('supplementary aggregation is rebuildable from raw facts and corrections', async () => {
+      const source = await createSource('REBUILD');
+      const accepted = await ingest(source.credential, {
+        measurement_type: `rebuild.${randomUUID()}`,
+        value: 7,
+      });
+      const measurement = ingestResponseSchema.parse(accepted.json()).measurement;
+      const correction = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/usage/measurements/${measurement.id}/corrections`,
+        headers: humanHeaders(),
+        payload: {
+          reason: 'TEST_ONLY rebuild proof',
+          compensating_value: -2,
+          unit: 'request',
+          expected_version: 1,
+        },
+      });
+      expect(correction.statusCode, correction.body).toBe(200);
+      const proof = await admin.query<{ canonical: string; hourly: string; daily: string }>(
+        `SELECT
+          ((SELECT value FROM commercial.raw_measurements WHERE id=$1) +
+           COALESCE((SELECT sum(compensating_value) FROM commercial.measurement_corrections WHERE measurement_id=$1),0))::text canonical,
+          (SELECT aggregate_value::text FROM commercial.usage_aggregates WHERE entitlement_id=$2 AND measurement_type=$3 AND time_bucket='HOURLY') hourly,
+          (SELECT aggregate_value::text FROM commercial.usage_aggregates WHERE entitlement_id=$2 AND measurement_type=$3 AND time_bucket='DAILY') daily`,
+        [measurement.id, measurement.entitlement_id, measurement.measurement_type],
+      );
+      expect(proof.rows[0]!.hourly).toBe(proof.rows[0]!.canonical);
+      expect(proof.rows[0]!.daily).toBe(proof.rows[0]!.canonical);
+    });
+
+    it('supplementary distinct concurrent events do not lose aggregate updates', async () => {
+      const source = await createSource('AGG-CONCURRENCY');
+      const measurementType = `concurrent.${randomUUID()}`;
+      const eventTime = new Date().toISOString();
+      const responses = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          ingest(source.credential, {
+            measurement_type: measurementType,
+            value: 1,
+            event_time: eventTime,
+          }),
+        ),
+      );
+      expect(responses.every((response) => response.statusCode === 200)).toBe(true);
+      const totals = await admin.query<{ bucket: string; value: string }>(
+        `SELECT time_bucket bucket,aggregate_value::text value FROM commercial.usage_aggregates
+         WHERE tenant_id=$1 AND measurement_type=$2 ORDER BY time_bucket`,
+        [tenantA, measurementType],
+      );
+      expect(totals.rows).toEqual([
+        { bucket: 'DAILY', value: '8' },
+        { bucket: 'HOURLY', value: '8' },
+      ]);
+    });
+
+    it('supplementary correction failure rolls back history, aggregate, audit, outbox and idempotency', async () => {
+      const source = await createSource('CORRECTION-ATOMICITY');
+      const accepted = await ingest(source.credential, {
+        measurement_type: `atomic.${randomUUID()}`,
+      });
+      const measurement = ingestResponseSchema.parse(accepted.json()).measurement;
+      const context = await admin.query<{ context_token: string; user_id: string }>(
+        `SELECT context_token,user_id FROM platform.issue_tenant_context(
+          '["https://issuer.acs.test","alice"]',$1,'commercial.usage.correct')`,
+        [tenantA],
+      );
+      const reason = `TEST_ONLY-${randomUUID()}`;
+      const repository = new PostgresUsageMeteringRepository(
+        usageUrl!,
+        machineIssuerUrl!,
+        (phase) => {
+          if (phase === 'after-outbox') throw new Error('TEST_ONLY_CORRECTION_FAILURE');
+        },
+      );
+      await expect(
+        repository.correct({
+          action: 'commercial.usage.correct',
+          actorUserId: context.rows[0]!.user_id,
+          contextToken: context.rows[0]!.context_token,
+          tenantId: tenantA,
+          correlationId: randomUUID(),
+          requestId: randomUUID(),
+          measurement_id: measurement.id,
+          reason,
+          compensating_value: -1,
+          unit: 'request',
+          expected_version: 1,
+          idempotencyKey: randomUUID(),
+          requestHash: 'a'.repeat(64),
+        }),
+      ).rejects.toThrow('TEST_ONLY_CORRECTION_FAILURE');
+      await repository.close();
+      const remaining = await admin.query<{ corrections: string; events: string }>(
+        `SELECT
+          (SELECT count(*) FROM commercial.measurement_corrections WHERE reason=$1)::text corrections,
+          (SELECT count(*) FROM platform.domain_events WHERE payload->>'measurement_id'=$2 AND event_type='commercial.usage.measurement.corrected')::text events`,
+        [reason, measurement.id],
+      );
+      expect(remaining.rows[0]).toEqual({ corrections: '0', events: '0' });
+    });
+
+    it('supplementary source-state and credential-rotation races converge safely', async () => {
+      const source = await createSource('RACES');
+      const disableEvent = `disable-race-${randomUUID()}`;
+      const [, racedIngest] = await Promise.all([
+        oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/usage/sources/${source.data.id}/disable`,
+          headers: humanHeaders(),
+        }),
+        ingest(source.credential, { source_event_id: disableEvent }),
+      ]);
+      expect([200, 401, 403]).toContain(racedIngest.statusCode);
+      expect((await ingest(source.credential)).statusCode).toBe(401);
+
+      const rotatedSource = await createSource('ROTATION-RACE');
+      const rotationEvent = `rotation-race-${randomUUID()}`;
+      const [rotated, rotationIngest] = await Promise.all([
+        oidcApp.inject({
+          method: 'POST',
+          url: `/api/v1/commercial/usage/sources/${rotatedSource.data.id}/rotate-credential`,
+          headers: humanHeaders(),
+        }),
+        ingest(rotatedSource.credential, { source_event_id: rotationEvent }),
+      ]);
+      expect(rotated.statusCode, rotated.body).toBe(200);
+      expect([200, 401]).toContain(rotationIngest.statusCode);
+      expect((await ingest(rotatedSource.credential)).statusCode).toBe(401);
+      const count = await admin.query<{ value: string }>(
+        'SELECT count(*)::text value FROM commercial.raw_measurements WHERE source_id=$1 AND source_event_id=$2',
+        [rotatedSource.data.id, rotationEvent],
+      );
+      expect(Number(count.rows[0]!.value)).toBeLessThanOrEqual(1);
+    });
+
+    it('USAGE-PERFORMANCE records machine and signed-OIDC human application baselines', async () => {
+      const samples = new Map<string, number[]>();
+      const record = async <T>(name: string, measured: boolean, work: () => Promise<T>) => {
+        const started = performance.now(),
+          result = await work();
+        if (measured)
+          (samples.get(name) ?? samples.set(name, []).get(name)!).push(performance.now() - started);
+        return result;
+      };
+      const run = async (measured: boolean) => {
+        const journey = performance.now(),
+          registered = await record('USAGE_SOURCE_REGISTRATION_MS', measured, () =>
+            createSource('PERFORMANCE'),
+          );
+        const sourceId = registered.data.id;
+        const human = async (name: string, method: 'GET' | 'POST', url: string, payload?: object) =>
+          record(name, measured, async () => {
+            const response = await oidcApp.inject({
+              method,
+              url,
+              headers: humanHeaders(),
+              ...(payload ? { payload } : {}),
+            });
+            expect(response.statusCode, response.body).toBe(200);
+            return response;
+          });
+        await human('USAGE_SOURCE_LIST_MS', 'GET', '/api/v1/commercial/usage/sources');
+        await human(
+          'USAGE_SOURCE_DETAIL_MS',
+          'GET',
+          `/api/v1/commercial/usage/sources/${sourceId}`,
+        );
+        const event = `USG-PERF-${randomUUID()}`,
+          eventTime = new Date().toISOString();
+        const accepted = await record('USAGE_MACHINE_ACCEPTED_INGESTION_MS', measured, () =>
+          ingest(registered.credential, { source_event_id: event, event_time: eventTime }),
+        );
+        expect(accepted.statusCode, accepted.body).toBe(200);
+        const raw = ingestResponseSchema.parse(accepted.json()).measurement;
+        await record('USAGE_MACHINE_EQUIVALENT_REPLAY_MS', measured, async () =>
+          expect(
+            (await ingest(registered.credential, { source_event_id: event, event_time: eventTime }))
+              .statusCode,
+          ).toBe(200),
+        );
+        await record('USAGE_MACHINE_SAME_BUCKET_INGESTION_MS', measured, async () =>
+          expect((await ingest(registered.credential, { event_time: eventTime })).statusCode).toBe(
+            200,
+          ),
+        );
+        await human('USAGE_MEASUREMENT_LIST_MS', 'GET', '/api/v1/commercial/usage/measurements');
+        await human(
+          'USAGE_MEASUREMENT_DETAIL_MS',
+          'GET',
+          `/api/v1/commercial/usage/measurements/${raw.id}`,
+        );
+        await human(
+          'USAGE_CORRECTION_MS',
+          'POST',
+          `/api/v1/commercial/usage/measurements/${raw.id}/corrections`,
+          {
+            reason: 'TEST_ONLY performance correction',
+            compensating_value: -1,
+            unit: raw.unit,
+            expected_version: 1,
+          },
+        );
+        const range = `from=${encodeURIComponent(new Date(Date.now() - 86_400_000).toISOString())}&until=${encodeURIComponent(new Date(Date.now() + 86_400_000).toISOString())}`;
+        await human(
+          'USAGE_HOURLY_AGGREGATE_QUERY_MS',
+          'GET',
+          `/api/v1/commercial/usage/aggregates?time_bucket=HOURLY&${range}`,
+        );
+        await human(
+          'USAGE_DAILY_AGGREGATE_QUERY_MS',
+          'GET',
+          `/api/v1/commercial/usage/aggregates?time_bucket=DAILY&${range}`,
+        );
+        await human(
+          'USAGE_SOURCE_STATE_TRANSITION_MS',
+          'POST',
+          `/api/v1/commercial/usage/sources/${sourceId}/disable`,
+          {},
+        );
+        await human(
+          'USAGE_SOURCE_STATE_TRANSITION_MS',
+          'POST',
+          `/api/v1/commercial/usage/sources/${sourceId}/reactivate`,
+          {},
+        );
+        await human(
+          'USAGE_CREDENTIAL_ROTATION_MS',
+          'POST',
+          `/api/v1/commercial/usage/sources/${sourceId}/rotate-credential`,
+          {},
+        );
+        if (measured)
+          (
+            samples.get('USAGE_REPRESENTATIVE_OPERATOR_JOURNEY_MS') ??
+            samples
+              .set('USAGE_REPRESENTATIVE_OPERATOR_JOURNEY_MS', [])
+              .get('USAGE_REPRESENTATIVE_OPERATOR_JOURNEY_MS')!
+          ).push(performance.now() - journey);
+      };
+      await run(false);
+      for (let index = 0; index < 5; index += 1) await run(true);
+      const summary = (values: number[]) => {
+        const sorted = [...values].sort((a, b) => a - b);
+        return {
+          sample_count: values.length,
+          median_ms: Number(sorted[Math.floor(sorted.length / 2)]!.toFixed(2)),
+          min_ms: Number(sorted[0]!.toFixed(2)),
+          max_ms: Number(sorted.at(-1)!.toFixed(2)),
+        };
+      };
+      process.stdout.write(
+        `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, PERFORMANCE_ENVIRONMENT: 'LOCAL_DISPOSABLE_TEST_ONLY', MACHINE_AUTH: 'PRESERVED', HUMAN_SIGNED_OIDC: 'PRESERVED', WARM_UP_COMPLETED: true, ...Object.fromEntries([...samples].map(([name, values]) => [name, summary(values)])) })}\n`,
+      );
+    }, 60_000);
+  });
+
 describe.sequential('Entitlement Registry signed OIDC acceptance matrix', () => {
   const aliceMembership = '30000000-0000-4000-8000-000000000055';
   const bobMembership = '30000000-0000-4000-8000-000000000099';

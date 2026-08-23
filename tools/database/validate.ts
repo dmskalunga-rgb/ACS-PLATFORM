@@ -118,6 +118,22 @@ const entitlementRollbackPath = resolve(
 );
 const entitlementTestPath = resolve('database/tests/rls/entitlement_registry_isolation.sql');
 const entitlementSeedPath = resolve('database/tests/fixtures/entitlement_registry_seed.sql');
+const machinePrincipalRolesPath = resolve('database/roles/machine_principal_context_roles.sql');
+const machinePrincipalMigrationPath = resolve(
+  'database/migrations/20260828010000_machine_principal_trusted_context.sql',
+);
+const machinePrincipalRollbackPath = resolve(
+  'database/rollbacks/20260828010000_machine_principal_trusted_context.sql',
+);
+const usageMeteringRolesPath = resolve('database/roles/phase2_usage_metering_roles.sql');
+const usageMeteringMigrationPath = resolve(
+  'database/migrations/20260829000000_phase2_usage_metering.sql',
+);
+const usageMeteringRollbackPath = resolve(
+  'database/rollbacks/20260829000000_phase2_usage_metering.sql',
+);
+const usageMeteringTestPath = resolve('database/tests/rls/usage_metering_isolation.sql');
+const usageMeteringSeedPath = resolve('database/tests/fixtures/usage_metering_seed.sql');
 
 const testRoles = [
   'acs_phase1_auditor_login_test',
@@ -147,6 +163,8 @@ const testRoles = [
   'acs_phase2_contract_login_test',
   'acs_phase2_subscription_login_test',
   'acs_phase2_entitlement_login_test',
+  'acs_phase2_usage_metering_login_test',
+  'acs_machine_context_issuer_login_test',
   'acs_phase2_customer_registry',
   'acs_phase2_lead_registry',
   'acs_phase2_plan_catalog',
@@ -156,6 +174,8 @@ const testRoles = [
   'acs_phase2_contract_registry',
   'acs_phase2_subscription_registry',
   'acs_phase2_entitlement_registry',
+  'acs_phase2_usage_metering',
+  'acs_machine_context_issuer',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -179,6 +199,7 @@ try {
       "SELECT to_regclass('commercial.subscriptions') AS relation",
     );
     if (subscriptionRegistryExists.rows[0]?.relation !== null) {
+      await client.query(await readFile(usageMeteringRollbackPath, 'utf8'));
       await client.query(await readFile(entitlementRollbackPath, 'utf8'));
       await client.query(await readFile(subscriptionRollbackPath, 'utf8'));
     }
@@ -196,6 +217,12 @@ try {
     await client.query(await readFile(eventRollbackPath, 'utf8'));
   }
   const tenantAdminExists = await client.query("SELECT to_regclass('platform.roles') AS relation");
+  const machinePrincipalExists = await client.query(
+    "SELECT to_regclass('platform.machine_principals') AS relation",
+  );
+  if (machinePrincipalExists.rows[0]?.relation !== null) {
+    await client.query(await readFile(machinePrincipalRollbackPath, 'utf8'));
+  }
   if (tenantAdminExists.rows[0]?.relation !== null) {
     await client.query(await readFile(tenantAdminRollbackPath, 'utf8'));
   }
@@ -204,6 +231,8 @@ try {
   await client.query(await readFile(migrationPath, 'utf8'));
   await client.query(await readFile(phase1RolesPath, 'utf8'));
   await client.query(await readFile(phase1MigrationPath, 'utf8'));
+  await client.query(await readFile(machinePrincipalRolesPath, 'utf8'));
+  await client.query(await readFile(machinePrincipalMigrationPath, 'utf8'));
   await client.query(await readFile(tenantAdminMigrationPath, 'utf8'));
   await client.query(await readFile(eventRolesPath, 'utf8'));
   await client.query(await readFile(eventMigrationPath, 'utf8'));
@@ -225,6 +254,8 @@ try {
   await client.query(await readFile(subscriptionMigrationPath, 'utf8'));
   await client.query(await readFile(entitlementRolesPath, 'utf8'));
   await client.query(await readFile(entitlementMigrationPath, 'utf8'));
+  await client.query(await readFile(usageMeteringRolesPath, 'utf8'));
+  await client.query(await readFile(usageMeteringMigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
   );
@@ -266,10 +297,23 @@ try {
   await client.query(await readFile(subscriptionTestPath, 'utf8'));
   await client.query(await readFile(entitlementSeedPath, 'utf8'));
   await client.query(await readFile(entitlementTestPath, 'utf8'));
+  await client.query(await readFile(usageMeteringSeedPath, 'utf8'));
+  await client.query(await readFile(usageMeteringTestPath, 'utf8'));
+  await client.query(await readFile(usageMeteringRollbackPath, 'utf8'));
+  await client.query(await readFile(machinePrincipalRollbackPath, 'utf8'));
+  await client.query(await readFile(machinePrincipalMigrationPath, 'utf8'));
+  await client.query(await readFile(usageMeteringMigrationPath, 'utf8'));
+  await client.query(await readFile(usageMeteringSeedPath, 'utf8'));
+  await client.query(await readFile(usageMeteringTestPath, 'utf8'));
+  await client.query(await readFile(usageMeteringRollbackPath, 'utf8'));
   await client.query(await readFile(entitlementRollbackPath, 'utf8'));
   await client.query(await readFile(entitlementMigrationPath, 'utf8'));
   await client.query(await readFile(entitlementSeedPath, 'utf8'));
   await client.query(await readFile(entitlementTestPath, 'utf8'));
+  await client.query(await readFile(usageMeteringMigrationPath, 'utf8'));
+  await client.query(await readFile(usageMeteringSeedPath, 'utf8'));
+  await client.query(await readFile(usageMeteringTestPath, 'utf8'));
+  await client.query(await readFile(usageMeteringRollbackPath, 'utf8'));
   await client.query(await readFile(entitlementRollbackPath, 'utf8'));
   await client.query(await readFile(subscriptionRollbackPath, 'utf8'));
   await client.query(await readFile(subscriptionMigrationPath, 'utf8'));
@@ -376,6 +420,11 @@ try {
   await client.query(await readFile(entitlementMigrationPath, 'utf8'));
   await client.query(await readFile(entitlementSeedPath, 'utf8'));
   await client.query(await readFile(entitlementTestPath, 'utf8'));
+  // Usage/Metering is the terminal Phase 2 foundation dependency. Restore it
+  // only after the Subscription/Entitlement rollback-reapply proofs complete.
+  await client.query(await readFile(usageMeteringMigrationPath, 'utf8'));
+  await client.query(await readFile(usageMeteringSeedPath, 'utf8'));
+  await client.query(await readFile(usageMeteringTestPath, 'utf8'));
   const durableDenials = await client.query(
     "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
   );
@@ -417,9 +466,13 @@ try {
     GRANT acs_phase2_subscription_registry TO acs_phase2_subscription_login_test;
     CREATE ROLE acs_phase2_entitlement_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
     GRANT acs_phase2_entitlement_registry TO acs_phase2_entitlement_login_test;
+    CREATE ROLE acs_phase2_usage_metering_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
+    GRANT acs_phase2_usage_metering TO acs_phase2_usage_metering_login_test;
+    CREATE ROLE acs_machine_context_issuer_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
+    GRANT acs_machine_context_issuer TO acs_machine_context_issuer_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', machine_trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED', usage_metering_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();
