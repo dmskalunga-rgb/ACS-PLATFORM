@@ -59,6 +59,7 @@ jobs:
       ACS_PROPOSAL_DATABASE_URL: postgresql://acs_phase2_proposal_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
       ACS_CONTRACT_DATABASE_URL: postgresql://acs_phase2_contract_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
       ACS_SUBSCRIPTION_DATABASE_URL: postgresql://acs_phase2_subscription_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_ENTITLEMENT_DATABASE_URL: postgresql://acs_phase2_entitlement_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
       ACS_EVENT_PUBLISHER_DATABASE_URL: postgresql://acs_event_publisher_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_EVENT_CONSUMER_DATABASE_URL: postgresql://acs_event_consumer_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
       ACS_EVENT_OPERATOR_DATABASE_URL: postgresql://acs_event_operator_login_test:acs_phase1_test_only@localhost:5432/acs_foundation

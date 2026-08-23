@@ -23,6 +23,7 @@
     "test:opportunity-registry:e2e": "pnpm --filter @acs/platform-api test:opportunity-registry:e2e",
     "test:contract:e2e": "pnpm --filter @acs/platform-api test:contract:e2e",
     "test:subscription:e2e": "pnpm --filter @acs/platform-api test:subscription:e2e",
+    "test:entitlement:e2e": "pnpm --filter @acs/platform-api test:entitlement:e2e",
     "dev": "turbo run dev --parallel",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

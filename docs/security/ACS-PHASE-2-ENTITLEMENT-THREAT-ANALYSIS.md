@@ -1,6 +1,6 @@
 # ACS Phase 2 — Entitlement Threat Analysis
 
-Status: `DOR_DEFINED`; implementation is `NOT_STARTED`.
+Status: `LOCAL_IMPLEMENTATION_EVIDENCED`; implementation remains pending independent publication and integration review.
 
 | Threat                                   | Required control                                                                                                    | Required proof                     |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |

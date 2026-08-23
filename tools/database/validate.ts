@@ -109,6 +109,15 @@ const subscriptionRollbackPath = resolve(
 );
 const subscriptionTestPath = resolve('database/tests/rls/subscription_registry_isolation.sql');
 const subscriptionSeedPath = resolve('database/tests/fixtures/subscription_registry_seed.sql');
+const entitlementRolesPath = resolve('database/roles/phase2_entitlement_roles.sql');
+const entitlementMigrationPath = resolve(
+  'database/migrations/20260828000000_phase2_entitlement_registry.sql',
+);
+const entitlementRollbackPath = resolve(
+  'database/rollbacks/20260828000000_phase2_entitlement_registry.sql',
+);
+const entitlementTestPath = resolve('database/tests/rls/entitlement_registry_isolation.sql');
+const entitlementSeedPath = resolve('database/tests/fixtures/entitlement_registry_seed.sql');
 
 const testRoles = [
   'acs_phase1_auditor_login_test',
@@ -137,6 +146,7 @@ const testRoles = [
   'acs_phase2_proposal_login_test',
   'acs_phase2_contract_login_test',
   'acs_phase2_subscription_login_test',
+  'acs_phase2_entitlement_login_test',
   'acs_phase2_customer_registry',
   'acs_phase2_lead_registry',
   'acs_phase2_plan_catalog',
@@ -145,6 +155,7 @@ const testRoles = [
   'acs_phase2_proposal_registry',
   'acs_phase2_contract_registry',
   'acs_phase2_subscription_registry',
+  'acs_phase2_entitlement_registry',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -168,6 +179,7 @@ try {
       "SELECT to_regclass('commercial.subscriptions') AS relation",
     );
     if (subscriptionRegistryExists.rows[0]?.relation !== null) {
+      await client.query(await readFile(entitlementRollbackPath, 'utf8'));
       await client.query(await readFile(subscriptionRollbackPath, 'utf8'));
     }
     await client.query(await readFile(contractRollbackPath, 'utf8'));
@@ -211,6 +223,8 @@ try {
   await client.query(await readFile(contractMigrationPath, 'utf8'));
   await client.query(await readFile(subscriptionRolesPath, 'utf8'));
   await client.query(await readFile(subscriptionMigrationPath, 'utf8'));
+  await client.query(await readFile(entitlementRolesPath, 'utf8'));
+  await client.query(await readFile(entitlementMigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
   );
@@ -250,10 +264,23 @@ try {
   await client.query(await readFile(contractTestPath, 'utf8'));
   await client.query(await readFile(subscriptionSeedPath, 'utf8'));
   await client.query(await readFile(subscriptionTestPath, 'utf8'));
+  await client.query(await readFile(entitlementSeedPath, 'utf8'));
+  await client.query(await readFile(entitlementTestPath, 'utf8'));
+  await client.query(await readFile(entitlementRollbackPath, 'utf8'));
+  await client.query(await readFile(entitlementMigrationPath, 'utf8'));
+  await client.query(await readFile(entitlementSeedPath, 'utf8'));
+  await client.query(await readFile(entitlementTestPath, 'utf8'));
+  await client.query(await readFile(entitlementRollbackPath, 'utf8'));
   await client.query(await readFile(subscriptionRollbackPath, 'utf8'));
   await client.query(await readFile(subscriptionMigrationPath, 'utf8'));
   await client.query(await readFile(subscriptionSeedPath, 'utf8'));
   await client.query(await readFile(subscriptionTestPath, 'utf8'));
+  // Entitlement depends on the restored ACTIVE Subscription fixture and is
+  // deliberately seeded last so signed-OIDC E2E has its canonical grants.
+  await client.query(await readFile(entitlementMigrationPath, 'utf8'));
+  await client.query(await readFile(entitlementSeedPath, 'utf8'));
+  await client.query(await readFile(entitlementTestPath, 'utf8'));
+  await client.query(await readFile(entitlementRollbackPath, 'utf8'));
   await client.query(await readFile(subscriptionRollbackPath, 'utf8'));
   await client.query(await readFile(contractRollbackPath, 'utf8'));
   await client.query(await readFile(contractMigrationPath, 'utf8'));
@@ -344,6 +371,11 @@ try {
   await client.query(await readFile(subscriptionMigrationPath, 'utf8'));
   await client.query(await readFile(subscriptionSeedPath, 'utf8'));
   await client.query(await readFile(subscriptionTestPath, 'utf8'));
+  // Keep Entitlement available for its signed-OIDC API E2E after the final
+  // dependency restoration and re-seed only its fixture-scoped permissions.
+  await client.query(await readFile(entitlementMigrationPath, 'utf8'));
+  await client.query(await readFile(entitlementSeedPath, 'utf8'));
+  await client.query(await readFile(entitlementTestPath, 'utf8'));
   const durableDenials = await client.query(
     "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
   );
@@ -383,9 +415,11 @@ try {
     GRANT acs_phase2_contract_registry TO acs_phase2_contract_login_test;
     CREATE ROLE acs_phase2_subscription_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
     GRANT acs_phase2_subscription_registry TO acs_phase2_subscription_login_test;
+    CREATE ROLE acs_phase2_entitlement_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
+    GRANT acs_phase2_entitlement_registry TO acs_phase2_entitlement_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();

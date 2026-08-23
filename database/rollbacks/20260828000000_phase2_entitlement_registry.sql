@@ -1,0 +1,14 @@
+BEGIN;
+DELETE FROM platform.tenant_context_grants WHERE permission_key LIKE 'commercial.entitlement.%';
+DELETE FROM platform.role_permissions WHERE permission_key LIKE 'commercial.entitlement.%';
+DELETE FROM platform.membership_permissions WHERE permission_key LIKE 'commercial.entitlement.%';
+DROP POLICY IF EXISTS domain_events_entitlement_insert ON platform.domain_events;
+DROP POLICY IF EXISTS audit_logs_entitlement_insert ON platform.audit_logs;
+DROP POLICY IF EXISTS entitlement_memberships_read ON platform.memberships;
+DROP POLICY IF EXISTS entitlement_subscription_origins_read ON commercial.subscription_plan_origins;
+DROP POLICY IF EXISTS entitlement_subscriptions_read ON commercial.subscriptions;
+DROP TABLE IF EXISTS commercial.entitlement_operations;
+DROP TABLE IF EXISTS commercial.entitlement_history;
+DROP TABLE IF EXISTS commercial.entitlements;
+DELETE FROM platform.permissions WHERE permission_key LIKE 'commercial.entitlement.%';
+COMMIT;
