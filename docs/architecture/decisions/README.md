@@ -29,3 +29,4 @@ the decision becomes repository policy only after controlled review and merge.
 | ADR-0022 | Tenant-scoped Commercial Subscription (`PROPOSED`)         |
 | ADR-0023 | Tenant-scoped Commercial Entitlement (`PROPOSED`)          |
 | ADR-0024 | Tenant-scoped Usage / Metering (`PROPOSED`)                |
+| ADR-0025 | Tenant-scoped Commercial Rating (`PROPOSED`)               |
