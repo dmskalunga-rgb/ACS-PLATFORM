@@ -33,6 +33,14 @@ import {
   proposalListEnvelopeSchema,
   proposalTransitionSchema,
   proposalUpdateSchema,
+  contractAssignSchema,
+  contractCreateSchema,
+  contractEnvelopeSchema,
+  contractLineCreateSchema,
+  contractLineUpdateSchema,
+  contractListEnvelopeSchema,
+  contractTransitionSchema,
+  contractUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -75,6 +83,7 @@ import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
 import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.js';
 import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-registry.js';
 import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
+import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -91,6 +100,15 @@ import {
   PROPOSAL_REVISE,
   PROPOSAL_SEND,
 } from './proposal-registry.js';
+import {
+  CONTRACT_ACTIVATE,
+  CONTRACT_APPROVE,
+  CONTRACT_CANCEL,
+  CONTRACT_REVISE,
+  CONTRACT_TERMINATE,
+  ContractRegistryFailure,
+  ContractRegistryService,
+} from './contract-registry.js';
 import {
   TenantAdministrationFailure,
   TenantAdministrationService,
@@ -116,6 +134,7 @@ export async function buildApp(
     readonly partnerRegistryService?: PartnerRegistryService;
     readonly opportunityRegistryService?: OpportunityRegistryService;
     readonly proposalRegistryService?: ProposalRegistryService;
+    readonly contractRegistryService?: ContractRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -146,6 +165,8 @@ export async function buildApp(
   let opportunityRegistryService = options.opportunityRegistryService;
   let proposalRepository: PostgresProposalRegistryRepository | undefined;
   let proposalRegistryService = options.proposalRegistryService;
+  let contractRepository: PostgresContractRegistryRepository | undefined;
+  let contractRegistryService = options.contractRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -256,6 +277,18 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.contractDatabaseUrl !== undefined) {
+      contractRepository = new PostgresContractRegistryRepository(
+        configuration.contractDatabaseUrl,
+      );
+      contractRegistryService = new ContractRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        contractRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -269,6 +302,7 @@ export async function buildApp(
         partnerRepository?.close(),
         opportunityRepository?.close(),
         proposalRepository?.close(),
+        contractRepository?.close(),
       ]);
     });
   }
@@ -2090,6 +2124,248 @@ export async function buildApp(
           t,
           id,
           k,
+          transition,
+          action,
+          v,
+          metadata(request),
+        ),
+      ),
+    );
+
+  const contractFailure = (
+    error: ContractRegistryFailure,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) =>
+    reply
+      .status(
+        error.code === 'UNAUTHENTICATED'
+          ? 401
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : ['DUPLICATE_CONTRACT', 'STALE_VERSION', 'IDEMPOTENCY_CONFLICT'].includes(error.code)
+              ? 409
+              : [
+                    'INVALID_REFERENCE',
+                    'INVALID_TRANSITION',
+                    'TERMINAL_CONTRACT',
+                    'INVALID_VALUE',
+                  ].includes(error.code)
+                ? 400
+                : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: error.code,
+            message: error.message,
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+  const contractUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'CONTRACT_REGISTRY_NOT_CONFIGURED',
+          message: 'Contract Registry dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const contractTenant = (request: FastifyRequest) =>
+    z.uuid().safeParse(request.headers['x-acs-tenant-id']);
+  const contractKey = (request: FastifyRequest) =>
+    typeof request.headers['idempotency-key'] === 'string' &&
+    uuidSchema.safeParse(request.headers['idempotency-key']).success
+      ? request.headers['idempotency-key']
+      : null;
+  const contractId = (request: FastifyRequest) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).contractId
+        : undefined,
+    );
+  const contractLineId = (request: FastifyRequest) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).lineId
+        : undefined,
+    );
+  const invalidContract = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Valid tenant, identifiers, request body and idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const contractRoute = async <T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    schema: ZodType<T>,
+    call: (
+      service: ContractRegistryService,
+      tenant: string,
+      id: string,
+      key: string,
+      value: T,
+      lineId?: string,
+    ) => Promise<unknown>,
+    line = false,
+  ) => {
+    if (!contractRegistryService) return contractUnavailable(request, reply);
+    const tenant = contractTenant(request),
+      id = contractId(request),
+      key = contractKey(request),
+      body = schema.safeParse(request.body),
+      parsedLine = line ? contractLineId(request) : undefined;
+    if (
+      !tenant.success ||
+      !id.success ||
+      !key ||
+      !body.success ||
+      (parsedLine && !parsedLine.success)
+    )
+      return invalidContract(request, reply);
+    try {
+      return contractEnvelopeSchema.parse(
+        await call(
+          contractRegistryService,
+          tenant.data,
+          id.data,
+          key,
+          body.data,
+          parsedLine?.success ? parsedLine.data : undefined,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ContractRegistryFailure) return contractFailure(error, request, reply);
+      throw error;
+    }
+  };
+  app.post('/api/v1/commercial/contracts', async (request, reply) => {
+    if (!contractRegistryService) return contractUnavailable(request, reply);
+    const tenant = contractTenant(request),
+      key = contractKey(request),
+      body = contractCreateSchema.safeParse(request.body);
+    if (!tenant.success || !key || !body.success) return invalidContract(request, reply);
+    try {
+      return contractEnvelopeSchema.parse(
+        await contractRegistryService.create(
+          request.headers.authorization,
+          tenant.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ContractRegistryFailure) return contractFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/contracts', async (request, reply) => {
+    if (!contractRegistryService) return contractUnavailable(request, reply);
+    const tenant = contractTenant(request),
+      query = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          cursor: z.uuid().optional(),
+        })
+        .strict()
+        .safeParse(request.query);
+    if (!tenant.success || !query.success) return invalidContract(request, reply);
+    try {
+      return contractListEnvelopeSchema.parse(
+        await contractRegistryService.list(
+          request.headers.authorization,
+          tenant.data,
+          query.data.limit,
+          query.data.cursor,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ContractRegistryFailure) return contractFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/contracts/:contractId', async (request, reply) => {
+    if (!contractRegistryService) return contractUnavailable(request, reply);
+    const tenant = contractTenant(request),
+      id = contractId(request);
+    if (!tenant.success || !id.success) return invalidContract(request, reply);
+    try {
+      return contractEnvelopeSchema.parse(
+        await contractRegistryService.get(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ContractRegistryFailure) return contractFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.patch('/api/v1/commercial/contracts/:contractId', async (request, reply) =>
+    contractRoute(request, reply, contractUpdateSchema, (s, t, id, key, v) =>
+      s.update(request.headers.authorization, t, id, key, v, metadata(request)),
+    ),
+  );
+  app.post('/api/v1/commercial/contracts/:contractId/assign', async (request, reply) =>
+    contractRoute(request, reply, contractAssignSchema, (s, t, id, key, v) =>
+      s.assign(request.headers.authorization, t, id, key, v, metadata(request)),
+    ),
+  );
+  app.post('/api/v1/commercial/contracts/:contractId/lines', async (request, reply) =>
+    contractRoute(request, reply, contractLineCreateSchema, (s, t, id, key, v) =>
+      s.line(request.headers.authorization, t, id, undefined, key, 'create', v, metadata(request)),
+    ),
+  );
+  app.patch('/api/v1/commercial/contracts/:contractId/lines/:lineId', async (request, reply) =>
+    contractRoute(
+      request,
+      reply,
+      contractLineUpdateSchema,
+      (s, t, id, key, v, lineId) =>
+        s.line(request.headers.authorization, t, id, lineId, key, 'update', v, metadata(request)),
+      true,
+    ),
+  );
+  app.delete('/api/v1/commercial/contracts/:contractId/lines/:lineId', async (request, reply) =>
+    contractRoute(
+      request,
+      reply,
+      contractTransitionSchema,
+      (s, t, id, key, v, lineId) =>
+        s.line(request.headers.authorization, t, id, lineId, key, 'delete', v, metadata(request)),
+      true,
+    ),
+  );
+  for (const [path, transition, action] of [
+    ['submit', 'submit', 'commercial.contract.update'],
+    ['return-to-draft', 'return-to-draft', CONTRACT_APPROVE],
+    ['approve', 'approve', CONTRACT_APPROVE],
+    ['revise', 'revise', CONTRACT_REVISE],
+    ['activate', 'activate', CONTRACT_ACTIVATE],
+    ['cancel', 'cancel', CONTRACT_CANCEL],
+    ['terminate', 'terminate', CONTRACT_TERMINATE],
+  ] as const)
+    app.post(`/api/v1/commercial/contracts/:contractId/${path}`, async (request, reply) =>
+      contractRoute(request, reply, contractTransitionSchema, (s, t, id, key, v) =>
+        s.transition(
+          request.headers.authorization,
+          t,
+          id,
+          key,
           transition,
           action,
           v,

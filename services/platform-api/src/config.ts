@@ -26,6 +26,7 @@ const configurationSchema = z.object({
   ACS_PARTNER_DATABASE_URL: z.url().optional(),
   ACS_OPPORTUNITY_DATABASE_URL: z.url().optional(),
   ACS_PROPOSAL_DATABASE_URL: z.url().optional(),
+  ACS_CONTRACT_DATABASE_URL: z.url().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -48,6 +49,7 @@ export interface PlatformConfiguration {
   readonly partnerDatabaseUrl?: string;
   readonly opportunityDatabaseUrl?: string;
   readonly proposalDatabaseUrl?: string;
+  readonly contractDatabaseUrl?: string;
   readonly webOrigin: string;
 }
 
@@ -152,6 +154,9 @@ export function loadConfiguration(
     ...(parsed.ACS_PROPOSAL_DATABASE_URL === undefined
       ? {}
       : { proposalDatabaseUrl: parsed.ACS_PROPOSAL_DATABASE_URL }),
+    ...(parsed.ACS_CONTRACT_DATABASE_URL === undefined
+      ? {}
+      : { contractDatabaseUrl: parsed.ACS_CONTRACT_DATABASE_URL }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

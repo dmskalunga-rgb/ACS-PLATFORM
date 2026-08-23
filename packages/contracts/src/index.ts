@@ -8,3 +8,4 @@ export * from './plan-catalog.js';
 export * from './partner-registry.js';
 export * from './opportunity-registry.js';
 export * from './proposal-registry.js';
+export * from './contract-registry.js';
