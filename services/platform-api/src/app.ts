@@ -41,6 +41,13 @@ import {
   contractListEnvelopeSchema,
   contractTransitionSchema,
   contractUpdateSchema,
+  subscriptionAssignSchema,
+  subscriptionCreateSchema,
+  subscriptionEnvelopeSchema,
+  subscriptionListEnvelopeSchema,
+  subscriptionRenewSchema,
+  subscriptionTransitionSchema,
+  subscriptionUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -84,6 +91,7 @@ import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.j
 import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-registry.js';
 import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
 import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
+import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -110,6 +118,16 @@ import {
   ContractRegistryService,
 } from './contract-registry.js';
 import {
+  SUBSCRIPTION_ACTIVATE,
+  SUBSCRIPTION_CANCEL,
+  SUBSCRIPTION_REQUEST_ACTIVATION,
+  SUBSCRIPTION_RESUME,
+  SUBSCRIPTION_SUSPEND,
+  SUBSCRIPTION_TERMINATE,
+  SubscriptionRegistryFailure,
+  SubscriptionRegistryService,
+} from './subscription-registry.js';
+import {
   TenantAdministrationFailure,
   TenantAdministrationService,
 } from './tenant-administration.js';
@@ -135,6 +153,7 @@ export async function buildApp(
     readonly opportunityRegistryService?: OpportunityRegistryService;
     readonly proposalRegistryService?: ProposalRegistryService;
     readonly contractRegistryService?: ContractRegistryService;
+    readonly subscriptionRegistryService?: SubscriptionRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -167,6 +186,8 @@ export async function buildApp(
   let proposalRegistryService = options.proposalRegistryService;
   let contractRepository: PostgresContractRegistryRepository | undefined;
   let contractRegistryService = options.contractRegistryService;
+  let subscriptionRepository: PostgresSubscriptionRegistryRepository | undefined;
+  let subscriptionRegistryService = options.subscriptionRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -289,6 +310,18 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.subscriptionDatabaseUrl !== undefined) {
+      subscriptionRepository = new PostgresSubscriptionRegistryRepository(
+        configuration.subscriptionDatabaseUrl,
+      );
+      subscriptionRegistryService = new SubscriptionRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        subscriptionRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -303,6 +336,7 @@ export async function buildApp(
         opportunityRepository?.close(),
         proposalRepository?.close(),
         contractRepository?.close(),
+        subscriptionRepository?.close(),
       ]);
     });
   }
@@ -2373,6 +2407,215 @@ export async function buildApp(
         ),
       ),
     );
+
+  const subscriptionFailure = (
+    error: SubscriptionRegistryFailure,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) =>
+    reply
+      .status(
+        error.code === 'UNAUTHENTICATED'
+          ? 401
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : ['DUPLICATE_SUBSCRIPTION', 'STALE_VERSION', 'IDEMPOTENCY_CONFLICT'].includes(
+                  error.code,
+                )
+              ? 409
+              : [
+                    'INVALID_REFERENCE',
+                    'INVALID_TRANSITION',
+                    'TERMINAL_SUBSCRIPTION',
+                    'INVALID_VALUE',
+                  ].includes(error.code)
+                ? 400
+                : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: error.code,
+            message: error.message,
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+  const subscriptionUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'SUBSCRIPTION_REGISTRY_NOT_CONFIGURED',
+          message: 'Subscription Registry dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const subscriptionTenant = (request: FastifyRequest) =>
+    z.uuid().safeParse(request.headers['x-acs-tenant-id']);
+  const subscriptionKey = (request: FastifyRequest) =>
+    typeof request.headers['idempotency-key'] === 'string' &&
+    uuidSchema.safeParse(request.headers['idempotency-key']).success
+      ? request.headers['idempotency-key']
+      : null;
+  const subscriptionId = (request: FastifyRequest) =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>).subscriptionId
+        : undefined,
+    );
+  const invalidSubscription = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Valid tenant, identifiers, request body and idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const subscriptionRoute = async <T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    schema: ZodType<T>,
+    call: (
+      service: SubscriptionRegistryService,
+      tenant: string,
+      id: string,
+      key: string,
+      value: T,
+    ) => Promise<unknown>,
+  ) => {
+    if (!subscriptionRegistryService) return subscriptionUnavailable(request, reply);
+    const tenant = subscriptionTenant(request);
+    const id = subscriptionId(request);
+    const key = subscriptionKey(request);
+    const body = schema.safeParse(request.body);
+    if (!tenant.success || !id.success || !key || !body.success)
+      return invalidSubscription(request, reply);
+    try {
+      return subscriptionEnvelopeSchema.parse(
+        await call(subscriptionRegistryService, tenant.data, id.data, key, body.data),
+      );
+    } catch (error) {
+      if (error instanceof SubscriptionRegistryFailure)
+        return subscriptionFailure(error, request, reply);
+      throw error;
+    }
+  };
+  app.post('/api/v1/commercial/subscriptions', async (request, reply) => {
+    if (!subscriptionRegistryService) return subscriptionUnavailable(request, reply);
+    const tenant = subscriptionTenant(request);
+    const key = subscriptionKey(request);
+    const body = subscriptionCreateSchema.safeParse(request.body);
+    if (!tenant.success || !key || !body.success) return invalidSubscription(request, reply);
+    try {
+      return subscriptionEnvelopeSchema.parse(
+        await subscriptionRegistryService.create(
+          request.headers.authorization,
+          tenant.data,
+          key,
+          body.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof SubscriptionRegistryFailure)
+        return subscriptionFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/subscriptions', async (request, reply) => {
+    if (!subscriptionRegistryService) return subscriptionUnavailable(request, reply);
+    const tenant = subscriptionTenant(request);
+    const query = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(100).default(25),
+        cursor: z.uuid().optional(),
+      })
+      .strict()
+      .safeParse(request.query);
+    if (!tenant.success || !query.success) return invalidSubscription(request, reply);
+    try {
+      return subscriptionListEnvelopeSchema.parse(
+        await subscriptionRegistryService.list(
+          request.headers.authorization,
+          tenant.data,
+          query.data.limit,
+          query.data.cursor,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof SubscriptionRegistryFailure)
+        return subscriptionFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/subscriptions/:subscriptionId', async (request, reply) => {
+    if (!subscriptionRegistryService) return subscriptionUnavailable(request, reply);
+    const tenant = subscriptionTenant(request);
+    const id = subscriptionId(request);
+    if (!tenant.success || !id.success) return invalidSubscription(request, reply);
+    try {
+      return subscriptionEnvelopeSchema.parse(
+        await subscriptionRegistryService.get(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof SubscriptionRegistryFailure)
+        return subscriptionFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.patch('/api/v1/commercial/subscriptions/:subscriptionId', async (request, reply) =>
+    subscriptionRoute(request, reply, subscriptionUpdateSchema, (service, tenant, id, key, value) =>
+      service.update(request.headers.authorization, tenant, id, key, value, metadata(request)),
+    ),
+  );
+  app.post('/api/v1/commercial/subscriptions/:subscriptionId/assign', async (request, reply) =>
+    subscriptionRoute(request, reply, subscriptionAssignSchema, (service, tenant, id, key, value) =>
+      service.assign(request.headers.authorization, tenant, id, key, value, metadata(request)),
+    ),
+  );
+  for (const [path, transition, action] of [
+    ['request-activation', 'request-activation', SUBSCRIPTION_REQUEST_ACTIVATION],
+    ['activate', 'activate', SUBSCRIPTION_ACTIVATE],
+    ['suspend', 'suspend', SUBSCRIPTION_SUSPEND],
+    ['resume', 'resume', SUBSCRIPTION_RESUME],
+    ['cancel', 'cancel', SUBSCRIPTION_CANCEL],
+    ['terminate', 'terminate', SUBSCRIPTION_TERMINATE],
+  ] as const)
+    app.post(`/api/v1/commercial/subscriptions/:subscriptionId/${path}`, async (request, reply) =>
+      subscriptionRoute(
+        request,
+        reply,
+        subscriptionTransitionSchema,
+        (service, tenant, id, key, value) =>
+          service.transition(
+            request.headers.authorization,
+            tenant,
+            id,
+            key,
+            transition,
+            action,
+            value,
+            metadata(request),
+          ),
+      ),
+    );
+  app.post('/api/v1/commercial/subscriptions/:subscriptionId/renew', async (request, reply) =>
+    subscriptionRoute(request, reply, subscriptionRenewSchema, (service, tenant, id, key, value) =>
+      service.renew(request.headers.authorization, tenant, id, key, value, metadata(request)),
+    ),
+  );
 
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({

@@ -1,8 +1,8 @@
 # ACS Phase 2 — Subscription Traceability Matrix
 
-**Status:** `DOR_DEFINED_NOT_IMPLEMENTED`
+**Status:** `LOCAL_IMPLEMENTATION_EVIDENCED`
 **ADR:** ADR-0022 (`PROPOSED`)
-**Implementation / PR / merge:** `NOT_AUTHORIZED`
+**Implementation:** `LOCAL_IMPLEMENTATION_EVIDENCED`; **PR / merge:** `NOT_AUTHORIZED`
 
 | Trace ID   | Baseline / governing source                                                   | Deterministic Subscription decision                                                                                      | Required future evidence              | Status          |
 | ---------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | --------------- |
@@ -26,4 +26,4 @@ The authoritative deterministic cases are defined in the DoR:
 - `SUB-POS-001` through `SUB-POS-012`;
 - `SUB-NEG-001` through `SUB-NEG-022`.
 
-No case is implementation evidence until it is executed against the eventual Subscription implementation and recorded with the validated commit SHA.
+Local execution evidence is recorded in `docs/evidence/phase-2/SUBSCRIPTION-REGISTRY-EVIDENCE.md`. Publication, PR evidence and validated commit SHA remain pending.
