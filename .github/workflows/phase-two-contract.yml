@@ -72,7 +72,7 @@ jobs:
       - run: pnpm db:validate
       - run: pnpm --filter @acs/platform-api... build
       - run: pnpm test:contract:e2e
-      - run: pnpm test:proposal-registry:e2e
+      - run: pnpm --filter @acs/platform-api test:proposal:e2e
       - run: pnpm test:opportunity-registry:e2e
       - run: pnpm test:partner-registry:e2e
       - run: pnpm test:plan-catalog:e2e
