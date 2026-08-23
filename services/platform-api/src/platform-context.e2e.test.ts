@@ -19,8 +19,11 @@ import {
   contractListEnvelopeSchema,
   subscriptionEnvelopeSchema,
   subscriptionListEnvelopeSchema,
+  entitlementEnvelopeSchema,
+  entitlementListEnvelopeSchema,
   type Contract,
   type Subscription,
+  type Entitlement,
   type Proposal,
   type Opportunity,
   type Partner,
@@ -34,6 +37,7 @@ import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-re
 import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
 import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
 import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
+import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
 import { PostgresTenantContextRepository } from './postgres-platform-context.js';
 import type { PlatformConfiguration } from './config.js';
 
@@ -54,10 +58,11 @@ const requiredEnvironment = {
   proposal: process.env.ACS_PROPOSAL_DATABASE_URL,
   contract: process.env.ACS_CONTRACT_DATABASE_URL,
   subscription: process.env.ACS_SUBSCRIPTION_DATABASE_URL,
+  entitlement: process.env.ACS_ENTITLEMENT_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment).filter(
-  ([name]) => name !== 'subscription',
+  ([name]) => !['subscription', 'entitlement'].includes(name),
 )) {
   if (value === undefined || value === '') throw new Error(`${name} E2E database URL is required.`);
 }
@@ -68,6 +73,7 @@ const contractDatabaseUrl = requiredEnvironment.contract;
 if (contractDatabaseUrl === undefined || contractDatabaseUrl === '')
   throw new Error('contract E2E database URL is required.');
 const subscriptionDatabaseUrl = requiredEnvironment.subscription ?? '';
+const entitlementDatabaseUrl = requiredEnvironment.entitlement ?? '';
 
 const configuration: PlatformConfiguration = {
   environment: 'test',
@@ -89,6 +95,7 @@ const configuration: PlatformConfiguration = {
     : { proposalDatabaseUrl: process.env.ACS_PROPOSAL_DATABASE_URL }),
   contractDatabaseUrl,
   ...(subscriptionDatabaseUrl === '' ? {} : { subscriptionDatabaseUrl }),
+  ...(entitlementDatabaseUrl === '' ? {} : { entitlementDatabaseUrl }),
   webOrigin: 'http://localhost:5173',
 };
 
@@ -145,6 +152,1024 @@ beforeAll(async () => {
     .setIssuedAt()
     .setExpirationTime('5m')
     .sign(keys.privateKey);
+});
+describe.sequential('Entitlement Registry signed OIDC acceptance matrix', () => {
+  const aliceMembership = '30000000-0000-4000-8000-000000000055';
+  const bobMembership = '30000000-0000-4000-8000-000000000099';
+  const bobUser = '50000000-0000-4000-8000-000000000055';
+  let aliceToken: string;
+  let bobToken: string;
+  let charlieToken: string;
+  let primary: Entitlement;
+  let created: Entitlement;
+  const headers = (key = randomUUID(), token = aliceToken, tenant = tenantA) => ({
+    authorization: `Bearer ${token}`,
+    'x-acs-tenant-id': tenant,
+    'idempotency-key': key,
+  });
+
+  const transition = async (value: Entitlement, action: string, token = aliceToken) => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/entitlements/${value.id}/${action}`,
+      headers: headers(randomUUID(), token),
+      payload: { expected_version: value.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return entitlementEnvelopeSchema.parse(response.json()).data;
+  };
+
+  const activeSubscriptionSource = async () => {
+    const suffix = randomUUID().slice(0, 12);
+    const reference = await admin.query<{
+      opportunity_id: string;
+      plan_id: string;
+      customer_id: string;
+    }>(
+      `SELECT o.id AS opportunity_id,p.id AS plan_id,c.id AS customer_id
+       FROM commercial.opportunities o
+       JOIN commercial.plans p ON p.tenant_id=o.tenant_id
+       JOIN commercial.customers c ON c.tenant_id=o.tenant_id
+       WHERE o.tenant_id=$1 ORDER BY o.id,p.id,c.id LIMIT 1`,
+      [tenantA],
+    );
+    if (!reference.rows[0]) throw new Error('Entitlement source references are unavailable.');
+    const source = reference.rows[0];
+    const proposal = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.proposals(tenant_id,proposal_code,title,opportunity_id,customer_id,owner_membership_id,created_by_membership_id,currency_code,status,valid_until,proposal_subtotal,grand_total,approved_by_membership_id,approved_at,created_by,updated_by)
+       VALUES($1,$2,'Entitlement source',$3,$4,$5,$5,'USD','ACCEPTED',clock_timestamp()+interval '60 days',25,25,$5,clock_timestamp(),$6,$6) RETURNING id`,
+      [
+        tenantA,
+        `ENT-SRC-${suffix}`,
+        source.opportunity_id,
+        source.customer_id,
+        aliceMembership,
+        '40000000-0000-4000-8000-000000000044',
+      ],
+    );
+    const line = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.proposal_line_items(proposal_id,tenant_id,line_number,plan_id,plan_name_snapshot,description_snapshot,quantity,unit_price,line_subtotal)
+       VALUES($1,$2,1,$3,'Entitlement plan snapshot','Entitlement source line',1,25,25) RETURNING id`,
+      [proposal.rows[0]!.id, tenantA, source.plan_id],
+    );
+    const contract = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.contracts(tenant_id,source_proposal_id,source_proposal_revision_number,source_proposal_code,title,opportunity_id,customer_id,owner_membership_id,created_by_membership_id,currency_code,status,effective_from,effective_until,contract_subtotal,grand_total,approved_by_membership_id,approved_at,created_by,updated_by)
+       VALUES($1,$2,1,$3,'Entitlement source contract',$4,$5,$6,$6,'USD','ACTIVE',clock_timestamp(),clock_timestamp()+interval '365 days',25,25,$6,clock_timestamp(),$7,$7) RETURNING id`,
+      [
+        tenantA,
+        proposal.rows[0]!.id,
+        `ENT-SRC-${suffix}`,
+        source.opportunity_id,
+        source.customer_id,
+        aliceMembership,
+        '40000000-0000-4000-8000-000000000044',
+      ],
+    );
+    await admin.query(
+      `INSERT INTO commercial.contract_line_items(contract_id,tenant_id,line_number,source_proposal_line_item_id,plan_id,plan_name_snapshot,description_snapshot,quantity,unit_price,line_subtotal)
+       VALUES($1,$2,1,$3,$4,'Entitlement plan snapshot','Entitlement source line',1,25,25)`,
+      [contract.rows[0]!.id, tenantA, line.rows[0]!.id, source.plan_id],
+    );
+    const dates = {
+      effective_from: new Date(Date.now() + 86_400_000).toISOString(),
+      effective_until: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    };
+    const subscription = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/subscriptions',
+      headers: headers(),
+      payload: { contract_id: contract.rows[0]!.id, ...dates },
+    });
+    expect(subscription.statusCode, subscription.body).toBe(200);
+    let value = subscriptionEnvelopeSchema.parse(subscription.json()).data;
+    for (const [action, token] of [
+      ['request-activation', aliceToken],
+      ['activate', bobToken],
+    ] as const) {
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/subscriptions/${value.id}/${action}`,
+        headers: headers(randomUUID(), token),
+        payload: { expected_version: value.version },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      value = subscriptionEnvelopeSchema.parse(response.json()).data;
+    }
+    return value;
+  };
+
+  beforeAll(async () => {
+    if (entitlementDatabaseUrl === '') throw new Error('entitlement E2E database URL is required.');
+    aliceToken = await signedOidcToken('alice');
+    bobToken = await signedOidcToken('bob');
+    charlieToken = await signedOidcToken('charlie');
+    await admin.query(
+      `INSERT INTO platform.memberships(id,tenant_id,user_id,status) VALUES($1,$2,$3,'ACTIVE') ON CONFLICT DO NOTHING`,
+      [bobMembership, tenantA, bobUser],
+    );
+    await admin.query(
+      `INSERT INTO platform.membership_permissions(tenant_id,membership_id,permission_key)
+       VALUES($1,$2,'commercial.entitlement.activate') ON CONFLICT DO NOTHING`,
+      [tenantA, bobMembership],
+    );
+    await admin.query(
+      `INSERT INTO platform.membership_permissions(tenant_id,membership_id,permission_key)
+       VALUES($1,$2,'commercial.subscription.activate') ON CONFLICT DO NOTHING`,
+      [tenantA, bobMembership],
+    );
+    const seeded = await admin.query<{ id: string }>(
+      `SELECT id FROM commercial.entitlements WHERE tenant_id=$1 ORDER BY created_at LIMIT 1`,
+      [tenantA],
+    );
+    if (!seeded.rows[0]) throw new Error('Entitlement signed-OIDC fixture is unavailable.');
+    const initial = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/entitlements/${seeded.rows[0].id}`,
+      headers: headers(),
+    });
+    expect(initial.statusCode, initial.body).toBe(200);
+    primary = entitlementEnvelopeSchema.parse(initial.json()).data;
+    expect(primary.created_by_membership_id).toBe(aliceMembership);
+  });
+
+  const createEntitlement = async () => {
+    const subscription = await activeSubscriptionSource();
+    const effectiveFrom = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: { subscription_id: subscription.id, effective_from: effectiveFrom },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return { entitlement: entitlementEnvelopeSchema.parse(response.json()).data, subscription };
+  };
+
+  const activateEntitlement = async () => {
+    let value = (await createEntitlement()).entitlement;
+    value = await transition(value, 'request-activation');
+    return transition(value, 'activate', bobToken);
+  };
+
+  const issueEntitlementContext = async (action: string) => {
+    const contexts = new PostgresTenantContextRepository(
+      requiredEnvironment.issuer as string,
+      requiredEnvironment.tenant as string,
+    );
+    const issued = await contexts.issueContext(
+      JSON.stringify(['https://issuer.acs.test', 'alice']),
+      tenantA,
+      action,
+    );
+    if (!issued) throw new Error(`Canonical Entitlement context was not issued for ${action}.`);
+    return { ...issued, close: () => contexts.close() };
+  };
+
+  it('ENT-POS-001 creates one DRAFT from a same-tenant ACTIVE Subscription', async () => {
+    const result = await createEntitlement();
+    created = result.entitlement;
+    expect(created).toMatchObject({
+      subscription_id: result.subscription.id,
+      status: 'DRAFT',
+      content_model: 'PLAN_LINE_ACCESS',
+      version: 1,
+    });
+  });
+
+  it('ENT-POS-002 derives immutable Customer, Contract, Plan-line and Plan authority server-side', async () => {
+    const origin = await admin.query<{
+      customer_id: string;
+      source_contract_id: string;
+      source_contract_line_item_id: string;
+      plan_id: string;
+    }>(
+      `SELECT s.customer_id,s.source_contract_id,o.source_contract_line_item_id,o.plan_id
+       FROM commercial.subscriptions s JOIN commercial.subscription_plan_origins o ON o.subscription_id=s.id
+       WHERE s.id=$1`,
+      [created.subscription_id],
+    );
+    expect(created).toMatchObject({
+      customer_id: origin.rows[0]!.customer_id,
+      contract_id: origin.rows[0]!.source_contract_id,
+      source_contract_line_item_id: origin.rows[0]!.source_contract_line_item_id,
+      plan_id: origin.rows[0]!.plan_id,
+    });
+  });
+
+  it('ENT-POS-003 lists and reads only tenant-scoped Entitlements through signed OIDC and RLS', async () => {
+    const list = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+    });
+    expect(list.statusCode, list.body).toBe(200);
+    expect(entitlementListEnvelopeSchema.parse(list.json()).data.length).toBeGreaterThan(0);
+    const detail = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/entitlements/${created.id}`,
+      headers: headers(),
+    });
+    expect(detail.statusCode, detail.body).toBe(200);
+    expect(entitlementEnvelopeSchema.parse(detail.json()).data.id).toBe(created.id);
+  });
+
+  it('ENT-POS-004 updates a DRAFT and assigns an active same-tenant owner', async () => {
+    const update = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/entitlements/${created.id}`,
+      headers: headers(),
+      payload: {
+        effective_until: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+        expected_version: created.version,
+      },
+    });
+    expect(update.statusCode, update.body).toBe(200);
+    created = entitlementEnvelopeSchema.parse(update.json()).data;
+    const assign = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/entitlements/${created.id}/assign`,
+      headers: headers(),
+      payload: { owner_membership_id: bobMembership, expected_version: created.version },
+    });
+    expect(assign.statusCode, assign.body).toBe(200);
+    created = entitlementEnvelopeSchema.parse(assign.json()).data;
+    expect(created.owner_membership_id).toBe(bobMembership);
+  });
+
+  it('ENT-POS-005 explicitly requests activation with expected-version protection', async () => {
+    created = await transition(created, 'request-activation');
+    expect(created.status).toBe('PENDING_ACTIVATION');
+  });
+
+  it('ENT-POS-006 permits only a separate authorized actor to activate', async () => {
+    created = await transition(created, 'activate', bobToken);
+    expect(created.status).toBe('ACTIVE');
+  });
+
+  it('ENT-POS-007 explicitly suspends and resumes the ACTIVE Entitlement', async () => {
+    created = await transition(created, 'suspend');
+    expect(created.status).toBe('SUSPENDED');
+    created = await transition(created, 'resume');
+    expect(created.status).toBe('ACTIVE');
+  });
+
+  it('ENT-POS-008 explicitly cancels an ACTIVE Entitlement', async () => {
+    const cancelled = await transition(await activateEntitlement(), 'cancel');
+    expect(cancelled.status).toBe('CANCELLED');
+  });
+
+  it('ENT-POS-009 explicitly terminates an ACTIVE Entitlement', async () => {
+    const terminated = await transition(await activateEntitlement(), 'terminate');
+    expect(terminated.status).toBe('TERMINATED');
+  });
+
+  it('ENT-POS-010 replays the same tenant-scoped command without duplicate artifacts', async () => {
+    const value = (await createEntitlement()).entitlement;
+    const key = randomUUID();
+    const payload = {
+      effective_until: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+      expected_version: value.version,
+    };
+    const first = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/entitlements/${value.id}`,
+      headers: headers(key),
+      payload,
+    });
+    const second = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/entitlements/${value.id}`,
+      headers: headers(key),
+      payload,
+    });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(second.statusCode, second.body).toBe(200);
+    expect(entitlementEnvelopeSchema.parse(second.json()).meta.idempotent_replay).toBe(true);
+    const evidence = await admin.query<{
+      history: string;
+      audits: string;
+      events: string;
+      operations: string;
+    }>(
+      `SELECT (SELECT count(*) FROM commercial.entitlement_history WHERE entitlement_id=$1)::text history,
+       (SELECT count(*) FROM platform.audit_logs WHERE metadata->>'id'=$1::text)::text audits,
+       (SELECT count(*) FROM platform.domain_events WHERE payload->>'id'=$1::text)::text events,
+       (SELECT count(*) FROM commercial.entitlement_operations WHERE resource_id=$1)::text operations`,
+      [value.id],
+    );
+    expect(evidence.rows[0]).toEqual({ history: '2', audits: '2', events: '2', operations: '2' });
+  });
+
+  it('ENT-POS-011 permits exactly one concurrent expected-version mutation', async () => {
+    const value = (await createEntitlement()).entitlement;
+    const responses = await Promise.all(
+      ['a', 'b'].map(() =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/entitlements/${value.id}`,
+          headers: headers(),
+          payload: {
+            effective_until: new Date(Date.now() + 21 * 86_400_000).toISOString(),
+            expected_version: value.version,
+          },
+        }),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+  });
+
+  it('ENT-POS-012 commits aggregate, history, audit, outbox and idempotency atomically', async () => {
+    const evidence = await admin.query<{
+      history: string;
+      audits: string;
+      events: string;
+      operations: string;
+    }>(
+      `SELECT (SELECT count(*) FROM commercial.entitlement_history WHERE entitlement_id=$1)::text history,
+       (SELECT count(*) FROM platform.audit_logs WHERE metadata->>'id'=$1::text)::text audits,
+       (SELECT count(*) FROM platform.domain_events WHERE payload->>'id'=$1::text)::text events,
+       (SELECT count(*) FROM commercial.entitlement_operations WHERE resource_id=$1)::text operations`,
+      [created.id],
+    );
+    expect(Number(evidence.rows[0]!.history)).toBeGreaterThanOrEqual(7);
+    expect(evidence.rows[0]!.history).toBe(evidence.rows[0]!.audits);
+    expect(evidence.rows[0]!.history).toBe(evidence.rows[0]!.events);
+    expect(evidence.rows[0]!.history).toBe(evidence.rows[0]!.operations);
+  });
+
+  it('ENT-NEG-001 denies unauthenticated access', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/entitlements',
+      headers: { 'x-acs-tenant-id': tenantA },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+  it('ENT-NEG-002 denies a canonical member without the required action permission', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/entitlements/${created.id}`,
+      headers: headers(randomUUID(), charlieToken),
+    });
+    expect(response.statusCode).toBe(403);
+  });
+  it('ENT-NEG-003 rejects missing, foreign and terminal Subscription origins', async () => {
+    const missing = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: { subscription_id: randomUUID(), effective_from: new Date().toISOString() },
+    });
+    expect([400, 404]).toContain(missing.statusCode);
+    const foreign = await admin.query<{ id: string }>(
+      'SELECT id FROM commercial.subscriptions WHERE tenant_id=$1 LIMIT 1',
+      [tenantB],
+    );
+    const denied = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: {
+        subscription_id: foreign.rows[0]?.id ?? randomUUID(),
+        effective_from: new Date().toISOString(),
+      },
+    });
+    expect([400, 404]).toContain(denied.statusCode);
+  });
+  it('ENT-NEG-004 denies cross-tenant Entitlement and Subscription references without disclosure', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/entitlements/${created.id}`,
+      headers: headers(randomUUID(), aliceToken, tenantB),
+    });
+    expect([403, 404]).toContain(response.statusCode);
+  });
+  it('ENT-NEG-005 rejects client substitution of tenant and immutable origin authority', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: {
+        subscription_id: created.subscription_id,
+        effective_from: created.effective_from,
+        tenant_id: tenantB,
+        customer_id: randomUUID(),
+        contract_id: randomUUID(),
+        plan_id: randomUUID(),
+      },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('ENT-NEG-006 prevents duplicate immutable origin assertions sequentially and concurrently', async () => {
+    const result = await createEntitlement();
+    const duplicate = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: {
+        subscription_id: result.entitlement.subscription_id,
+        effective_from: result.entitlement.effective_from,
+      },
+    });
+    expect(duplicate.statusCode).toBe(409);
+    const subscription = await activeSubscriptionSource();
+    const payload = {
+      subscription_id: subscription.id,
+      effective_from: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    };
+    const race = await Promise.all(
+      [1, 2].map(() =>
+        oidcApp.inject({
+          method: 'POST',
+          url: '/api/v1/commercial/entitlements',
+          headers: headers(),
+          payload,
+        }),
+      ),
+    );
+    expect(race.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+  });
+  it('ENT-NEG-007 rejects quantity, quota, meter, seat, capacity and financial input', async () => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: {
+        subscription_id: created.subscription_id,
+        effective_from: created.effective_from,
+        quantity: 1,
+        quota: 1,
+        meter: 'x',
+        seat: 1,
+        capacity: 1,
+        price: 1,
+      },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+  it('ENT-NEG-008 denies creator self-activation', async () => {
+    let value = (await createEntitlement()).entitlement;
+    value = await transition(value, 'request-activation');
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/entitlements/${value.id}/activate`,
+      headers: headers(),
+      payload: { expected_version: value.version },
+    });
+    expect(response.statusCode).toBe(403);
+  });
+  it('ENT-NEG-009 rejects invalid transitions and terminal mutation', async () => {
+    const draft = (await createEntitlement()).entitlement;
+    const invalid = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/entitlements/${draft.id}/suspend`,
+      headers: headers(),
+      payload: { expected_version: draft.version },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const cancelled = await transition(await activateEntitlement(), 'cancel');
+    const terminal = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/entitlements/${cancelled.id}`,
+      headers: headers(),
+      payload: {
+        effective_until: new Date(Date.now() + 10 * 86_400_000).toISOString(),
+        expected_version: cancelled.version,
+      },
+    });
+    expect(terminal.statusCode).toBe(400);
+  });
+  it('ENT-NEG-010 rejects invalid effective dates and dates outside Subscription authority', async () => {
+    const subscription = await activeSubscriptionSource();
+    const inverted = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: {
+        subscription_id: subscription.id,
+        effective_from: new Date(Date.now() + 10_000).toISOString(),
+        effective_until: new Date(Date.now() + 5_000).toISOString(),
+      },
+    });
+    expect(inverted.statusCode).toBe(400);
+    const outside = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: {
+        subscription_id: subscription.id,
+        effective_from: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        effective_until: new Date(Date.now() + 400 * 86_400_000).toISOString(),
+      },
+    });
+    expect(outside.statusCode).toBe(400);
+  });
+  it('ENT-NEG-011 rejects stale expected_version without partial mutation', async () => {
+    const value = (await createEntitlement()).entitlement;
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/entitlements/${value.id}`,
+      headers: headers(),
+      payload: {
+        effective_until: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+        expected_version: value.version + 1,
+      },
+    });
+    expect(response.statusCode).toBe(409);
+    const stored = await admin.query<{ version: string }>(
+      'SELECT version::text FROM commercial.entitlements WHERE id=$1',
+      [value.id],
+    );
+    expect(stored.rows[0]!.version).toBe('1');
+  });
+  it('ENT-NEG-012 rejects divergent idempotency-key payload reuse', async () => {
+    const value = (await createEntitlement()).entitlement;
+    const key = randomUUID();
+    const first = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/entitlements/${value.id}`,
+      headers: headers(key),
+      payload: {
+        effective_until: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+        expected_version: value.version,
+      },
+    });
+    expect(first.statusCode).toBe(200);
+    const second = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/entitlements/${value.id}`,
+      headers: headers(key),
+      payload: {
+        effective_until: new Date(Date.now() + 21 * 86_400_000).toISOString(),
+        expected_version: value.version,
+      },
+    });
+    expect(second.statusCode).toBe(409);
+  });
+  it('ENT-NEG-013 denies trusted-context replacement from body, route or JWT-only authority', async () => {
+    const body = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(),
+      payload: {
+        subscription_id: created.subscription_id,
+        effective_from: created.effective_from,
+        context_token: randomUUID(),
+      },
+    });
+    expect(body.statusCode).toBe(400);
+    const tenant = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/entitlements/${created.id}`,
+      headers: { authorization: `Bearer ${aliceToken}`, 'x-acs-tenant-id': tenantB },
+    });
+    expect([403, 404]).toContain(tenant.statusCode);
+  });
+  it('ENT-NEG-014 prevents direct least-privilege sessions from bypassing FORCE RLS', async () => {
+    const direct = new Client({ connectionString: entitlementDatabaseUrl });
+    await direct.connect();
+    const rows = await direct.query('SELECT id FROM commercial.entitlements WHERE id=$1', [
+      created.id,
+    ]);
+    await direct.end();
+    expect(rows.rowCount).toBe(0);
+  });
+  it('ENT-NEG-015 rolls aggregate, history, audit, outbox and idempotency back at every TEST_ONLY checkpoint', async () => {
+    const value = (await createEntitlement()).entitlement;
+    for (const phase of [
+      'after-history',
+      'after-audit',
+      'after-outbox',
+      'after-idempotency',
+      'pre-commit',
+    ] as const) {
+      const context = await issueEntitlementContext('commercial.entitlement.update');
+      const correlationId = randomUUID();
+      const key = randomUUID();
+      const repository = new PostgresEntitlementRegistryRepository(
+        entitlementDatabaseUrl,
+        (current) => {
+          if (current === phase) throw new Error(`TEST_ONLY_ENTITLEMENT_${phase}`);
+        },
+      );
+      await expect(
+        repository.update({
+          actorUserId: '40000000-0000-4000-8000-000000000044',
+          contextToken: context.contextToken,
+          correlationId,
+          idempotencyKey: key,
+          requestHash: 'a'.repeat(64),
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          action: 'commercial.entitlement.update',
+          entitlementId: value.id,
+          effective_until: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+          expected_version: value.version,
+        }),
+      ).rejects.toThrow(`TEST_ONLY_ENTITLEMENT_${phase}`);
+      await repository.close();
+      await context.close();
+      const evidence = await admin.query<{
+        version: string;
+        history: string;
+        audits: string;
+        events: string;
+        operations: string;
+      }>(
+        `SELECT (SELECT version::text FROM commercial.entitlements WHERE id=$1::uuid) version,(SELECT count(*)::text FROM commercial.entitlement_history WHERE entitlement_id=$1::uuid) history,(SELECT count(*)::text FROM platform.audit_logs WHERE correlation_id=$2::text) audits,(SELECT count(*)::text FROM platform.domain_events WHERE correlation_id=$2::uuid) events,(SELECT count(*)::text FROM commercial.entitlement_operations WHERE idempotency_key=$3::uuid) operations`,
+        [value.id, correlationId, key],
+      );
+      expect(evidence.rows[0]).toEqual({
+        version: '1',
+        history: '1',
+        audits: '0',
+        events: '0',
+        operations: '0',
+      });
+    }
+  });
+  it('ENT-NEG-016 excludes sensitive, mutable, quantity and financial facts from audit/outbox payloads', async () => {
+    const evidence = await admin.query<{ audit: string; event: string }>(
+      `SELECT coalesce((SELECT metadata::text FROM platform.audit_logs WHERE metadata->>'id'=$1::text ORDER BY occurred_at DESC LIMIT 1),'') audit,coalesce((SELECT payload::text FROM platform.domain_events WHERE payload->>'id'=$1::text ORDER BY occurred_at DESC LIMIT 1),'') event`,
+      [created.id],
+    );
+    for (const payload of Object.values(evidence.rows[0]!))
+      for (const forbidden of [
+        'contact',
+        'quantity',
+        'quota',
+        'meter',
+        'seat',
+        'capacity',
+        'price',
+        'payment',
+      ])
+        expect(payload).not.toContain(forbidden);
+  });
+  it('ENT-NEG-017 proves no automatic Usage or financial/accounting/Commission side effect exists', async () => {
+    const downstream = await admin.query<Record<string, string | null>>(
+      `SELECT to_regclass('commercial.usage_records')::text usage,to_regclass('commercial.billing_accounts')::text billing,to_regclass('commercial.invoices')::text invoices,to_regclass('commercial.payments')::text payments,to_regclass('commercial.receipts')::text receipts,to_regclass('commercial.collections')::text collections,to_regclass('commercial.accounting_entries')::text accounting,to_regclass('commercial.commissions')::text commissions`,
+    );
+    expect(Object.values(downstream.rows[0]!).every((value) => value === null)).toBe(true);
+  });
+  it('ENT-NEG-018 denies broad administrative runtime bypass', async () => {
+    const role = await admin.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+      `SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname='acs_phase2_entitlement_registry'`,
+    );
+    expect(role.rows[0]).toEqual({ rolsuper: false, rolbypassrls: false });
+    const direct = new Client({ connectionString: entitlementDatabaseUrl });
+    await direct.connect();
+    const rows = await direct.query<{ count: number }>(
+      'SELECT count(*)::integer AS count FROM commercial.entitlements',
+    );
+    await direct.end();
+    expect(rows.rows[0]!.count).toBe(0);
+  });
+
+  it('verifies concurrent identical idempotent replay produces one authoritative mutation', async () => {
+    const value = (await createEntitlement()).entitlement;
+    const key = randomUUID();
+    const payload = {
+      effective_until: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+      expected_version: value.version,
+    };
+    const responses = await Promise.all(
+      [1, 2].map(() =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/entitlements/${value.id}`,
+          headers: headers(key),
+          payload,
+        }),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(
+      responses
+        .map((response) => entitlementEnvelopeSchema.parse(response.json()).meta.idempotent_replay)
+        .sort(),
+    ).toEqual([false, true]);
+    const evidence = await admin.query<{ history: string; audits: string; events: string }>(
+      `SELECT (SELECT count(*)::text FROM commercial.entitlement_history WHERE entitlement_id=$1) history,
+       (SELECT count(*)::text FROM platform.audit_logs WHERE metadata->>'id'=$1::text) audits,
+       (SELECT count(*)::text FROM platform.domain_events WHERE payload->>'id'=$1::text) events`,
+      [value.id],
+    );
+    expect(evidence.rows[0]).toEqual({ history: '2', audits: '2', events: '2' });
+  });
+
+  it('verifies update/request-activation and assign/update races have one winner', async () => {
+    for (const pair of ['update-request', 'assign-update'] as const) {
+      const value = (await createEntitlement()).entitlement;
+      const update = () =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/entitlements/${value.id}`,
+          headers: headers(),
+          payload: {
+            effective_until: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+            expected_version: value.version,
+          },
+        });
+      const competing = () =>
+        pair === 'update-request'
+          ? oidcApp.inject({
+              method: 'POST',
+              url: `/api/v1/commercial/entitlements/${value.id}/request-activation`,
+              headers: headers(),
+              payload: { expected_version: value.version },
+            })
+          : oidcApp.inject({
+              method: 'POST',
+              url: `/api/v1/commercial/entitlements/${value.id}/assign`,
+              headers: headers(),
+              payload: { owner_membership_id: bobMembership, expected_version: value.version },
+            });
+      const responses = await Promise.all([update(), competing()]);
+      expect(responses.filter((response) => response.statusCode === 200)).toHaveLength(1);
+      expect(responses.filter((response) => [400, 409].includes(response.statusCode))).toHaveLength(
+        1,
+      );
+      const stored = await admin.query<{ version: string; history: string }>(
+        `SELECT e.version::text,(SELECT count(*)::text FROM commercial.entitlement_history h WHERE h.entitlement_id=e.id) history FROM commercial.entitlements e WHERE e.id=$1`,
+        [value.id],
+      );
+      expect(stored.rows[0]).toEqual({ version: '2', history: '2' });
+    }
+  });
+
+  it('verifies activate/cancel, activate/suspend and suspend/resume races preserve lifecycle validity', async () => {
+    for (const pair of ['activate-cancel', 'activate-suspend'] as const) {
+      let value = (await createEntitlement()).entitlement;
+      value = await transition(value, 'request-activation');
+      const activate = oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/entitlements/${value.id}/activate`,
+        headers: headers(randomUUID(), bobToken),
+        payload: { expected_version: value.version },
+      });
+      const other = oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/entitlements/${value.id}/${pair === 'activate-cancel' ? 'cancel' : 'suspend'}`,
+        headers: headers(),
+        payload: { expected_version: value.version },
+      });
+      const responses = await Promise.all([activate, other]);
+      expect(responses.filter((response) => response.statusCode === 200)).toHaveLength(1);
+      expect(responses.filter((response) => [400, 409].includes(response.statusCode))).toHaveLength(
+        1,
+      );
+    }
+    const active = await activateEntitlement();
+    const responses = await Promise.all([
+      oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/entitlements/${active.id}/suspend`,
+        headers: headers(),
+        payload: { expected_version: active.version },
+      }),
+      oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/entitlements/${active.id}/resume`,
+        headers: headers(),
+        payload: { expected_version: active.version },
+      }),
+    ]);
+    expect(responses.filter((response) => response.statusCode === 200)).toHaveLength(1);
+    expect(responses.filter((response) => [400, 409].includes(response.statusCode))).toHaveLength(
+      1,
+    );
+  });
+
+  it('isolates the same idempotency key across tenant A and tenant B', async () => {
+    await admin.query(
+      `INSERT INTO platform.membership_permissions(tenant_id,membership_id,permission_key)
+       VALUES($1,$2,'commercial.entitlement.create') ON CONFLICT DO NOTHING`,
+      [tenantB, '30000000-0000-4000-8000-000000000088'],
+    );
+    const tenantBUser = '60000000-0000-4000-8000-000000000066';
+    const tenantBMembership = '30000000-0000-4000-8000-000000000088';
+    const customer = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.customers(tenant_id,display_name,reference_code,created_by,updated_by)
+       VALUES($1,'Tenant B idempotency customer',$2,$3,$3) RETURNING id`,
+      [tenantB, `ENT-B-${randomUUID().slice(0, 10)}`, tenantBUser],
+    );
+    const plan = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.plans(tenant_id,plan_code,name,created_by,updated_by)
+       VALUES($1,$2,'Tenant B idempotency plan',$3,$3) RETURNING id`,
+      [tenantB, `ENT-B-${randomUUID().slice(0, 10)}`, tenantBUser],
+    );
+    const opportunity = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.opportunities(tenant_id,opportunity_code,title,owner_membership_id,customer_id,plan_id,created_by,updated_by)
+       VALUES($1,$2,'Tenant B idempotency opportunity',$3,$4,$5,$6,$6) RETURNING id`,
+      [
+        tenantB,
+        `ENT-B-${randomUUID().slice(0, 10)}`,
+        tenantBMembership,
+        customer.rows[0]!.id,
+        plan.rows[0]!.id,
+        tenantBUser,
+      ],
+    );
+    const proposal = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.proposals(tenant_id,proposal_code,title,opportunity_id,customer_id,owner_membership_id,created_by_membership_id,currency_code,status,valid_until,proposal_subtotal,grand_total,approved_by_membership_id,approved_at,created_by,updated_by)
+       VALUES($1,$2,'Tenant B idempotency proposal',$3,$4,$5,$5,'USD','ACCEPTED',clock_timestamp()+interval '60 days',25,25,$5,clock_timestamp(),$6,$6) RETURNING id`,
+      [
+        tenantB,
+        `ENT-B-${randomUUID().slice(0, 10)}`,
+        opportunity.rows[0]!.id,
+        customer.rows[0]!.id,
+        tenantBMembership,
+        tenantBUser,
+      ],
+    );
+    const proposalLine = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.proposal_line_items(proposal_id,tenant_id,line_number,plan_id,plan_name_snapshot,description_snapshot,quantity,unit_price,line_subtotal)
+       VALUES($1,$2,1,$3,'Tenant B plan snapshot','Tenant B line',1,25,25) RETURNING id`,
+      [proposal.rows[0]!.id, tenantB, plan.rows[0]!.id],
+    );
+    const tenantBContract = await admin.query<{ id: string; customer_id: string }>(
+      `INSERT INTO commercial.contracts(tenant_id,source_proposal_id,source_proposal_revision_number,source_proposal_code,title,opportunity_id,customer_id,owner_membership_id,created_by_membership_id,currency_code,status,effective_from,effective_until,contract_subtotal,grand_total,approved_by_membership_id,approved_at,created_by,updated_by)
+       VALUES($1,$2,1,$3,'Tenant B idempotency contract',$4,$5,$6,$6,'USD','ACTIVE',clock_timestamp(),clock_timestamp()+interval '365 days',25,25,$6,clock_timestamp(),$7,$7) RETURNING id,customer_id`,
+      [
+        tenantB,
+        proposal.rows[0]!.id,
+        `ENT-B-${randomUUID().slice(0, 10)}`,
+        opportunity.rows[0]!.id,
+        customer.rows[0]!.id,
+        tenantBMembership,
+        tenantBUser,
+      ],
+    );
+    const tenantBContractRow = tenantBContract.rows[0];
+    if (!tenantBContractRow) throw new Error('Tenant B Contract fixture unavailable.');
+    await admin.query(
+      `INSERT INTO commercial.contract_line_items(contract_id,tenant_id,line_number,source_proposal_line_item_id,plan_id,plan_name_snapshot,description_snapshot,quantity,unit_price,line_subtotal)
+       VALUES($1,$2,1,$3,$4,'Tenant B plan snapshot','Tenant B line',1,25,25)`,
+      [tenantBContractRow.id, tenantB, proposalLine.rows[0]!.id, plan.rows[0]!.id],
+    );
+    const tenantBSubscription = await admin.query<{ id: string; effective_from: Date }>(
+      `INSERT INTO commercial.subscriptions(tenant_id,source_contract_id,source_contract_revision_number,customer_id,owner_membership_id,created_by_membership_id,status,effective_from,effective_until,created_by,updated_by)
+       VALUES($1,$2,1,$3,$4,$4,'ACTIVE',clock_timestamp(),clock_timestamp()+interval '180 days',$5,$5)
+       RETURNING id,effective_from`,
+      [
+        tenantB,
+        tenantBContractRow.id,
+        tenantBContractRow.customer_id,
+        tenantBMembership,
+        tenantBUser,
+      ],
+    );
+    const tenantBSubscriptionRow = tenantBSubscription.rows[0];
+    if (!tenantBSubscriptionRow) throw new Error('Tenant B Subscription fixture unavailable.');
+    await admin.query(
+      `INSERT INTO commercial.subscription_plan_origins(subscription_id,tenant_id,source_contract_line_item_id,plan_id,plan_name_snapshot,description_snapshot,quantity)
+       SELECT $1,li.tenant_id,li.id,li.plan_id,li.plan_name_snapshot,li.description_snapshot,li.quantity
+       FROM commercial.contract_line_items li WHERE li.contract_id=$2`,
+      [tenantBSubscriptionRow.id, tenantBContractRow.id],
+    );
+    const tenantASubscription = await activeSubscriptionSource();
+    const key = randomUUID();
+    const tenantAResponse = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(key),
+      payload: {
+        subscription_id: tenantASubscription.id,
+        effective_from: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      },
+    });
+    const tenantBResponse = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/entitlements',
+      headers: headers(key, charlieToken, tenantB),
+      payload: {
+        subscription_id: tenantBSubscriptionRow.id,
+        effective_from: new Date(
+          tenantBSubscriptionRow.effective_from.getTime() + 86_400_000,
+        ).toISOString(),
+      },
+    });
+    expect(tenantAResponse.statusCode, tenantAResponse.body).toBe(200);
+    expect(tenantBResponse.statusCode, tenantBResponse.body).toBe(200);
+    expect(entitlementEnvelopeSchema.parse(tenantAResponse.json()).data.id).not.toBe(
+      entitlementEnvelopeSchema.parse(tenantBResponse.json()).data.id,
+    );
+  });
+
+  it('records an Entitlement signed-OIDC PostgreSQL baseline without asserting an SLO', async () => {
+    const samples = new Map<string, number[]>();
+    const record = async <T>(name: string, measured: boolean, work: () => Promise<T>) => {
+      const started = performance.now();
+      const value = await work();
+      if (measured)
+        (samples.get(name) ?? samples.set(name, []).get(name)!).push(performance.now() - started);
+      return value;
+    };
+    const run = async (measured: boolean) => {
+      const journey = performance.now();
+      await activeSubscriptionSource();
+      let current = (
+        await record('ENTITLEMENT_CREATE_FROM_ACTIVE_SUBSCRIPTION_MS', measured, () =>
+          createEntitlement(),
+        )
+      ).entitlement;
+      await record('ENTITLEMENT_LIST_MS', measured, async () =>
+        expect(
+          (
+            await oidcApp.inject({
+              method: 'GET',
+              url: '/api/v1/commercial/entitlements',
+              headers: headers(),
+            })
+          ).statusCode,
+        ).toBe(200),
+      );
+      current = await record(
+        'ENTITLEMENT_DETAIL_MS',
+        measured,
+        async () =>
+          entitlementEnvelopeSchema.parse(
+            (
+              await oidcApp.inject({
+                method: 'GET',
+                url: `/api/v1/commercial/entitlements/${current.id}`,
+                headers: headers(),
+              })
+            ).json(),
+          ).data,
+      );
+      current = await record(
+        'ENTITLEMENT_DRAFT_UPDATE_MS',
+        measured,
+        async () =>
+          entitlementEnvelopeSchema.parse(
+            (
+              await oidcApp.inject({
+                method: 'PATCH',
+                url: `/api/v1/commercial/entitlements/${current.id}`,
+                headers: headers(),
+                payload: {
+                  effective_until: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+                  expected_version: current.version,
+                },
+              })
+            ).json(),
+          ).data,
+      );
+      current = await record(
+        'ENTITLEMENT_ASSIGN_MS',
+        measured,
+        async () =>
+          entitlementEnvelopeSchema.parse(
+            (
+              await oidcApp.inject({
+                method: 'POST',
+                url: `/api/v1/commercial/entitlements/${current.id}/assign`,
+                headers: headers(),
+                payload: { owner_membership_id: bobMembership, expected_version: current.version },
+              })
+            ).json(),
+          ).data,
+      );
+      current = await record('ENTITLEMENT_REQUEST_ACTIVATION_MS', measured, () =>
+        transition(current, 'request-activation'),
+      );
+      current = await record('ENTITLEMENT_ACTIVATE_MS', measured, () =>
+        transition(current, 'activate', bobToken),
+      );
+      current = await record('ENTITLEMENT_SUSPEND_MS', measured, () =>
+        transition(current, 'suspend'),
+      );
+      current = await record('ENTITLEMENT_RESUME_MS', measured, () =>
+        transition(current, 'resume'),
+      );
+      await record('ENTITLEMENT_TERMINAL_TRANSITION_MS', measured, () =>
+        transition(current, 'cancel'),
+      );
+      if (measured)
+        (
+          samples.get('ENTITLEMENT_COMPLETE_LIFECYCLE_JOURNEY_MS') ??
+          samples
+            .set('ENTITLEMENT_COMPLETE_LIFECYCLE_JOURNEY_MS', [])
+            .get('ENTITLEMENT_COMPLETE_LIFECYCLE_JOURNEY_MS')!
+        ).push(performance.now() - journey);
+    };
+    await run(false);
+    for (let i = 0; i < 5; i += 1) await run(true);
+    const summary = (values: number[]) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      return {
+        sample_count: values.length,
+        median_ms: Number(sorted[Math.floor(sorted.length / 2)]!.toFixed(2)),
+        min_ms: Number(sorted[0]!.toFixed(2)),
+        max_ms: Number(sorted.at(-1)!.toFixed(2)),
+      };
+    };
+    process.stdout.write(
+      `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, PERFORMANCE_ENVIRONMENT: 'LOCAL_DISPOSABLE_TEST_ONLY', WARM_UP_COMPLETED: true, ...Object.fromEntries([...samples].map(([name, values]) => [name, summary(values)])) })}\n`,
+    );
+  }, 30_000);
 });
 
 async function signedOidcToken(subject: string, claims: Record<string, unknown> = {}) {
@@ -5609,12 +6634,18 @@ describe.sequential('Subscription Registry signed OIDC acceptance matrix', () =>
   });
   it('SUB-NEG-022 proves all unauthorized downstream side effects remain absent', async () => {
     const downstream = await admin.query<Record<string, string | null>>(
-      `SELECT to_regclass('commercial.entitlements')::text entitlements,to_regclass('commercial.usage_records')::text usage,
+      `SELECT (SELECT count(*)::text FROM commercial.entitlements WHERE subscription_id=$1) automatic_entitlements,to_regclass('commercial.usage_records')::text usage,
        to_regclass('commercial.invoices')::text invoices,to_regclass('commercial.payments')::text payments,
        to_regclass('commercial.receipts')::text receipts,to_regclass('commercial.collections')::text collections,
        to_regclass('commercial.accounting_entries')::text accounting,to_regclass('commercial.commissions')::text commissions`,
+      [primary.id],
     );
-    expect(Object.values(downstream.rows[0]!).every((value) => value === null)).toBe(true);
+    expect(downstream.rows[0]!.automatic_entitlements).toBe('0');
+    expect(
+      Object.entries(downstream.rows[0]!)
+        .filter(([key]) => key !== 'automatic_entitlements')
+        .every(([, value]) => value === null),
+    ).toBe(true);
   });
 
   it('records a Subscription signed-OIDC PostgreSQL baseline without asserting an SLO', async () => {
@@ -5735,5 +6766,5 @@ describe.sequential('Subscription Registry signed OIDC acceptance matrix', () =>
         ...Object.fromEntries([...samples].map(([name, values]) => [name, summarize(values)])),
       })}\n`,
     );
-  });
+  }, 30_000);
 });

@@ -1,7 +1,7 @@
 # ACS Phase 2 — Tenant-Scoped Commercial Entitlement Definition of Ready
 
 **Status:** `DETERMINISTIC_FOR_IMPLEMENTATION_PREPARATION`
-**Implementation status:** `NOT_IMPLEMENTED`
+**Implementation status:** `LOCAL_IMPLEMENTATION_EVIDENCED`
 **ADR:** [ADR-0023](decisions/ADR-0023-tenant-scoped-commercial-entitlement.md) (`PROPOSED`)
 
 ## 1. Authority and aggregate boundary

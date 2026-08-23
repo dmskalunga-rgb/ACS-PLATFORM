@@ -48,6 +48,12 @@ import {
   subscriptionRenewSchema,
   subscriptionTransitionSchema,
   subscriptionUpdateSchema,
+  entitlementAssignSchema,
+  entitlementCreateSchema,
+  entitlementEnvelopeSchema,
+  entitlementListEnvelopeSchema,
+  entitlementTransitionSchema,
+  entitlementUpdateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -92,6 +98,7 @@ import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-re
 import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
 import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
 import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
+import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -128,6 +135,16 @@ import {
   SubscriptionRegistryService,
 } from './subscription-registry.js';
 import {
+  ENTITLEMENT_ACTIVATE,
+  ENTITLEMENT_CANCEL,
+  ENTITLEMENT_REQUEST_ACTIVATION,
+  ENTITLEMENT_RESUME,
+  ENTITLEMENT_SUSPEND,
+  ENTITLEMENT_TERMINATE,
+  EntitlementRegistryFailure,
+  EntitlementRegistryService,
+} from './entitlement-registry.js';
+import {
   TenantAdministrationFailure,
   TenantAdministrationService,
 } from './tenant-administration.js';
@@ -154,6 +171,7 @@ export async function buildApp(
     readonly proposalRegistryService?: ProposalRegistryService;
     readonly contractRegistryService?: ContractRegistryService;
     readonly subscriptionRegistryService?: SubscriptionRegistryService;
+    readonly entitlementRegistryService?: EntitlementRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -188,6 +206,8 @@ export async function buildApp(
   let contractRegistryService = options.contractRegistryService;
   let subscriptionRepository: PostgresSubscriptionRegistryRepository | undefined;
   let subscriptionRegistryService = options.subscriptionRegistryService;
+  let entitlementRepository: PostgresEntitlementRegistryRepository | undefined;
+  let entitlementRegistryService = options.entitlementRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -322,6 +342,18 @@ export async function buildApp(
         securityAuditRepository,
       );
     }
+    if (configuration.entitlementDatabaseUrl !== undefined) {
+      entitlementRepository = new PostgresEntitlementRegistryRepository(
+        configuration.entitlementDatabaseUrl,
+      );
+      entitlementRegistryService = new EntitlementRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        entitlementRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -337,6 +369,7 @@ export async function buildApp(
         proposalRepository?.close(),
         contractRepository?.close(),
         subscriptionRepository?.close(),
+        entitlementRepository?.close(),
       ]);
     });
   }
@@ -2616,6 +2649,181 @@ export async function buildApp(
       service.renew(request.headers.authorization, tenant, id, key, value, metadata(request)),
     ),
   );
+
+  const entitlementFail = (
+    e: EntitlementRegistryFailure,
+    req: FastifyRequest,
+    reply: FastifyReply,
+  ) =>
+    reply
+      .status(
+        e.code === 'UNAUTHENTICATED'
+          ? 401
+          : e.code === 'NOT_FOUND'
+            ? 404
+            : ['DUPLICATE_ENTITLEMENT', 'STALE_VERSION', 'IDEMPOTENCY_CONFLICT'].includes(e.code)
+              ? 409
+              : [
+                    'INVALID_REFERENCE',
+                    'INVALID_TRANSITION',
+                    'TERMINAL_ENTITLEMENT',
+                    'INVALID_VALUE',
+                  ].includes(e.code)
+                ? 400
+                : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: e.code,
+            message: e.message,
+            request_id: req.id,
+            correlation_id: req.correlationId,
+          },
+        }),
+      );
+  const entitlementTenant = (r: FastifyRequest) => z.uuid().safeParse(r.headers['x-acs-tenant-id']);
+  const entitlementId = (r: FastifyRequest) =>
+    uuidSchema.safeParse(
+      typeof r.params === 'object' && r.params !== null
+        ? (r.params as Record<string, unknown>).entitlementId
+        : undefined,
+    );
+  const entitlementKey = (r: FastifyRequest) =>
+    typeof r.headers['idempotency-key'] === 'string' &&
+    uuidSchema.safeParse(r.headers['idempotency-key']).success
+      ? r.headers['idempotency-key']
+      : null;
+  const entitlementUnavailable = (r: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'ENTITLEMENT_REGISTRY_NOT_CONFIGURED',
+          message: 'Entitlement Registry dependencies are not configured.',
+          request_id: r.id,
+          correlation_id: r.correlationId,
+        },
+      }),
+    );
+  app.post('/api/v1/commercial/entitlements', async (r, reply) => {
+    if (!entitlementRegistryService) return entitlementUnavailable(r, reply);
+    const t = entitlementTenant(r),
+      k = entitlementKey(r),
+      b = entitlementCreateSchema.safeParse(r.body);
+    if (!t.success || !k || !b.success) return reply.status(400).send();
+    try {
+      return entitlementEnvelopeSchema.parse(
+        await entitlementRegistryService.create(
+          r.headers.authorization,
+          t.data,
+          k,
+          b.data,
+          metadata(r),
+        ),
+      );
+    } catch (e) {
+      if (e instanceof EntitlementRegistryFailure) return entitlementFail(e, r, reply);
+      throw e;
+    }
+  });
+  app.get('/api/v1/commercial/entitlements', async (r, reply) => {
+    if (!entitlementRegistryService) return entitlementUnavailable(r, reply);
+    const t = entitlementTenant(r);
+    if (!t.success) return reply.status(400).send();
+    try {
+      return entitlementListEnvelopeSchema.parse(
+        await entitlementRegistryService.list(
+          r.headers.authorization,
+          t.data,
+          25,
+          undefined,
+          metadata(r),
+        ),
+      );
+    } catch (e) {
+      if (e instanceof EntitlementRegistryFailure) return entitlementFail(e, r, reply);
+      throw e;
+    }
+  });
+  app.get('/api/v1/commercial/entitlements/:entitlementId', async (r, reply) => {
+    if (!entitlementRegistryService) return entitlementUnavailable(r, reply);
+    const t = entitlementTenant(r),
+      id = entitlementId(r);
+    if (!t.success || !id.success) return reply.status(400).send();
+    try {
+      return entitlementEnvelopeSchema.parse(
+        await entitlementRegistryService.get(r.headers.authorization, t.data, id.data, metadata(r)),
+      );
+    } catch (e) {
+      if (e instanceof EntitlementRegistryFailure) return entitlementFail(e, r, reply);
+      throw e;
+    }
+  });
+  const entitlementMutate = async <T>(
+    r: FastifyRequest,
+    reply: FastifyReply,
+    schema: ZodType<T>,
+    f: (id: string, key: string, value: T) => Promise<unknown>,
+  ) => {
+    if (!entitlementRegistryService) return entitlementUnavailable(r, reply);
+    const t = entitlementTenant(r),
+      id = entitlementId(r),
+      k = entitlementKey(r),
+      b = schema.safeParse(r.body);
+    if (!t.success || !id.success || !k || !b.success) return reply.status(400).send();
+    try {
+      return entitlementEnvelopeSchema.parse(await f(id.data, k, b.data));
+    } catch (e) {
+      if (e instanceof EntitlementRegistryFailure) return entitlementFail(e, r, reply);
+      throw e;
+    }
+  };
+  app.patch('/api/v1/commercial/entitlements/:entitlementId', (r, reply) =>
+    entitlementMutate(r, reply, entitlementUpdateSchema, (id, k, v) =>
+      entitlementRegistryService!.update(
+        r.headers.authorization,
+        entitlementTenant(r).data!,
+        id,
+        k,
+        v,
+        metadata(r),
+      ),
+    ),
+  );
+  app.post('/api/v1/commercial/entitlements/:entitlementId/assign', (r, reply) =>
+    entitlementMutate(r, reply, entitlementAssignSchema, (id, k, v) =>
+      entitlementRegistryService!.assign(
+        r.headers.authorization,
+        entitlementTenant(r).data!,
+        id,
+        k,
+        v,
+        metadata(r),
+      ),
+    ),
+  );
+  for (const [path, transition, action] of [
+    ['request-activation', 'request-activation', ENTITLEMENT_REQUEST_ACTIVATION],
+    ['activate', 'activate', ENTITLEMENT_ACTIVATE],
+    ['suspend', 'suspend', ENTITLEMENT_SUSPEND],
+    ['resume', 'resume', ENTITLEMENT_RESUME],
+    ['cancel', 'cancel', ENTITLEMENT_CANCEL],
+    ['terminate', 'terminate', ENTITLEMENT_TERMINATE],
+  ] as const)
+    app.post(`/api/v1/commercial/entitlements/:entitlementId/${path}`, (r, reply) =>
+      entitlementMutate(r, reply, entitlementTransitionSchema, (id, k, v) =>
+        entitlementRegistryService!.transition(
+          r.headers.authorization,
+          entitlementTenant(r).data!,
+          id,
+          k,
+          transition,
+          action,
+          v,
+          metadata(r),
+        ),
+      ),
+    );
 
   app.setNotFoundHandler(async (request, reply) => {
     const envelope = errorEnvelopeSchema.parse({

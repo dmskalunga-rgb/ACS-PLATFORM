@@ -20,6 +20,7 @@
     "test:proposal:e2e": "vitest run src/platform-context.e2e.test.ts -t Proposal.Registry",
     "test:contract:e2e": "vitest run src/platform-context.e2e.test.ts -t Contract.Registry",
     "test:subscription:e2e": "vitest run src/platform-context.e2e.test.ts -t Subscription.Registry",
+    "test:entitlement:e2e": "vitest run src/platform-context.e2e.test.ts -t Entitlement.Registry",
     "test:coverage": "vitest run --config vitest.unit.config.ts --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
