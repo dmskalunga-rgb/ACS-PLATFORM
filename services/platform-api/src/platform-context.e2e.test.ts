@@ -15,6 +15,9 @@ import {
   opportunityListEnvelopeSchema,
   proposalEnvelopeSchema,
   proposalListEnvelopeSchema,
+  contractEnvelopeSchema,
+  contractListEnvelopeSchema,
+  type Contract,
   type Proposal,
   type Opportunity,
   type Partner,
@@ -26,6 +29,7 @@ import { PostgresPlanCatalogRepository } from './postgres-plan-catalog.js';
 import { PostgresPartnerRegistryRepository } from './postgres-partner-registry.js';
 import { PostgresOpportunityRegistryRepository } from './postgres-opportunity-registry.js';
 import { PostgresProposalRegistryRepository } from './postgres-proposal-registry.js';
+import { PostgresContractRegistryRepository } from './postgres-contract-registry.js';
 import { PostgresTenantContextRepository } from './postgres-platform-context.js';
 import type { PlatformConfiguration } from './config.js';
 
@@ -44,6 +48,7 @@ const requiredEnvironment = {
   partner: process.env.ACS_PARTNER_DATABASE_URL,
   opportunity: process.env.ACS_OPPORTUNITY_DATABASE_URL,
   proposal: process.env.ACS_PROPOSAL_DATABASE_URL,
+  contract: process.env.ACS_CONTRACT_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment)) {
@@ -52,6 +57,9 @@ for (const [name, value] of Object.entries(requiredEnvironment)) {
 const proposalDatabaseUrl = requiredEnvironment.proposal;
 if (proposalDatabaseUrl === undefined || proposalDatabaseUrl === '')
   throw new Error('proposal E2E database URL is required.');
+const contractDatabaseUrl = requiredEnvironment.contract;
+if (contractDatabaseUrl === undefined || contractDatabaseUrl === '')
+  throw new Error('contract E2E database URL is required.');
 
 const configuration: PlatformConfiguration = {
   environment: 'test',
@@ -71,6 +79,7 @@ const configuration: PlatformConfiguration = {
   ...(process.env.ACS_PROPOSAL_DATABASE_URL === undefined
     ? {}
     : { proposalDatabaseUrl: process.env.ACS_PROPOSAL_DATABASE_URL }),
+  contractDatabaseUrl,
   webOrigin: 'http://localhost:5173',
 };
 
@@ -4485,6 +4494,566 @@ describe.sequential('Proposal Registry signed OIDC acceptance matrix', () => {
     );
     process.stdout.write(
       `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, ...Object.fromEntries(measurements) })}\n`,
+    );
+  });
+});
+
+describe.sequential('Contract Registry signed OIDC acceptance matrix', () => {
+  const aliceMembership = '30000000-0000-4000-8000-000000000055';
+  const aliceUser = '40000000-0000-4000-8000-000000000044';
+  const bobMembership = '30000000-0000-4000-8000-000000000099';
+  const bobUser = '50000000-0000-4000-8000-000000000055';
+  let planId: string;
+  let opportunityId: string;
+  let aliceToken: string;
+  let bobToken: string;
+  let charlieToken: string;
+  let primary: Contract;
+
+  const requestHeaders = (key = randomUUID(), tenant = tenantA, token = aliceToken) => ({
+    authorization: `Bearer ${token}`,
+    'x-acs-tenant-id': tenant,
+    'idempotency-key': key,
+  });
+  const acceptedProposal = async (tenant = tenantA) => {
+    const suffix = randomUUID().slice(0, 10);
+    const proposal = await admin.query<{ id: string }>(
+      `INSERT INTO commercial.proposals(tenant_id,proposal_code,title,opportunity_id,owner_membership_id,created_by_membership_id,currency_code,status,valid_until,proposal_subtotal,grand_total,approved_by_membership_id,approved_at,created_by,updated_by)
+       VALUES($1,$2,'Contract source fixture',$3,$4,$4,'USD','ACCEPTED',clock_timestamp()+interval '30 days',25,25,$5,clock_timestamp(),$6,$6) RETURNING id`,
+      [tenant, `CTR-SRC-${suffix}`, opportunityId, aliceMembership, bobMembership, aliceUser],
+    );
+    await admin.query(
+      `INSERT INTO commercial.proposal_line_items(proposal_id,tenant_id,line_number,plan_id,plan_name_snapshot,description_snapshot,quantity,unit_price,line_subtotal)
+       VALUES($1,$2,1,$3,'Contract plan snapshot','Canonical Contract source line',1,25,25)`,
+      [proposal.rows[0]!.id, tenant, planId],
+    );
+    return proposal.rows[0]!.id;
+  };
+  const createContract = async (key = randomUUID(), suppliedSource?: string) => {
+    const source = suppliedSource ?? (await acceptedProposal());
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/contracts',
+      headers: requestHeaders(key),
+      payload: { source_proposal_id: source },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return { contract: contractEnvelopeSchema.parse(response.json()).data, response, key, source };
+  };
+  const mutate = async (
+    contract: Contract,
+    action: string,
+    token = aliceToken,
+    body: Record<string, unknown> = { expected_version: contract.version },
+  ) => {
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/contracts/${contract.id}/${action}`,
+      headers: requestHeaders(randomUUID(), tenantA, token),
+      payload: body,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return contractEnvelopeSchema.parse(response.json()).data;
+  };
+  const approvedContract = async () => {
+    let current = (await createContract()).contract;
+    current = await mutate(current, 'submit');
+    return mutate(current, 'approve', bobToken);
+  };
+  const issueContext = async (action: string) => {
+    const contexts = new PostgresTenantContextRepository(
+      requiredEnvironment.issuer as string,
+      requiredEnvironment.tenant as string,
+    );
+    const issued = await contexts.issueContext(
+      JSON.stringify(['https://issuer.acs.test', 'alice']),
+      tenantA,
+      action,
+    );
+    if (!issued) throw new Error('Canonical Contract test context was not issued.');
+    return { ...issued, close: () => contexts.close() };
+  };
+
+  beforeAll(async () => {
+    aliceToken = await signedOidcToken('alice');
+    bobToken = await signedOidcToken('bob');
+    charlieToken = await signedOidcToken('charlie');
+    await admin.query(
+      `INSERT INTO platform.memberships(id,tenant_id,user_id,status)
+       VALUES($1,$2,$3,'ACTIVE') ON CONFLICT DO NOTHING`,
+      [bobMembership, tenantA, bobUser],
+    );
+    await admin.query(
+      `INSERT INTO platform.membership_permissions(tenant_id,membership_id,permission_key)
+       SELECT $1,$2,permission_key FROM platform.permissions
+       WHERE permission_key LIKE 'commercial.contract.%' ON CONFLICT DO NOTHING`,
+      [tenantA, bobMembership],
+    );
+    const reference = await admin.query<{ opportunity_id: string; plan_id: string }>(
+      `SELECT o.id opportunity_id,p.id plan_id FROM commercial.opportunities o
+       JOIN commercial.plans p ON p.tenant_id=o.tenant_id
+       WHERE o.tenant_id=$1 ORDER BY o.id,p.id LIMIT 1`,
+      [tenantA],
+    );
+    if (!reference.rows[0]) throw new Error('Contract E2E references are unavailable.');
+    opportunityId = reference.rows[0].opportunity_id;
+    planId = reference.rows[0].plan_id;
+  });
+
+  it('CTR-POS-001 creates from an accepted Proposal through the signed OIDC path', async () => {
+    primary = (await createContract()).contract;
+    expect(primary).toMatchObject({ status: 'DRAFT', revision_number: 1, version: 1 });
+  });
+
+  it('CTR-POS-002 lists and reads only tenant-scoped Contracts', async () => {
+    const list = await oidcApp.inject({
+      method: 'GET',
+      url: '/api/v1/commercial/contracts?limit=100',
+      headers: requestHeaders(),
+    });
+    expect(list.statusCode, list.body).toBe(200);
+    expect(
+      contractListEnvelopeSchema.parse(list.json()).data.some((x) => x.id === primary.id),
+    ).toBe(true);
+    const detail = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/contracts/${primary.id}`,
+      headers: requestHeaders(),
+    });
+    expect(contractEnvelopeSchema.parse(detail.json()).data.id).toBe(primary.id);
+  });
+
+  it('CTR-POS-003 preserves source snapshots and server-computed totals', () => {
+    expect(primary.lines).toHaveLength(1);
+    expect(primary.lines[0]).toMatchObject({ quantity: '1.0000', unit_price: '25.0000' });
+    expect(primary.contract_subtotal).toBe('25.0000');
+    expect(primary.grand_total).toBe('25.0000');
+  });
+
+  it('CTR-POS-004 updates DRAFT data and lines with expected_version', async () => {
+    const updated = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/contracts/${primary.id}`,
+      headers: requestHeaders(),
+      payload: { title: 'Updated Contract', expected_version: primary.version },
+    });
+    primary = contractEnvelopeSchema.parse(updated.json()).data;
+    const line = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/contracts/${primary.id}/lines/${primary.lines[0]!.id}`,
+      headers: requestHeaders(),
+      payload: { quantity: '2.0000', expected_version: primary.version },
+    });
+    primary = contractEnvelopeSchema.parse(line.json()).data;
+    expect(primary.grand_total).toBe('50.0000');
+  });
+
+  it('CTR-POS-005 submits and returns a Contract to DRAFT', async () => {
+    primary = await mutate(primary, 'submit');
+    primary = await mutate(primary, 'return-to-draft', bobToken);
+    expect(primary.status).toBe('DRAFT');
+  });
+
+  it('CTR-POS-006 enforces a distinct approver', async () => {
+    primary = await mutate(primary, 'submit');
+    primary = await mutate(primary, 'approve', bobToken);
+    expect(primary).toMatchObject({ status: 'APPROVED', approved_by_membership_id: bobMembership });
+  });
+
+  it('CTR-POS-007 creates an immutable revision snapshot before revise', async () => {
+    const revision = primary.revision_number;
+    primary = await mutate(primary, 'revise');
+    const snapshot = await admin.query(
+      'SELECT 1 FROM commercial.contract_revisions WHERE contract_id=$1 AND revision_number=$2',
+      [primary.id, revision],
+    );
+    expect(snapshot.rowCount).toBe(1);
+    expect(primary.revision_number).toBe(revision + 1);
+  });
+
+  it('CTR-POS-008 activates only inside its effective-date boundary', async () => {
+    let current = await approvedContract();
+    const patch = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/contracts/${current.id}/revise`,
+      headers: requestHeaders(),
+      payload: { expected_version: current.version },
+    });
+    current = contractEnvelopeSchema.parse(patch.json()).data;
+    const dates = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/contracts/${current.id}`,
+      headers: requestHeaders(),
+      payload: {
+        effective_from: new Date(Date.now() - 60_000).toISOString(),
+        effective_until: new Date(Date.now() + 86_400_000).toISOString(),
+        expected_version: current.version,
+      },
+    });
+    current = contractEnvelopeSchema.parse(dates.json()).data;
+    current = await mutate(await mutate(current, 'submit'), 'approve', bobToken);
+    expect((await mutate(current, 'activate')).status).toBe('ACTIVE');
+  });
+
+  it('CTR-POS-009 supports cancel and terminate terminal paths', async () => {
+    const cancelled = await mutate(await approvedContract(), 'cancel');
+    expect(cancelled.status).toBe('CANCELLED');
+    let active = await approvedContract();
+    await admin.query(
+      "UPDATE commercial.contracts SET effective_from=clock_timestamp()-interval '1 minute' WHERE id=$1",
+      [active.id],
+    );
+    active = await mutate(active, 'activate');
+    expect((await mutate(active, 'terminate')).status).toBe('TERMINATED');
+  });
+
+  it('CTR-POS-010 reassigns ownership to an active tenant membership', async () => {
+    let current = (await createContract()).contract;
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/contracts/${current.id}/assign`,
+      headers: requestHeaders(),
+      payload: { owner_membership_id: bobMembership, expected_version: current.version },
+    });
+    current = contractEnvelopeSchema.parse(response.json()).data;
+    expect(current.owner_membership_id).toBe(bobMembership);
+  });
+
+  it('CTR-POS-011 keeps historical snapshots stable after source changes', async () => {
+    const created = await createContract();
+    await admin.query(
+      "UPDATE commercial.proposals SET title='Changed after Contract' WHERE id=$1",
+      [created.source],
+    );
+    const detail = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/contracts/${created.contract.id}`,
+      headers: requestHeaders(),
+    });
+    expect(contractEnvelopeSchema.parse(detail.json()).data.title).toBe('Contract source fixture');
+  });
+
+  it('CTR-POS-012 replays a tenant-scoped create idempotently', async () => {
+    const source = await acceptedProposal();
+    const key = randomUUID();
+    const first = await createContract(key, source);
+    const replay = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/contracts',
+      headers: requestHeaders(key),
+      payload: { source_proposal_id: source },
+    });
+    expect(contractEnvelopeSchema.parse(replay.json()).meta.idempotent_replay).toBe(true);
+    expect(contractEnvelopeSchema.parse(replay.json()).data.id).toBe(first.contract.id);
+  });
+
+  it('CTR-NEG-001 rejects missing, invalid and unknown OIDC identities', async () => {
+    const source = await acceptedProposal();
+    for (const authorization of [
+      undefined,
+      'Bearer invalid',
+      `Bearer ${await signedOidcToken('nobody')}`,
+    ]) {
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/contracts',
+        headers: {
+          'x-acs-tenant-id': tenantA,
+          'idempotency-key': randomUUID(),
+          ...(authorization ? { authorization } : {}),
+        },
+        payload: { source_proposal_id: source },
+      });
+      expect([401, 403]).toContain(response.statusCode);
+    }
+  });
+
+  it('CTR-NEG-002 denies a valid member without Contract permission', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/contracts/${primary.id}`,
+      headers: requestHeaders(randomUUID(), tenantA, charlieToken),
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('CTR-NEG-003 rejects unknown fields and client-supplied totals', async () => {
+    const source = await acceptedProposal();
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/contracts',
+      headers: requestHeaders(),
+      payload: { source_proposal_id: source, grand_total: '0.0000', tenant_id: tenantB },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('CTR-NEG-004 rejects non-accepted, missing and duplicate Proposal sources', async () => {
+    const source = await acceptedProposal();
+    await admin.query("UPDATE commercial.proposals SET status='DRAFT' WHERE id=$1", [source]);
+    const invalid = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/contracts',
+      headers: requestHeaders(),
+      payload: { source_proposal_id: source },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const duplicateSource = await acceptedProposal();
+    await createContract(randomUUID(), duplicateSource);
+    const duplicate = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/contracts',
+      headers: requestHeaders(),
+      payload: { source_proposal_id: duplicateSource },
+    });
+    expect(duplicate.statusCode).toBe(409);
+  });
+
+  it('CTR-NEG-005 does not disclose a foreign-tenant source or Contract', async () => {
+    const response = await oidcApp.inject({
+      method: 'GET',
+      url: `/api/v1/commercial/contracts/${primary.id}`,
+      headers: requestHeaders(randomUUID(), tenantB, charlieToken),
+    });
+    expect(response.statusCode).not.toBe(200);
+  });
+
+  it('CTR-NEG-006 rejects invalid money and effective-date ranges', async () => {
+    const current = (await createContract()).contract;
+    const line = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/contracts/${current.id}/lines`,
+      headers: requestHeaders(),
+      payload: { plan_id: planId, quantity: '0.0000', unit_price: '1.0000', expected_version: 1 },
+    });
+    expect(line.statusCode).toBe(400);
+    const dates = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/contracts/${current.id}`,
+      headers: requestHeaders(),
+      payload: {
+        effective_from: new Date(Date.now() + 86_400_000).toISOString(),
+        effective_until: new Date().toISOString(),
+        expected_version: current.version,
+      },
+    });
+    expect(dates.statusCode).toBe(400);
+  });
+
+  it('CTR-NEG-007 rejects invalid lifecycle and terminal mutations', async () => {
+    const current = (await createContract()).contract;
+    const activate = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/contracts/${current.id}/activate`,
+      headers: requestHeaders(),
+      payload: { expected_version: current.version },
+    });
+    expect(activate.statusCode).toBe(400);
+    const cancelled = await mutate(await approvedContract(), 'cancel');
+    const update = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/contracts/${cancelled.id}`,
+      headers: requestHeaders(),
+      payload: { title: 'Forbidden terminal edit', expected_version: cancelled.version },
+    });
+    expect(update.statusCode).toBe(400);
+  });
+
+  it('CTR-NEG-008 rejects creator self-approval', async () => {
+    let current = (await createContract()).contract;
+    current = await mutate(current, 'submit');
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: `/api/v1/commercial/contracts/${current.id}/approve`,
+      headers: requestHeaders(),
+      payload: { expected_version: current.version },
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('CTR-NEG-009 rejects stale expected_version updates', async () => {
+    const current = (await createContract()).contract;
+    const response = await oidcApp.inject({
+      method: 'PATCH',
+      url: `/api/v1/commercial/contracts/${current.id}`,
+      headers: requestHeaders(),
+      payload: { title: 'Stale', expected_version: current.version + 1 },
+    });
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('CTR-NEG-010 rejects divergent tenant-scoped idempotency payloads', async () => {
+    const key = randomUUID();
+    await createContract(key);
+    const response = await oidcApp.inject({
+      method: 'POST',
+      url: '/api/v1/commercial/contracts',
+      headers: requestHeaders(key),
+      payload: { source_proposal_id: await acceptedProposal() },
+    });
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('CTR-NEG-011 proves FORCE RLS and no hard-delete API surface', async () => {
+    const direct = new Client({ connectionString: contractDatabaseUrl });
+    await direct.connect();
+    const rows = await direct.query('SELECT id FROM commercial.contracts');
+    await direct.end();
+    expect(rows.rowCount).toBe(0);
+    const response = await oidcApp.inject({
+      method: 'DELETE',
+      url: `/api/v1/commercial/contracts/${primary.id}`,
+      headers: requestHeaders(),
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('CTR-NEG-012 keeps sensitive relationship data out of audit and outbox payloads', async () => {
+    const created = await createContract();
+    const evidence = await admin.query<{ audit: string; event: string }>(
+      `SELECT coalesce((SELECT metadata::text FROM platform.audit_logs WHERE resource=$1 ORDER BY occurred_at DESC LIMIT 1),'') audit,
+              coalesce((SELECT payload::text FROM platform.domain_events WHERE payload->>'id'=$2 ORDER BY occurred_at DESC LIMIT 1),'') event`,
+      [`commercial:contract:${created.contract.id}`, created.contract.id],
+    );
+    expect(evidence.rows[0]!.audit).not.toContain('contact');
+    expect(evidence.rows[0]!.event).not.toContain('contact');
+  });
+
+  it('CTR-NEG-013 proves mutation, audit, outbox and revision rollback atomicity', async () => {
+    const source = await acceptedProposal();
+    const context = await issueContext('commercial.contract.create');
+    const failedCorrelationId = randomUUID();
+    const repository = new PostgresContractRegistryRepository(contractDatabaseUrl, (phase) => {
+      if (phase === 'after-outbox') throw new Error('TEST_ONLY_CONTRACT_FAILURE');
+    });
+    await expect(
+      repository.create({
+        actorUserId: aliceUser,
+        contextToken: context.contextToken,
+        correlationId: failedCorrelationId,
+        idempotencyKey: randomUUID(),
+        requestHash: 'a'.repeat(64),
+        requestId: randomUUID(),
+        tenantId: tenantA,
+        action: 'commercial.contract.create',
+        source_proposal_id: source,
+      }),
+    ).rejects.toThrow('TEST_ONLY_CONTRACT_FAILURE');
+    await repository.close();
+    await context.close();
+    const persisted = await admin.query(
+      'SELECT 1 FROM commercial.contracts WHERE source_proposal_id=$1',
+      [source],
+    );
+    const event = await admin.query(
+      "SELECT 1 FROM platform.domain_events WHERE event_type='commercial.contract.created' AND payload->>'source_proposal_id'=$1",
+      [source],
+    );
+    const audit = await admin.query('SELECT 1 FROM platform.audit_logs WHERE correlation_id=$1', [
+      failedCorrelationId,
+    ]);
+    expect(persisted.rowCount).toBe(0);
+    expect(event.rowCount).toBe(0);
+    expect(audit.rowCount).toBe(0);
+
+    const raced = (await createContract()).contract;
+    const race = await Promise.all(
+      ['Race A', 'Race B'].map((title) =>
+        oidcApp.inject({
+          method: 'PATCH',
+          url: `/api/v1/commercial/contracts/${raced.id}`,
+          headers: requestHeaders(),
+          payload: { title, expected_version: raced.version },
+        }),
+      ),
+    );
+    expect(race.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+
+    const approved = await approvedContract();
+    const revisionContext = await issueContext('commercial.contract.revise');
+    const revisionRepository = new PostgresContractRegistryRepository(
+      contractDatabaseUrl,
+      (phase) => {
+        if (phase === 'after-revision-snapshot') throw new Error('TEST_ONLY_REVISION_FAILURE');
+      },
+    );
+    await expect(
+      revisionRepository.transition({
+        actorUserId: aliceUser,
+        contextToken: revisionContext.contextToken,
+        correlationId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        requestHash: 'b'.repeat(64),
+        requestId: randomUUID(),
+        tenantId: tenantA,
+        contractId: approved.id,
+        action: 'commercial.contract.revise',
+        transition: 'revise',
+        expected_version: approved.version,
+      }),
+    ).rejects.toThrow('TEST_ONLY_REVISION_FAILURE');
+    await revisionRepository.close();
+    await revisionContext.close();
+    const revisions = await admin.query(
+      'SELECT 1 FROM commercial.contract_revisions WHERE contract_id=$1',
+      [approved.id],
+    );
+    const aggregate = await admin.query<{ status: string; revision_number: string }>(
+      'SELECT status,revision_number::text FROM commercial.contracts WHERE id=$1',
+      [approved.id],
+    );
+    expect(revisions.rowCount).toBe(0);
+    expect(aggregate.rows[0]).toMatchObject({
+      status: 'APPROVED',
+      revision_number: String(approved.revision_number),
+    });
+    const downstream = await admin.query<{ subscriptions: string | null; invoices: string | null }>(
+      "SELECT to_regclass('commercial.subscriptions')::text subscriptions,to_regclass('commercial.invoices')::text invoices",
+    );
+    expect(downstream.rows[0]).toEqual({ subscriptions: null, invoices: null });
+  });
+
+  it('records a Contract signed-OIDC PostgreSQL baseline without asserting an SLO', async () => {
+    const timings = new Map<string, number>();
+    const measure = async <T>(name: string, work: () => Promise<T>) => {
+      const started = performance.now();
+      const result = await work();
+      timings.set(name, Number((performance.now() - started).toFixed(2)));
+      return result;
+    };
+    const created = await measure('CONTRACT_CREATE_MS', () => createContract());
+    await measure('CONTRACT_LIST_MS', async () => {
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/commercial/contracts?limit=25',
+        headers: requestHeaders(),
+      });
+      expect(response.statusCode).toBe(200);
+    });
+    let current = await measure('CONTRACT_DETAIL_MS', async () => {
+      const response = await oidcApp.inject({
+        method: 'GET',
+        url: `/api/v1/commercial/contracts/${created.contract.id}`,
+        headers: requestHeaders(),
+      });
+      expect(response.statusCode).toBe(200);
+      return contractEnvelopeSchema.parse(response.json()).data;
+    });
+    current = await measure('CONTRACT_DRAFT_UPDATE_MS', async () => {
+      const response = await oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/contracts/${current.id}`,
+        headers: requestHeaders(),
+        payload: { title: 'Performance baseline Contract', expected_version: current.version },
+      });
+      expect(response.statusCode).toBe(200);
+      return contractEnvelopeSchema.parse(response.json()).data;
+    });
+    current = await measure('CONTRACT_SUBMIT_MS', () => mutate(current, 'submit'));
+    current = await measure('CONTRACT_APPROVE_MS', () => mutate(current, 'approve', bobToken));
+    current = await measure('CONTRACT_REVISE_MS', () => mutate(current, 'revise'));
+    process.stdout.write(
+      `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, ...Object.fromEntries(timings) })}\n`,
     );
   });
 });

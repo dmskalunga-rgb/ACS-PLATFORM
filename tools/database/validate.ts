@@ -91,6 +91,15 @@ const proposalRollbackPath = resolve(
 );
 const proposalTestPath = resolve('database/tests/rls/proposal_registry_isolation.sql');
 const proposalSeedPath = resolve('database/tests/fixtures/proposal_registry_seed.sql');
+const contractRolesPath = resolve('database/roles/phase2_contract_roles.sql');
+const contractMigrationPath = resolve(
+  'database/migrations/20260826000000_phase2_contract_registry.sql',
+);
+const contractRollbackPath = resolve(
+  'database/rollbacks/20260826000000_phase2_contract_registry.sql',
+);
+const contractTestPath = resolve('database/tests/rls/contract_registry_isolation.sql');
+const contractSeedPath = resolve('database/tests/fixtures/contract_registry_seed.sql');
 
 const testRoles = [
   'acs_phase1_auditor_login_test',
@@ -117,12 +126,14 @@ const testRoles = [
   'acs_phase2_partner_login_test',
   'acs_phase2_opportunity_login_test',
   'acs_phase2_proposal_login_test',
+  'acs_phase2_contract_login_test',
   'acs_phase2_customer_registry',
   'acs_phase2_lead_registry',
   'acs_phase2_plan_catalog',
   'acs_phase2_partner_registry',
   'acs_phase2_opportunity_registry',
   'acs_phase2_proposal_registry',
+  'acs_phase2_contract_registry',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -142,6 +153,7 @@ try {
     "SELECT to_regclass('commercial.customers') AS relation",
   );
   if (customerRegistryExists.rows[0]?.relation !== null) {
+    await client.query(await readFile(contractRollbackPath, 'utf8'));
     await client.query(await readFile(proposalRollbackPath, 'utf8'));
     await client.query(await readFile(opportunityRollbackPath, 'utf8'));
     await client.query(await readFile(planRollbackPath, 'utf8'));
@@ -178,6 +190,8 @@ try {
   await client.query(await readFile(opportunityMigrationPath, 'utf8'));
   await client.query(await readFile(proposalRolesPath, 'utf8'));
   await client.query(await readFile(proposalMigrationPath, 'utf8'));
+  await client.query(await readFile(contractRolesPath, 'utf8'));
+  await client.query(await readFile(contractMigrationPath, 'utf8'));
   await client.query(
     'CREATE ROLE acs_phase0_tenant_test NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE',
   );
@@ -213,10 +227,21 @@ try {
   await client.query(await readFile(partnerTestPath, 'utf8'));
   await client.query(await readFile(opportunityTestPath, 'utf8'));
   await client.query(await readFile(proposalTestPath, 'utf8'));
+  await client.query(await readFile(contractSeedPath, 'utf8'));
+  await client.query(await readFile(contractTestPath, 'utf8'));
+  await client.query(await readFile(contractRollbackPath, 'utf8'));
+  await client.query(await readFile(contractMigrationPath, 'utf8'));
+  await client.query(await readFile(contractSeedPath, 'utf8'));
+  await client.query(await readFile(contractTestPath, 'utf8'));
+  await client.query(await readFile(contractRollbackPath, 'utf8'));
   await client.query(await readFile(proposalRollbackPath, 'utf8'));
   await client.query(await readFile(proposalMigrationPath, 'utf8'));
   await client.query(await readFile(proposalSeedPath, 'utf8'));
   await client.query(await readFile(proposalTestPath, 'utf8'));
+  await client.query(await readFile(contractMigrationPath, 'utf8'));
+  await client.query(await readFile(contractSeedPath, 'utf8'));
+  await client.query(await readFile(contractTestPath, 'utf8'));
+  await client.query(await readFile(contractRollbackPath, 'utf8'));
   await client.query(await readFile(proposalRollbackPath, 'utf8'));
   await client.query(await readFile(opportunityRollbackPath, 'utf8'));
   await client.query(await readFile(opportunityMigrationPath, 'utf8'));
@@ -283,6 +308,11 @@ try {
   await client.query(await readFile(proposalMigrationPath, 'utf8'));
   await client.query(await readFile(proposalSeedPath, 'utf8'));
   await client.query(await readFile(proposalTestPath, 'utf8'));
+  // Contract depends on the accepted Proposal snapshot. Leave its validated
+  // least-privilege runtime path available to the dedicated API E2E suite.
+  await client.query(await readFile(contractMigrationPath, 'utf8'));
+  await client.query(await readFile(contractSeedPath, 'utf8'));
+  await client.query(await readFile(contractTestPath, 'utf8'));
   const durableDenials = await client.query(
     "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
   );
@@ -318,9 +348,11 @@ try {
     GRANT acs_phase2_opportunity_registry TO acs_phase2_opportunity_login_test;
     CREATE ROLE acs_phase2_proposal_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
     GRANT acs_phase2_proposal_registry TO acs_phase2_proposal_login_test;
+    CREATE ROLE acs_phase2_contract_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
+    GRANT acs_phase2_contract_registry TO acs_phase2_contract_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_PROPOSAL', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();

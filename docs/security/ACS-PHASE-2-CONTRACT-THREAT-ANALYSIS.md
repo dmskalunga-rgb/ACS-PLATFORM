@@ -13,4 +13,6 @@
 | Privileged database bypass                 | Least-privilege role; no `SUPERUSER` or `BYPASSRLS`                         | CTR-NEG-010                        |
 | Unauthorized downstream effect             | Explicit side-effect-free activation boundary                               | CTR-NEG-013                        |
 
-Production assurance mappings, retention periods and named security owners remain governance decisions; they are not weakened by this DoR.
+The Web UI consumes the real Contract endpoint shapes, preserves server authority for tenant, totals, lifecycle, expected version and SoD, and presents bounded 400/401/403/404/409/5xx states. It does not expose unauthorised lifecycle actions or fabricate audit/history data.
+
+Production assurance mappings, retention periods and named security owners remain governance decisions; they are not weakened by this local implementation evidence.

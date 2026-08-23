@@ -1,4 +1,4 @@
-name: Phase 2 Proposal / Quotation validation
+name: Phase 2 Contract validation
 
 on:
   pull_request:
@@ -12,8 +12,8 @@ env:
   NODE_VERSION: 24.19.0
 
 jobs:
-  proposal-quality:
-    name: Proposal quality, contracts, Web and build
+  contract-quality:
+    name: Contract quality, contracts, Web and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -27,8 +27,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
-  proposal-postgresql-e2e:
-    name: Proposal OIDC, authorization, FORCE RLS, audit and event E2E
+  contract-postgresql-e2e:
+    name: Contract OIDC, authorization, FORCE RLS, audit and event E2E
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -71,6 +71,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:validate
       - run: pnpm --filter @acs/platform-api... build
+      - run: pnpm test:contract:e2e
       - run: pnpm --filter @acs/platform-api test:proposal:e2e
       - run: pnpm test:opportunity-registry:e2e
       - run: pnpm test:partner-registry:e2e
