@@ -133,7 +133,10 @@ import {
   ContractRegistryFailure,
   ContractRegistryService,
 } from './contract-registry.js';
-import { emitContractReviseDiagnostic } from './contract-revise-diagnostic.js';
+import {
+  emitContractReviseDiagnostic,
+  emitFastifyContractReviseDiagnostic,
+} from './contract-revise-diagnostic.js';
 import {
   SUBSCRIPTION_ACTIVATE,
   SUBSCRIPTION_CANCEL,
@@ -468,6 +471,7 @@ export async function buildApp(
     request.correlationId = parsed?.success === true ? parsed.data : request.id;
     void reply.header('x-request-id', request.id);
     void reply.header('x-correlation-id', request.correlationId);
+    emitFastifyContractReviseDiagnostic('ON_REQUEST', 'success');
   });
   app.addHook('onResponse', async (request, reply) => {
     requests.inc({
@@ -3440,6 +3444,10 @@ export async function buildApp(
       'request failed',
     );
     emitContractReviseDiagnostic('HTTP_ERROR_MAP', 'failure', { error, httpStatus: 500 });
+    emitFastifyContractReviseDiagnostic('ERROR_HANDLER', 'failure', {
+      error,
+      httpStatus: 500,
+    });
     const envelope = errorEnvelopeSchema.parse({
       error: {
         code: 'FOUNDATION_INTERNAL_ERROR',
