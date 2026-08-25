@@ -135,4 +135,70 @@ describe('FOUNDATION platform API', () => {
     expect(response.statusCode).toBe(404);
     expect(errorEnvelopeSchema.parse(response.json()).error.code).toBe('FOUNDATION_NOT_FOUND');
   });
+
+  it('enforces the real rate limit and resets state for a fresh application instance', async () => {
+    const rateLimitOptions = {
+      logger: false,
+      testRateLimit: { max: 2, timeWindow: '1 minute' },
+    } as const;
+    const rateLimitedApp = await buildApp(configuration, rateLimitOptions);
+    try {
+      expect((await rateLimitedApp.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+      expect((await rateLimitedApp.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+
+      const rejected = await rateLimitedApp.inject({ method: 'GET', url: '/health' });
+      expect(rejected.statusCode).toBe(429);
+      expect(rejected.headers['x-ratelimit-limit']).toBe('2');
+      expect(rejected.headers['retry-after']).toBeDefined();
+      expect(errorEnvelopeSchema.parse(rejected.json()).error).toMatchObject({
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'The request rate limit was exceeded. Retry later.',
+      });
+      expect(rejected.body).not.toContain('Rate limit exceeded');
+    } finally {
+      await rateLimitedApp.close();
+    }
+
+    const freshApp = await buildApp(configuration, rateLimitOptions);
+    try {
+      expect((await freshApp.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+    } finally {
+      await freshApp.close();
+    }
+  });
+
+  it('keeps unknown internal failures on the bounded canonical 500 response', async () => {
+    const repository: TenantContextRepository = {
+      resolveMembership: () => Promise.resolve(null),
+      isActionAuthorized: () => Promise.resolve(false),
+      issueContext: () => Promise.resolve(null),
+      readAndAudit: (context) => Promise.resolve(context),
+    };
+    const internalFailureApp = await buildApp(configuration, {
+      logger: false,
+      platformContextService: new PlatformContextService(
+        new DevelopmentHeaderIdentityAdapter(),
+        new RepositoryAuthorizationPort(repository),
+        repository,
+        {
+          recordDenied: () => Promise.reject(new Error('sensitive internal diagnostic')),
+        },
+      ),
+    });
+    try {
+      const response = await internalFailureApp.inject({
+        method: 'GET',
+        url: '/api/v1/platform/context',
+        headers: { 'x-acs-tenant-id': 'not-a-uuid' },
+      });
+      expect(response.statusCode).toBe(500);
+      expect(errorEnvelopeSchema.parse(response.json()).error).toMatchObject({
+        code: 'FOUNDATION_INTERNAL_ERROR',
+        message: 'The technical request could not be completed.',
+      });
+      expect(response.body).not.toContain('sensitive internal diagnostic');
+    } finally {
+      await internalFailureApp.close();
+    }
+  });
 });

@@ -190,6 +190,10 @@ export async function buildApp(
     readonly usageMeteringService?: UsageMeteringService;
     readonly machineUsageIngestionService?: MachineUsageIngestionService;
     readonly ratingService?: RatingService;
+    readonly testRateLimit?: {
+      readonly max: number;
+      readonly timeWindow: string;
+    };
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -427,10 +431,17 @@ export async function buildApp(
   }
 
   await app.register(cors, { credentials: false, origin: configuration.webOrigin });
+  const rateLimitPolicy =
+    configuration.environment === 'test' && options.testRateLimit !== undefined
+      ? options.testRateLimit
+      : {
+          max: configuration.environment === 'test' ? 1_000 : 100,
+          timeWindow: '1 minute',
+        };
   await app.register(rateLimit, {
     global: true,
-    max: configuration.environment === 'test' ? 1_000 : 100,
-    timeWindow: '1 minute',
+    max: rateLimitPolicy.max,
+    timeWindow: rateLimitPolicy.timeWindow,
   });
   await app.register(swagger, {
     openapi: {
@@ -3424,6 +3435,25 @@ export async function buildApp(
           error: {
             code: 'INVALID_REQUEST',
             message: 'The request does not match the published API contract.',
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+    }
+    if (
+      error instanceof Error &&
+      'statusCode' in error &&
+      error.statusCode === 429 &&
+      !('code' in error) &&
+      reply.hasHeader('x-ratelimit-limit') &&
+      reply.hasHeader('retry-after')
+    ) {
+      return reply.status(429).send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'The request rate limit was exceeded. Retry later.',
             request_id: request.id,
             correlation_id: request.correlationId,
           },

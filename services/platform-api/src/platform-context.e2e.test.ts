@@ -142,7 +142,10 @@ beforeAll(async () => {
     statement_timeout: statementTimeout,
   });
   await admin.connect();
-  app = await buildApp(configuration, { logger: e2eLogger });
+  app = await buildApp(configuration, {
+    logger: e2eLogger,
+    testRateLimit: { max: 1_000, timeWindow: '1 second' },
+  });
   const keys = await generateKeyPair('RS256');
   oidcSigningKey = keys.privateKey;
   const publicJwk = { ...(await exportJWK(keys.publicKey)), alg: 'RS256', kid: 'e2e', use: 'sig' };
@@ -168,7 +171,10 @@ beforeAll(async () => {
         jwksUri: `http://127.0.0.1:${address.port}/jwks`,
       },
     },
-    { logger: e2eLogger },
+    {
+      logger: e2eLogger,
+      testRateLimit: { max: 1_000, timeWindow: '1 second' },
+    },
   );
   oidcToken = await new SignJWT({ amr: ['pwd', 'otp'] })
     .setProtectedHeader({ alg: 'RS256', kid: 'e2e' })
