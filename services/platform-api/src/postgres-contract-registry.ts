@@ -48,7 +48,7 @@ type ContractDiagnosticPhase =
   'connect' | 'begin' | 'activate_context' | 'repository_operation' | 'commit';
 const allowedRuntimeErrorCodes = new Set(['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
 const postgresSqlStatePattern = /^[0-9A-Z]{5}$/;
-const emitSafeContractCreateDiagnostic = (
+const emitSafeContractReviseDiagnostic = (
   error: unknown,
   action: string,
   phase: ContractDiagnosticPhase,
@@ -57,7 +57,7 @@ const emitSafeContractCreateDiagnostic = (
     process.env.ACS_ENV !== 'test' ||
     process.env.CI !== 'true' ||
     process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC !== 'true' ||
-    action !== 'commercial.contract.create'
+    action !== 'commercial.contract.revise'
   )
     return;
   const candidateCode =
@@ -95,7 +95,7 @@ const emitSafeContractCreateDiagnostic = (
       error_name: errorName,
       error_code: errorCode,
       postgres_sqlstate: postgresSqlstate,
-      operation_label: 'contract.performance.create',
+      operation_label: 'contract.performance.revise',
       repository_component: 'postgres-contract-registry',
       phase,
       safe_retry_classification: safeRetryClassification,
@@ -552,7 +552,7 @@ export class PostgresContractRegistryRepository implements ContractRepository {
       await c.query('COMMIT');
       return result;
     } catch (error) {
-      emitSafeContractCreateDiagnostic(error, action, phase);
+      emitSafeContractReviseDiagnostic(error, action, phase);
       if (c !== undefined) await c.query('ROLLBACK');
       if (typeof error === 'object' && error !== null && 'code' in error) {
         if (error.code === '23505')

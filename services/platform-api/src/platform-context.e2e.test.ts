@@ -6791,14 +6791,7 @@ describe.sequential('Contract Registry signed OIDC acceptance matrix', () => {
       timings.set(name, Number((performance.now() - started).toFixed(2)));
       return result;
     };
-    const created = await (async () => {
-      process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC = 'true';
-      try {
-        return await measure('CONTRACT_CREATE_MS', () => createContract());
-      } finally {
-        delete process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC;
-      }
-    })();
+    const created = await measure('CONTRACT_CREATE_MS', () => createContract());
     await measure('CONTRACT_LIST_MS', async () => {
       const response = await oidcApp.inject({
         method: 'GET',
@@ -6828,7 +6821,14 @@ describe.sequential('Contract Registry signed OIDC acceptance matrix', () => {
     });
     current = await measure('CONTRACT_SUBMIT_MS', () => mutate(current, 'submit'));
     current = await measure('CONTRACT_APPROVE_MS', () => mutate(current, 'approve', bobToken));
-    current = await measure('CONTRACT_REVISE_MS', () => mutate(current, 'revise'));
+    current = await (async () => {
+      process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC = 'true';
+      try {
+        return await measure('CONTRACT_REVISE_MS', () => mutate(current, 'revise'));
+      } finally {
+        delete process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC;
+      }
+    })();
     process.stdout.write(
       `${JSON.stringify({ BASELINE_MEASUREMENT_NOT_SLO: true, ...Object.fromEntries(timings) })}\n`,
     );
