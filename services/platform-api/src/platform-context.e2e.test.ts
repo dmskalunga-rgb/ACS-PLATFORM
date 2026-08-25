@@ -133,6 +133,7 @@ let admin: pg.Client;
 let jwksServer: Server;
 let oidcToken: string;
 let oidcSigningKey: Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
+const e2eLogger = process.env.CI === 'true';
 
 beforeAll(async () => {
   admin = new Client({
@@ -141,7 +142,7 @@ beforeAll(async () => {
     statement_timeout: statementTimeout,
   });
   await admin.connect();
-  app = await buildApp(configuration, { logger: false });
+  app = await buildApp(configuration, { logger: e2eLogger });
   const keys = await generateKeyPair('RS256');
   oidcSigningKey = keys.privateKey;
   const publicJwk = { ...(await exportJWK(keys.publicKey)), alg: 'RS256', kid: 'e2e', use: 'sig' };
@@ -167,7 +168,7 @@ beforeAll(async () => {
         jwksUri: `http://127.0.0.1:${address.port}/jwks`,
       },
     },
-    { logger: false },
+    { logger: e2eLogger },
   );
   oidcToken = await new SignJWT({ amr: ['pwd', 'otp'] })
     .setProtectedHeader({ alg: 'RS256', kid: 'e2e' })
