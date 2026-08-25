@@ -44,7 +44,8 @@ export type ContractTestTransactionPhase =
   | 'after-outbox'
   | 'after-revision-snapshot'
   | 'before-commit';
-type ContractDiagnosticPhase = 'begin' | 'activate_context' | 'repository_operation' | 'commit';
+type ContractDiagnosticPhase =
+  'connect' | 'begin' | 'activate_context' | 'repository_operation' | 'commit';
 const allowedRuntimeErrorCodes = new Set(['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
 const postgresSqlStatePattern = /^[0-9A-Z]{5}$/;
 const emitSafeContractCreateDiagnostic = (
@@ -531,9 +532,11 @@ export class PostgresContractRegistryRepository implements ContractRepository {
     );
   }
   private async tx<T>(token: string, action: string, work: (c: pg.PoolClient) => Promise<T>) {
-    const c = await this.pool.connect();
-    let phase: ContractDiagnosticPhase = 'begin';
+    let c: pg.PoolClient | undefined;
+    let phase: ContractDiagnosticPhase = 'connect';
     try {
+      c = await this.pool.connect();
+      phase = 'begin';
       await c.query('BEGIN');
       phase = 'activate_context';
       const active = await c.query('SELECT * FROM platform.activate_tenant_context($1::uuid,$2)', [
@@ -550,7 +553,7 @@ export class PostgresContractRegistryRepository implements ContractRepository {
       return result;
     } catch (error) {
       emitSafeContractCreateDiagnostic(error, action, phase);
-      await c.query('ROLLBACK');
+      if (c !== undefined) await c.query('ROLLBACK');
       if (typeof error === 'object' && error !== null && 'code' in error) {
         if (error.code === '23505')
           throw new ContractRegistryFailure(
@@ -565,7 +568,7 @@ export class PostgresContractRegistryRepository implements ContractRepository {
       }
       throw error;
     } finally {
-      c.release();
+      c?.release();
     }
   }
 }
