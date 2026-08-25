@@ -57,6 +57,10 @@ import {
   machineMeasurementIngestSchema,
   measurementCorrectionCreateSchema,
   measurementSourceCreateSchema,
+  ratePlanCreateSchema,
+  ratePlanDraftUpdateSchema,
+  ratingApplicabilityCreateSchema,
+  rerateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
   platformContextSchema,
@@ -103,6 +107,7 @@ import { PostgresContractRegistryRepository } from './postgres-contract-registry
 import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
 import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
 import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
+import { PostgresRatingRepository } from './postgres-rating.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -153,6 +158,7 @@ import {
   UsageMeteringFailure,
   UsageMeteringService,
 } from './usage-metering.js';
+import { RatingFailure, RatingService } from './rating.js';
 import {
   TenantAdministrationFailure,
   TenantAdministrationService,
@@ -183,6 +189,7 @@ export async function buildApp(
     readonly entitlementRegistryService?: EntitlementRegistryService;
     readonly usageMeteringService?: UsageMeteringService;
     readonly machineUsageIngestionService?: MachineUsageIngestionService;
+    readonly ratingService?: RatingService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -222,6 +229,8 @@ export async function buildApp(
   let usageMeteringRepository: PostgresUsageMeteringRepository | undefined;
   let usageMeteringService = options.usageMeteringService;
   let machineUsageIngestionService = options.machineUsageIngestionService;
+  let ratingRepository: PostgresRatingRepository | undefined;
+  let ratingService = options.ratingService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -385,6 +394,16 @@ export async function buildApp(
       );
       machineUsageIngestionService = new MachineUsageIngestionService(usageMeteringRepository);
     }
+    if (configuration.ratingDatabaseUrl !== undefined) {
+      ratingRepository = new PostgresRatingRepository(configuration.ratingDatabaseUrl);
+      ratingService = new RatingService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        ratingRepository,
+        securityAuditRepository,
+      );
+    }
   }
   if (postgresRepository !== undefined && securityAuditRepository !== undefined) {
     app.addHook('onClose', async () => {
@@ -402,6 +421,7 @@ export async function buildApp(
         subscriptionRepository?.close(),
         entitlementRepository?.close(),
         usageMeteringRepository?.close(),
+        ratingRepository?.close(),
       ]);
     });
   }
@@ -3123,6 +3143,264 @@ export async function buildApp(
       };
     } catch (error) {
       if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
+      throw error;
+    }
+  });
+
+  const ratingTenant = (request: FastifyRequest) =>
+    z.uuid().safeParse(request.headers['x-acs-tenant-id']);
+  const ratingId = (request: FastifyRequest, field = 'ratePlanId') =>
+    uuidSchema.safeParse(
+      typeof request.params === 'object' && request.params !== null
+        ? (request.params as Record<string, unknown>)[field]
+        : undefined,
+    );
+  const ratingIdempotencyKey = (request: FastifyRequest) => {
+    const key = request.headers['idempotency-key'];
+    return typeof key === 'string' ? uuidSchema.safeParse(key) : uuidSchema.safeParse(undefined);
+  };
+  const ratingFailure = (error: RatingFailure, request: FastifyRequest, reply: FastifyReply) =>
+    reply
+      .status(
+        error.code === 'UNAUTHENTICATED'
+          ? 401
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : error.code === 'CONFLICT'
+              ? 409
+              : error.code === 'INVALID_INPUT' || error.code === 'INVALID_REFERENCE'
+                ? 400
+                : 403,
+      )
+      .send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: error.code,
+            message: error.message,
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+  const ratingUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'RATING_NOT_CONFIGURED',
+          message: 'Rating dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  app.post('/api/v1/commercial/rating/rate-plans', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request),
+      body = ratePlanCreateSchema.safeParse(request.body),
+      key = ratingIdempotencyKey(request);
+    if (!tenant.success || !body.success || !key.success) return reply.status(400).send();
+    try {
+      return {
+        data: await ratingService.create(
+          request.headers.authorization,
+          tenant.data,
+          key.data,
+          body.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/rating/rate-plans', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request);
+    if (!tenant.success) return reply.status(400).send();
+    try {
+      return {
+        data: await ratingService.list(
+          request.headers.authorization,
+          tenant.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/rating/rate-plans/:ratePlanId', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request),
+      id = ratingId(request);
+    if (!tenant.success || !id.success) return reply.status(400).send();
+    try {
+      return {
+        data: await ratingService.get(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.patch('/api/v1/commercial/rating/rate-plans/:ratePlanId', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request),
+      id = ratingId(request),
+      body = ratePlanDraftUpdateSchema.safeParse(request.body),
+      key = ratingIdempotencyKey(request);
+    if (!tenant.success || !id.success || !body.success || !key.success)
+      return reply.status(400).send();
+    try {
+      return {
+        data: await ratingService.update(
+          request.headers.authorization,
+          tenant.data,
+          id.data,
+          key.data,
+          body.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+      throw error;
+    }
+  });
+  for (const transition of ['submit', 'approve', 'activate', 'supersede', 'retire'] as const)
+    app.post(
+      `/api/v1/commercial/rating/rate-plans/:ratePlanId/${transition}`,
+      async (request, reply) => {
+        if (!ratingService) return ratingUnavailable(request, reply);
+        const tenant = ratingTenant(request),
+          id = ratingId(request),
+          key = ratingIdempotencyKey(request),
+          body = z
+            .object({ expected_version: z.number().int().positive() })
+            .safeParse(request.body);
+        if (!tenant.success || !id.success || !key.success || !body.success)
+          return reply.status(400).send();
+        try {
+          return {
+            data: await ratingService.transition(
+              request.headers.authorization,
+              tenant.data,
+              id.data,
+              transition,
+              body.data.expected_version,
+              key.data,
+              metadata(request),
+            ),
+            meta: { request_id: request.id, correlation_id: request.correlationId },
+          };
+        } catch (error) {
+          if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+          throw error;
+        }
+      },
+    );
+  app.post('/api/v1/commercial/rating/applicability', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request),
+      body = ratingApplicabilityCreateSchema.safeParse(request.body),
+      key = ratingIdempotencyKey(request);
+    if (!tenant.success || !body.success || !key.success) return reply.status(400).send();
+    try {
+      return {
+        data: await ratingService.applicability(
+          request.headers.authorization,
+          tenant.data,
+          key.data,
+          body.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.get('/api/v1/commercial/rating/rated-facts', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request);
+    if (!tenant.success) return reply.status(400).send();
+    try {
+      return {
+        data: await ratingService.facts(
+          request.headers.authorization,
+          tenant.data,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      };
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.post('/api/v1/commercial/rating/execute', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request),
+      body = z.object({ usage_aggregate_id: z.uuid() }).safeParse(request.body),
+      key = request.headers['idempotency-key'];
+    if (
+      !tenant.success ||
+      !body.success ||
+      typeof key !== 'string' ||
+      !uuidSchema.safeParse(key).success
+    )
+      return reply.status(400).send();
+    try {
+      return await ratingService.execute(
+        request.headers.authorization,
+        tenant.data,
+        body.data.usage_aggregate_id,
+        key,
+        metadata(request),
+      );
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
+      throw error;
+    }
+  });
+  app.post('/api/v1/commercial/rating/rated-facts/:ratedFactId/rerate', async (request, reply) => {
+    if (!ratingService) return ratingUnavailable(request, reply);
+    const tenant = ratingTenant(request),
+      id = ratingId(request, 'ratedFactId'),
+      body = rerateSchema.safeParse(request.body),
+      key = request.headers['idempotency-key'];
+    if (
+      !tenant.success ||
+      !id.success ||
+      !body.success ||
+      typeof key !== 'string' ||
+      !uuidSchema.safeParse(key).success
+    )
+      return reply.status(400).send();
+    try {
+      return await ratingService.rerate(
+        request.headers.authorization,
+        tenant.data,
+        id.data,
+        body.data.usage_aggregate_id,
+        body.data.reason,
+        key,
+        metadata(request),
+      );
+    } catch (error) {
+      if (error instanceof RatingFailure) return ratingFailure(error, request, reply);
       throw error;
     }
   });

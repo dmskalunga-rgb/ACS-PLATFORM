@@ -11,7 +11,9 @@ export const dataClassificationSchema = z.enum([
 
 export const eventEnvelopeSchema = z.object({
   event_id: z.uuid(),
-  event_type: z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/),
+  event_type: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*(?:\.[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)+$/),
   schema_version: z.string().regex(/^\d+\.\d+\.\d+$/),
   tenant_id: z.uuid(),
   timestamp: z.iso.datetime({ offset: true }),

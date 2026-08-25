@@ -25,9 +25,14 @@ import {
   rawMeasurementSchema,
   measurementCorrectionSchema,
   usageAggregateListEnvelopeSchema,
+  ratePlanSchema,
+  ratedFactSchema,
+  ratedFactListEnvelopeSchema,
   type Contract,
   type Subscription,
   type Entitlement,
+  type RatePlan,
+  type RatedFact,
   type Proposal,
   type Opportunity,
   type Partner,
@@ -44,6 +49,9 @@ import { PostgresContractRegistryRepository } from './postgres-contract-registry
 import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
 import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
 import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
+import { PostgresRatingRepository } from './postgres-rating.js';
+import { calculateRating } from './rating-engine.js';
+import { stableRatingHash } from './rating.js';
 import { PostgresTenantContextRepository } from './postgres-platform-context.js';
 import type { PlatformConfiguration } from './config.js';
 
@@ -65,10 +73,11 @@ const requiredEnvironment = {
   contract: process.env.ACS_CONTRACT_DATABASE_URL,
   subscription: process.env.ACS_SUBSCRIPTION_DATABASE_URL,
   entitlement: process.env.ACS_ENTITLEMENT_DATABASE_URL,
+  rating: process.env.ACS_RATING_DATABASE_URL,
 };
 
 for (const [name, value] of Object.entries(requiredEnvironment).filter(
-  ([name]) => !['subscription', 'entitlement'].includes(name),
+  ([name]) => !['subscription', 'entitlement', 'rating'].includes(name),
 )) {
   if (value === undefined || value === '') throw new Error(`${name} E2E database URL is required.`);
 }
@@ -80,6 +89,7 @@ if (contractDatabaseUrl === undefined || contractDatabaseUrl === '')
   throw new Error('contract E2E database URL is required.');
 const subscriptionDatabaseUrl = requiredEnvironment.subscription ?? '';
 const entitlementDatabaseUrl = requiredEnvironment.entitlement ?? '';
+const ratingDatabaseUrl = requiredEnvironment.rating ?? '';
 
 const configuration: PlatformConfiguration = {
   environment: 'test',
@@ -105,6 +115,9 @@ const configuration: PlatformConfiguration = {
   ...(process.env.ACS_USAGE_METERING_DATABASE_URL === undefined
     ? {}
     : { usageMeteringDatabaseUrl: process.env.ACS_USAGE_METERING_DATABASE_URL }),
+  ...(process.env.ACS_RATING_DATABASE_URL === undefined
+    ? {}
+    : { ratingDatabaseUrl: process.env.ACS_RATING_DATABASE_URL }),
   ...(process.env.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL === undefined
     ? {}
     : { machineContextIssuerDatabaseUrl: process.env.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL }),
@@ -7486,3 +7499,1059 @@ describe.sequential('Subscription Registry signed OIDC acceptance matrix', () =>
     );
   }, 30_000);
 });
+
+describe
+  .runIf(Boolean(process.env.ACS_RATING_DATABASE_URL))
+  .sequential('Rating signed OIDC acceptance matrix', () => {
+    const aliceUser = '40000000-0000-4000-8000-000000000044';
+    const aliceMembership = '30000000-0000-4000-8000-000000000055';
+    const bobUser = '50000000-0000-4000-8000-000000000055';
+    const bobMembership = '30000000-0000-4000-8000-000000000099';
+    const charlieUser = '60000000-0000-4000-8000-000000000066';
+    const charlieMembership = '30000000-0000-4000-8000-0000000000aa';
+    const ratePlanEnvelopeSchema = z.object({ data: ratePlanSchema });
+    const ratingResultSchema = z.object({ fact: ratedFactSchema, replay: z.boolean() });
+    let aliceToken: string;
+    let bobToken: string;
+    let charlieToken: string;
+    let sequence = 0;
+    let scenarioEpoch = Date.UTC(2023, 0, 1);
+    let primaryPlan: RatePlan;
+    let flatFact: RatedFact;
+
+    type Scenario = {
+      planId: string;
+      versionId: string;
+      usageId: string;
+      subscriptionId: string;
+      entitlementId: string;
+      bucketStart: string;
+    };
+
+    const headers = (key = randomUUID(), tenant = tenantA, token = aliceToken) => ({
+      authorization: `Bearer ${token}`,
+      'x-acs-tenant-id': tenant,
+      'idempotency-key': key,
+    });
+    const latest = (plan: RatePlan) => {
+      const version = plan.versions.at(-1);
+      if (!version) throw new Error('Rate Plan version is unavailable.');
+      return version;
+    };
+    const createPlan = async (key = randomUUID(), name = 'Canonical Rating plan') => {
+      const body = { code: `RAT-${randomUUID().slice(0, 12)}`, name };
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/rating/rate-plans',
+        headers: headers(key),
+        payload: body,
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      return { body, key, plan: ratePlanEnvelopeSchema.parse(response.json()).data };
+    };
+    const updatePlan = async (plan: RatePlan, key = randomUUID(), name = 'Updated Rating plan') => {
+      const response = await oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/rating/rate-plans/${plan.id}`,
+        headers: headers(key),
+        payload: { name, expected_version: latest(plan).expected_version },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      return { key, name, plan: ratePlanEnvelopeSchema.parse(response.json()).data };
+    };
+    const transition = async (
+      plan: RatePlan,
+      action: 'submit' | 'approve' | 'activate' | 'supersede' | 'retire',
+      token = aliceToken,
+    ) => {
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rate-plans/${plan.id}/${action}`,
+        headers: headers(randomUUID(), tenantA, token),
+        payload: { expected_version: latest(plan).expected_version },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      return ratePlanEnvelopeSchema.parse(response.json()).data;
+    };
+    const authoritativeLineage = async () => {
+      const row = await admin.query<{ subscription_id: string; entitlement_id: string }>(
+        `SELECT e.subscription_id,e.id entitlement_id FROM commercial.entitlements e
+         JOIN commercial.subscriptions s ON s.id=e.subscription_id AND s.tenant_id=e.tenant_id
+         WHERE e.tenant_id=$1 AND e.status='ACTIVE' AND s.status='ACTIVE' ORDER BY e.id LIMIT 1`,
+        [tenantA],
+      );
+      if (!row.rows[0]) throw new Error('Rating authoritative lineage is unavailable.');
+      return row.rows[0];
+    };
+    const scenario = async (
+      model: 'FLAT' | 'PER_UNIT' | 'TIERED_GRADUATED',
+      options: {
+        quantity?: string;
+        flatAmount?: string;
+        unitRate?: string;
+        unit?: string;
+        status?: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ACTIVE' | 'SUPERSEDED' | 'RETIRED';
+        tiers?: Array<{ lower: string; upper: string | null; rate: string }>;
+      } = {},
+    ): Promise<Scenario> => {
+      sequence += 1;
+      const lineage = await authoritativeLineage();
+      const planId = randomUUID();
+      const versionId = randomUUID();
+      const ruleId = randomUUID();
+      const usageId = randomUUID();
+      const bucket = new Date(scenarioEpoch + sequence * 172_800_000);
+      const bucketStart = bucket.toISOString();
+      const effectiveFrom = new Date(bucket.getTime() - 3_600_000).toISOString();
+      const effectiveTo = new Date(bucket.getTime() + 3_600_000).toISOString();
+      const measurement = `rating.case.${sequence}`;
+      const unit = options.unit ?? 'request';
+      const status = options.status ?? 'ACTIVE';
+      await admin.query(
+        `INSERT INTO commercial.rate_plans(id,tenant_id,code,name,owner_membership_id,created_by,updated_by)
+         VALUES($1,$2,$3,$4,$5,$6,$6)`,
+        [planId, tenantA, `fixture-${randomUUID()}`, `Rating ${model}`, aliceMembership, aliceUser],
+      );
+      await admin.query(
+        `INSERT INTO commercial.rate_plan_versions(id,tenant_id,rate_plan_id,version_number,status,effective_from,effective_to,created_by_membership_id,approved_by_membership_id,activated_by_membership_id)
+         VALUES($1,$2,$3,1,$4,$5,$6,$7,$8,$8)`,
+        [
+          versionId,
+          tenantA,
+          planId,
+          status,
+          effectiveFrom,
+          effectiveTo,
+          aliceMembership,
+          status === 'DRAFT' || status === 'PENDING_APPROVAL' ? null : bobMembership,
+        ],
+      );
+      await admin.query(
+        `INSERT INTO commercial.rate_rules(id,tenant_id,rate_plan_version_id,measurement_type,unit,pricing_model,flat_amount,unit_rate)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          ruleId,
+          tenantA,
+          versionId,
+          measurement,
+          unit,
+          model,
+          model === 'FLAT' ? (options.flatAmount ?? '1.005') : null,
+          model === 'PER_UNIT' ? (options.unitRate ?? '0.10002') : null,
+        ],
+      );
+      for (const [index, tier] of (options.tiers ?? []).entries())
+        await admin.query(
+          `INSERT INTO commercial.rate_tiers(id,tenant_id,rate_rule_id,ordinal,lower_bound,upper_bound,unit_rate)
+           VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [randomUUID(), tenantA, ruleId, index + 1, tier.lower, tier.upper, tier.rate],
+        );
+      await admin.query(
+        `INSERT INTO commercial.usage_aggregates(id,tenant_id,subscription_id,entitlement_id,measurement_type,unit,time_bucket,bucket_start,aggregate_value)
+         VALUES($1,$2,$3,$4,$5,$6,'HOURLY',$7,$8)`,
+        [
+          usageId,
+          tenantA,
+          lineage.subscription_id,
+          lineage.entitlement_id,
+          measurement,
+          unit,
+          bucketStart,
+          options.quantity ?? '1',
+        ],
+      );
+      await admin.query(
+        `INSERT INTO commercial.rating_applicabilities(id,tenant_id,subscription_id,rate_plan_id,rate_plan_version_id,effective_from,effective_to)
+         VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          randomUUID(),
+          tenantA,
+          lineage.subscription_id,
+          planId,
+          versionId,
+          effectiveFrom,
+          effectiveTo,
+        ],
+      );
+      return {
+        planId,
+        versionId,
+        usageId,
+        subscriptionId: lineage.subscription_id,
+        entitlementId: lineage.entitlement_id,
+        bucketStart,
+      };
+    };
+    const execute = async (value: Scenario, key = randomUUID(), token = aliceToken) => {
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/rating/execute',
+        headers: headers(key, tenantA, token),
+        payload: { usage_aggregate_id: value.usageId },
+      });
+      return { response, key };
+    };
+    const rerate = async (
+      fact: RatedFact,
+      usageId: string,
+      reason: string,
+      key = randomUUID(),
+      token = aliceToken,
+    ) => {
+      const response = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rated-facts/${fact.id}/rerate`,
+        headers: headers(key, tenantA, token),
+        payload: {
+          rated_fact_id: fact.id,
+          usage_aggregate_id: usageId,
+          reason,
+          idempotency_key: key,
+        },
+      });
+      return { response, key };
+    };
+    const issueContext = async (action: string) => {
+      const contexts = new PostgresTenantContextRepository(
+        requiredEnvironment.issuer as string,
+        requiredEnvironment.tenant as string,
+      );
+      const issued = await contexts.issueContext(
+        JSON.stringify(['https://issuer.acs.test', 'alice']),
+        tenantA,
+        action,
+      );
+      if (!issued) throw new Error('Canonical Rating trusted context was not issued.');
+      return { ...issued, close: () => contexts.close() };
+    };
+
+    beforeAll(async () => {
+      aliceToken = await signedOidcToken('alice');
+      bobToken = await signedOidcToken('bob');
+      charlieToken = await signedOidcToken('charlie');
+      const earliestRatingBucket = await admin.query<{ earliest: Date | string | null }>(
+        `SELECT min(bucket_start) earliest FROM commercial.usage_aggregates
+         WHERE tenant_id=$1 AND measurement_type LIKE 'rating.case.%'`,
+        [tenantA],
+      );
+      const earliest = earliestRatingBucket.rows[0]?.earliest;
+      scenarioEpoch =
+        earliest === null || earliest === undefined
+          ? Date.UTC(2023, 0, 1)
+          : new Date(earliest).getTime() - 100 * 86_400_000;
+      await admin.query(
+        `INSERT INTO platform.memberships(id,tenant_id,user_id,status) VALUES($1,$2,$3,'ACTIVE') ON CONFLICT DO NOTHING`,
+        [bobMembership, tenantA, bobUser],
+      );
+      await admin.query(
+        `INSERT INTO platform.memberships(id,tenant_id,user_id,status) VALUES($1,$2,$3,'ACTIVE') ON CONFLICT DO NOTHING`,
+        [charlieMembership, tenantA, charlieUser],
+      );
+      await admin.query(
+        `INSERT INTO platform.membership_permissions(tenant_id,membership_id,permission_key)
+         SELECT $1,$2,permission_key FROM platform.permissions WHERE permission_key LIKE 'commercial.rating.%'
+         ON CONFLICT DO NOTHING`,
+        [tenantA, bobMembership],
+      );
+    });
+
+    it('RAT-POS-001 creates and updates a DRAFT with stable idempotency and expected version', async () => {
+      const created = await createPlan();
+      const replay = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/rating/rate-plans',
+        headers: headers(created.key),
+        payload: created.body,
+      });
+      expect(replay.statusCode, replay.body).toBe(200);
+      expect(ratePlanEnvelopeSchema.parse(replay.json()).data.id).toBe(created.plan.id);
+      const updated = await updatePlan(created.plan);
+      const updateReplay = await oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/rating/rate-plans/${updated.plan.id}`,
+        headers: headers(updated.key),
+        payload: { name: updated.name, expected_version: latest(created.plan).expected_version },
+      });
+      expect(updateReplay.statusCode, updateReplay.body).toBe(200);
+      expect(ratePlanEnvelopeSchema.parse(updateReplay.json()).data.id).toBe(updated.plan.id);
+      expect(latest(updated.plan)).toMatchObject({ status: 'DRAFT', expected_version: 2 });
+      primaryPlan = updated.plan;
+    });
+
+    it('RAT-POS-002 enforces SoD and allows different authorized approval/activation', async () => {
+      primaryPlan = await transition(primaryPlan, 'submit');
+      const selfApproval = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rate-plans/${primaryPlan.id}/approve`,
+        headers: headers(),
+        payload: { expected_version: latest(primaryPlan).expected_version },
+      });
+      expect(selfApproval.statusCode).toBe(403);
+      primaryPlan = await transition(primaryPlan, 'approve', bobToken);
+      const selfActivation = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rate-plans/${primaryPlan.id}/activate`,
+        headers: headers(),
+        payload: { expected_version: latest(primaryPlan).expected_version },
+      });
+      expect(selfActivation.statusCode).toBe(403);
+      primaryPlan = await transition(primaryPlan, 'activate', bobToken);
+      expect(latest(primaryPlan).status).toBe('ACTIVE');
+    });
+
+    it('RAT-POS-003 produces one immutable FLAT pre-tax Rated Fact', async () => {
+      const value = await scenario('FLAT', { quantity: '99', flatAmount: '1.005' });
+      const result = await execute(value);
+      expect(result.response.statusCode, result.response.body).toBe(200);
+      flatFact = ratingResultSchema.parse(result.response.json()).fact;
+      expect(flatFact).toMatchObject({
+        pre_tax_amount: '1.0100',
+        currency_code: 'USD',
+        pricing_model: 'FLAT',
+        status: 'RATED',
+      });
+    });
+
+    it('RAT-POS-004 calculates PER_UNIT with decimal-safe final HALF_UP rounding', async () => {
+      const value = await scenario('PER_UNIT', { quantity: '2.5', unitRate: '0.102' });
+      const result = await execute(value);
+      expect(result.response.statusCode, result.response.body).toBe(200);
+      expect(ratingResultSchema.parse(result.response.json()).fact.pre_tax_amount).toBe('0.2600');
+    });
+
+    it('RAT-POS-005 applies true TIERED_GRADUATED segment pricing', async () => {
+      const value = await scenario('TIERED_GRADUATED', {
+        quantity: '150',
+        tiers: [
+          { lower: '0', upper: '100', rate: '0.1' },
+          { lower: '100', upper: null, rate: '0.05' },
+        ],
+      });
+      const result = await execute(value);
+      expect(result.response.statusCode, result.response.body).toBe(200);
+      expect(ratingResultSchema.parse(result.response.json()).fact.pre_tax_amount).toBe('12.5000');
+    });
+
+    it('RAT-POS-006 selects a historical SUPERSEDED version by Usage event-window time', async () => {
+      const historical = await scenario('FLAT', { flatAmount: '3.00', status: 'SUPERSEDED' });
+      const result = await execute(historical);
+      expect(result.response.statusCode, result.response.body).toBe(200);
+      const fact = ratingResultSchema.parse(result.response.json()).fact;
+      expect(fact.rate_plan_version_id).toBe(historical.versionId);
+      expect(fact.pre_tax_amount).toBe('3.0000');
+    });
+
+    it('RAT-POS-007 replays identical Rating without duplicate fact, audit or outbox', async () => {
+      const value = await scenario('FLAT', { flatAmount: '4.00' });
+      const key = randomUUID();
+      const first = await execute(value, key);
+      const second = await execute(value, key);
+      expect(first.response.statusCode, first.response.body).toBe(200);
+      expect(second.response.statusCode, second.response.body).toBe(200);
+      const firstResult = ratingResultSchema.parse(first.response.json());
+      const secondResult = ratingResultSchema.parse(second.response.json());
+      expect(secondResult).toMatchObject({ replay: true });
+      expect(secondResult.fact.id).toBe(firstResult.fact.id);
+      const evidence = await admin.query<{ facts: string; audits: string; events: string }>(
+        `SELECT (SELECT count(*)::text FROM commercial.rated_facts WHERE id=$1) facts,
+         (SELECT count(*)::text FROM platform.audit_logs WHERE metadata->>'resource_id'=$1::text) audits,
+         (SELECT count(*)::text FROM platform.domain_events WHERE payload->>'id'=$1::text) events`,
+        [firstResult.fact.id],
+      );
+      expect(evidence.rows[0]).toEqual({ facts: '1', audits: '1', events: '1' });
+    });
+
+    it('RAT-POS-008 preserves append-only history for corrected and late Usage rerating', async () => {
+      const value = await scenario('PER_UNIT', { quantity: '2', unitRate: '1.00' });
+      const initialResponse = await execute(value);
+      const initial = ratingResultSchema.parse(initialResponse.response.json()).fact;
+      await admin.query(
+        'UPDATE commercial.usage_aggregates SET aggregate_value=3,version=version+1 WHERE id=$1',
+        [value.usageId],
+      );
+      const correctedResponse = await rerate(initial, value.usageId, 'USAGE_CORRECTION_APPLIED');
+      expect(correctedResponse.response.statusCode, correctedResponse.response.body).toBe(200);
+      const corrected = ratingResultSchema.parse(correctedResponse.response.json()).fact;
+      expect(corrected).toMatchObject({
+        supersedes_rated_fact_id: initial.id,
+        pre_tax_amount: '3.0000',
+      });
+      const old = await admin.query<{ status: string }>(
+        'SELECT status FROM commercial.rated_facts WHERE id=$1',
+        [initial.id],
+      );
+      expect(old.rows[0]?.status).toBe('SUPERSEDED');
+    });
+
+    it('RAT-POS-009 permits authorized human manual rerating with audit/outbox', async () => {
+      const value = await scenario('FLAT', { flatAmount: '6.00' });
+      const initial = ratingResultSchema.parse((await execute(value)).response.json()).fact;
+      const response = await rerate(initial, value.usageId, 'AUTHORIZED_MANUAL_RERATING');
+      expect(response.response.statusCode, response.response.body).toBe(200);
+      const next = ratingResultSchema.parse(response.response.json()).fact;
+      const evidence = await admin.query<{ audits: string; events: string }>(
+        `SELECT (SELECT count(*)::text FROM platform.audit_logs WHERE metadata->>'resource_id'=$1::text) audits,
+         (SELECT count(*)::text FROM platform.domain_events WHERE event_type='commercial.rating.rerated' AND payload->>'id'=$1::text) events`,
+        [next.id],
+      );
+      expect(evidence.rows[0]).toEqual({ audits: '1', events: '1' });
+    });
+
+    it('RAT-POS-010 preserves historic references through supersession and retirement', async () => {
+      const historicVersion = latest(primaryPlan).id;
+      primaryPlan = await transition(primaryPlan, 'supersede');
+      expect(latest(primaryPlan)).toMatchObject({ id: historicVersion, status: 'SUPERSEDED' });
+      let retirement = (await createPlan()).plan;
+      retirement = await transition(retirement, 'submit');
+      retirement = await transition(retirement, 'approve', bobToken);
+      retirement = await transition(retirement, 'activate', bobToken);
+      retirement = await transition(retirement, 'retire');
+      expect(latest(retirement).status).toBe('RETIRED');
+      const detail = await oidcApp.inject({
+        method: 'GET',
+        url: `/api/v1/commercial/rating/rate-plans/${primaryPlan.id}`,
+        headers: headers(),
+      });
+      expect(detail.statusCode, detail.body).toBe(200);
+      expect(latest(ratePlanEnvelopeSchema.parse(detail.json()).data).id).toBe(historicVersion);
+    });
+
+    it('RAT-NEG-001 denies unauthenticated and unauthorized Rating operations', async () => {
+      const missing = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/commercial/rating/rate-plans',
+        headers: { 'x-acs-tenant-id': tenantA },
+      });
+      expect(missing.statusCode).toBe(401);
+      const denied = await oidcApp.inject({
+        method: 'GET',
+        url: '/api/v1/commercial/rating/rate-plans',
+        headers: headers(randomUUID(), tenantA, charlieToken),
+      });
+      expect(denied.statusCode).toBe(403);
+    });
+
+    it('RAT-NEG-002 denies cross-tenant Rate Plan, Usage and applicability substitution', async () => {
+      const foreignUsage = await admin.query<{ id: string }>(
+        'SELECT id FROM commercial.usage_aggregates WHERE tenant_id=$1 LIMIT 1',
+        [tenantB],
+      );
+      const execution = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/rating/execute',
+        headers: headers(),
+        payload: { usage_aggregate_id: foreignUsage.rows[0]?.id ?? randomUUID() },
+      });
+      expect(execution.statusCode).toBe(400);
+      const foreignVersion = await admin.query<{ id: string }>(
+        'SELECT id FROM commercial.rate_plan_versions WHERE tenant_id=$1 LIMIT 1',
+        [tenantB],
+      );
+      const lineage = await authoritativeLineage();
+      const applicability = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/rating/applicability',
+        headers: headers(),
+        payload: {
+          subscription_id: lineage.subscription_id,
+          rate_plan_version_id: foreignVersion.rows[0]?.id ?? randomUUID(),
+          effective_from: new Date('2020-01-01T00:00:00Z').toISOString(),
+          effective_to: new Date('2020-01-01T01:00:00Z').toISOString(),
+        },
+      });
+      expect(applicability.statusCode).toBe(400);
+    });
+
+    it('RAT-NEG-003 denies creator self-approval and self-activation', async () => {
+      let plan = (await createPlan()).plan;
+      plan = await transition(plan, 'submit');
+      const selfApproval = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rate-plans/${plan.id}/approve`,
+        headers: headers(),
+        payload: { expected_version: latest(plan).expected_version },
+      });
+      expect(selfApproval.statusCode).toBe(403);
+      plan = await transition(plan, 'approve', bobToken);
+      const selfActivation = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rate-plans/${plan.id}/activate`,
+        headers: headers(),
+        payload: { expected_version: latest(plan).expected_version },
+      });
+      expect(selfActivation.statusCode).toBe(403);
+    });
+
+    it('RAT-NEG-004 rejects stale updates and divergent idempotency reuse', async () => {
+      const created = await createPlan();
+      const stale = await oidcApp.inject({
+        method: 'PATCH',
+        url: `/api/v1/commercial/rating/rate-plans/${created.plan.id}`,
+        headers: headers(),
+        payload: { name: 'stale', expected_version: latest(created.plan).expected_version + 1 },
+      });
+      expect(stale.statusCode).toBe(409);
+      const divergent = await oidcApp.inject({
+        method: 'POST',
+        url: '/api/v1/commercial/rating/rate-plans',
+        headers: headers(created.key),
+        payload: { ...created.body, name: 'divergent' },
+      });
+      expect(divergent.statusCode).toBe(409);
+    });
+
+    it('RAT-NEG-005 prevents non-effective rating and overlapping applicability', async () => {
+      const draft = await scenario('FLAT', { status: 'DRAFT' });
+      const denied = await execute(draft);
+      expect(denied.response.statusCode).toBe(400);
+      await expect(
+        admin.query(
+          `INSERT INTO commercial.rating_applicabilities(id,tenant_id,subscription_id,rate_plan_id,rate_plan_version_id,effective_from,effective_to)
+           SELECT $1,tenant_id,subscription_id,rate_plan_id,rate_plan_version_id,effective_from,effective_to FROM commercial.rating_applicabilities WHERE rate_plan_version_id=$2`,
+          [randomUUID(), draft.versionId],
+        ),
+      ).rejects.toThrow(/Overlapping Rating applicability/i);
+    });
+
+    it('RAT-NEG-006 denies unit mismatch, invalid model/currency and malformed tiers', async () => {
+      const mismatched = await scenario('PER_UNIT', { unit: 'byte', unitRate: '1' });
+      await admin.query('UPDATE commercial.usage_aggregates SET unit=$1 WHERE id=$2', [
+        'request',
+        mismatched.usageId,
+      ]);
+      expect((await execute(mismatched)).response.statusCode).toBe(400);
+      expect(() =>
+        calculateRating({
+          pricingModel: 'TIERED_GRADUATED',
+          quantity: '2',
+          tiers: [{ lower_bound: '1', upper_bound: null, unit_rate: '1' }],
+        }),
+      ).toThrow();
+      await expect(
+        admin.query(
+          `INSERT INTO commercial.rate_rules(id,tenant_id,rate_plan_version_id,measurement_type,unit,pricing_model)
+           VALUES($1,$2,$3,$4,'request','UNSUPPORTED')`,
+          [randomUUID(), tenantA, mismatched.versionId, randomUUID()],
+        ),
+      ).rejects.toThrow();
+      await expect(
+        admin.query('UPDATE commercial.rate_plan_versions SET currency_code=$1 WHERE id=$2', [
+          'EUR',
+          mismatched.versionId,
+        ]),
+      ).rejects.toThrow();
+    });
+
+    it('RAT-NEG-007 keeps effective Rate Plans and Rated Facts immutable', async () => {
+      await expect(
+        admin.query(
+          "UPDATE commercial.rate_plan_versions SET effective_from=effective_from+interval '1 minute' WHERE id=$1",
+          [flatFact.rate_plan_version_id],
+        ),
+      ).rejects.toThrow(/immutable/i);
+      await expect(
+        admin.query('UPDATE commercial.rated_facts SET pre_tax_amount=99 WHERE id=$1', [
+          flatFact.id,
+        ]),
+      ).rejects.toThrow(/immutable/i);
+      await expect(
+        admin.query('DELETE FROM commercial.rated_facts WHERE id=$1', [flatFact.id]),
+      ).rejects.toThrow(/immutable/i);
+    });
+
+    it('RAT-NEG-008 denies unauthorized/machine rerating and never selects a later rate', async () => {
+      const value = await scenario('FLAT', { flatAmount: '7.00', status: 'SUPERSEDED' });
+      const initial = ratingResultSchema.parse((await execute(value)).response.json()).fact;
+      const unauthorized = await rerate(
+        initial,
+        value.usageId,
+        'DENIED',
+        randomUUID(),
+        charlieToken,
+      );
+      expect(unauthorized.response.statusCode).toBe(403);
+      const machine = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rated-facts/${initial.id}/rerate`,
+        headers: {
+          'x-acs-tenant-id': tenantA,
+          'idempotency-key': randomUUID(),
+          'x-acs-source-credential-id': randomUUID(),
+          'x-acs-source-credential': 'TEST_ONLY_NOT_HUMAN_AUTHORITY',
+        },
+        payload: {
+          rated_fact_id: initial.id,
+          usage_aggregate_id: value.usageId,
+          reason: 'DENIED_MACHINE',
+          idempotency_key: randomUUID(),
+        },
+      });
+      expect(machine.statusCode).toBe(401);
+      expect(initial.rate_plan_version_id).toBe(value.versionId);
+    });
+
+    it('RAT-NEG-009 serializes concurrent rating and rerating without duplicates', async () => {
+      const value = await scenario('FLAT', { flatAmount: '8.00' });
+      const key = randomUUID();
+      const firstRace = await Promise.all([execute(value, key), execute(value, key)]);
+      expect(firstRace.map(({ response }) => response.statusCode)).toEqual([200, 200]);
+      const facts = firstRace.map(({ response }) => ratingResultSchema.parse(response.json()).fact);
+      expect(new Set(facts.map(({ id }) => id)).size).toBe(1);
+      const rerateRace = await Promise.all([
+        rerate(facts[0]!, value.usageId, 'RACE_A', randomUUID()),
+        rerate(facts[0]!, value.usageId, 'RACE_B', randomUUID()),
+      ]);
+      expect(rerateRace.map(({ response }) => response.statusCode).sort()).toEqual([200, 409]);
+      const successors = await admin.query<{ count: string }>(
+        'SELECT count(*)::text count FROM commercial.rated_facts WHERE supersedes_rated_fact_id=$1',
+        [facts[0]!.id],
+      );
+      expect(successors.rows[0]?.count).toBe('1');
+    });
+
+    it('RAT-NEG-010 rolls Rating, audit, outbox and idempotency back at every failure phase', async () => {
+      for (const phase of [
+        'after-domain-write',
+        'after-audit',
+        'after-outbox',
+        'after-idempotency',
+        'before-commit',
+      ] as const) {
+        const value = await scenario('FLAT', { flatAmount: '9.00' });
+        const context = await issueContext('commercial.rating.execute');
+        const correlationId = randomUUID();
+        const repository = new PostgresRatingRepository(ratingDatabaseUrl, (current) => {
+          if (current === phase) throw new Error(`TEST_ONLY_RATING_${phase}`);
+        });
+        await expect(
+          repository.execute({
+            action: 'commercial.rating.execute',
+            actorUserId: aliceUser,
+            contextToken: context.contextToken,
+            correlationId,
+            idempotencyKey: randomUUID(),
+            requestHash: stableRatingHash({ usageAggregateId: value.usageId }),
+            requestId: randomUUID(),
+            tenantId: tenantA,
+            usageAggregateId: value.usageId,
+          }),
+        ).rejects.toThrow(`TEST_ONLY_RATING_${phase}`);
+        await repository.close();
+        await context.close();
+        const residue = await admin.query<{ facts: string; audits: string; events: string }>(
+          `SELECT (SELECT count(*)::text FROM commercial.rated_facts WHERE usage_aggregate_id=$1) facts,
+           (SELECT count(*)::text FROM platform.audit_logs WHERE correlation_id=$2::text) audits,
+           (SELECT count(*)::text FROM platform.domain_events WHERE correlation_id=($2::text)::uuid) events`,
+          [value.usageId, correlationId],
+        );
+        expect(residue.rows[0]).toEqual({ facts: '0', audits: '0', events: '0' });
+      }
+    });
+
+    it('RAT-NEG-011 proves the complete downstream financial firewall', async () => {
+      const downstream = await admin.query<Record<string, string | null>>(
+        `SELECT to_regclass('commercial.billing_accounts')::text billing,
+         to_regclass('commercial.invoices')::text invoices,
+         to_regclass('commercial.payments')::text payments,
+         to_regclass('commercial.receipts')::text receipts,
+         to_regclass('commercial.collections')::text collections,
+         to_regclass('commercial.accounting_entries')::text accounting,
+         to_regclass('commercial.commissions')::text commissions,
+         to_regclass('commercial.rating_tax_lines')::text tax,
+         to_regclass('commercial.rating_discounts')::text discount,
+         to_regclass('commercial.rating_prorations')::text proration,
+         to_regclass('commercial.rating_fx')::text fx`,
+      );
+      expect(Object.values(downstream.rows[0]!).every((value) => value === null)).toBe(true);
+      const adjustment = await oidcApp.inject({
+        method: 'POST',
+        url: `/api/v1/commercial/rating/rated-facts/${flatFact.id}/adjust`,
+        headers: headers(),
+        payload: { amount: '1.00' },
+      });
+      expect(adjustment.statusCode).toBe(404);
+    });
+
+    it('RATING-SUPPLEMENTARY proves HALF_UP boundaries and decimal determinism', () => {
+      expect(
+        (
+          [
+            ['1.0049', '1.00'],
+            ['1.0050', '1.01'],
+            ['1.0051', '1.01'],
+          ] as const
+        ).map(
+          ([value, expected]) =>
+            calculateRating({
+              pricingModel: 'FLAT',
+              quantity: '999999.99999999',
+              flatAmount: value,
+            }) === expected,
+        ),
+      ).toEqual([true, true, true]);
+      expect(calculateRating({ pricingModel: 'PER_UNIT', quantity: '0.1', unitRate: '0.2' })).toBe(
+        '0.02',
+      );
+    });
+
+    it('RATING-SUPPLEMENTARY proves rerating rollback preserves the original chain', async () => {
+      const value = await scenario('FLAT', { flatAmount: '10.00' });
+      const original = ratingResultSchema.parse((await execute(value)).response.json()).fact;
+      const context = await issueContext('commercial.rating.rerate');
+      const correlationId = randomUUID();
+      const repository = new PostgresRatingRepository(ratingDatabaseUrl, (phase) => {
+        if (phase === 'after-outbox') throw new Error('TEST_ONLY_RERATING_ROLLBACK');
+      });
+      await expect(
+        repository.rerate({
+          action: 'commercial.rating.rerate',
+          actorUserId: aliceUser,
+          contextToken: context.contextToken,
+          correlationId,
+          idempotencyKey: randomUUID(),
+          ratedFactId: original.id,
+          reason: 'TEST_ONLY_ATOMICITY',
+          requestHash: stableRatingHash({
+            ratedFactId: original.id,
+            usageAggregateId: value.usageId,
+            reason: 'TEST_ONLY_ATOMICITY',
+          }),
+          requestId: randomUUID(),
+          tenantId: tenantA,
+          usageAggregateId: value.usageId,
+        }),
+      ).rejects.toThrow('TEST_ONLY_RERATING_ROLLBACK');
+      await repository.close();
+      await context.close();
+      const state = await admin.query<{ status: string; successors: string }>(
+        `SELECT status,(SELECT count(*)::text FROM commercial.rated_facts WHERE supersedes_rated_fact_id=$1) successors
+         FROM commercial.rated_facts WHERE id=$1`,
+        [original.id],
+      );
+      expect(state.rows[0]).toEqual({ status: 'RATED', successors: '0' });
+    });
+
+    it('RATING-SUPPLEMENTARY verifies exact event vocabulary and least-privilege role', async () => {
+      const unexpected = await admin.query<{ count: string }>(
+        `SELECT count(*)::text count FROM platform.domain_events
+         WHERE event_type LIKE 'commercial.rating.%'
+           AND event_type <> ALL($1::text[])`,
+        [
+          [
+            'commercial.rating.rate-plan.created',
+            'commercial.rating.rate-plan.submitted',
+            'commercial.rating.rate-plan.approved',
+            'commercial.rating.rate-plan.activated',
+            'commercial.rating.rate-plan.superseded',
+            'commercial.rating.rate-plan.retired',
+            'commercial.rating.rated',
+            'commercial.rating.rerated',
+          ],
+        ],
+      );
+      expect(unexpected.rows[0]?.count).toBe('0');
+      const direct = new Client({ connectionString: ratingDatabaseUrl });
+      await direct.connect();
+      const identity = await direct.query<{ current_user: string; bypass: boolean }>(
+        `SELECT current_user,(SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user) bypass`,
+      );
+      const invisible = await direct.query('SELECT id FROM commercial.rate_plans LIMIT 1');
+      await direct.end();
+      expect(identity.rows[0]).toEqual({
+        current_user: 'acs_phase2_rating_login_test',
+        bypass: false,
+      });
+      expect(invisible.rowCount).toBe(0);
+    });
+
+    it('RATING-PERFORMANCE records a TEST_ONLY local baseline through the signed OIDC execution path', async () => {
+      const samples = new Map<string, number[]>();
+      const measure = async (name: string, operation: () => Promise<void>, measured: boolean) => {
+        const startedAt = performance.now();
+        await operation();
+        if (!measured) return;
+        const values = samples.get(name) ?? [];
+        values.push(performance.now() - startedAt);
+        samples.set(name, values);
+      };
+      const summarize = (values: number[]) => {
+        const sorted = [...values].sort((left, right) => left - right);
+        return {
+          sample_count: values.length,
+          median_ms: Number(sorted[Math.floor(sorted.length / 2)]!.toFixed(2)),
+          min_ms: Number(sorted[0]!.toFixed(2)),
+          max_ms: Number(sorted.at(-1)!.toFixed(2)),
+        };
+      };
+      const lifecycle = async (measured: boolean) => {
+        const created = await (async () => {
+          let value: Awaited<ReturnType<typeof createPlan>> | undefined;
+          await measure(
+            'RATE_PLAN_CREATE_MS',
+            async () => {
+              value = await createPlan(
+                randomUUID(),
+                `Performance plan ${randomUUID().slice(0, 8)}`,
+              );
+            },
+            measured,
+          );
+          if (!value) throw new Error('Rating performance plan creation did not return a plan.');
+          return value;
+        })();
+        let plan = created.plan;
+        await measure(
+          'RATE_PLAN_LIST_MS',
+          async () => {
+            const response = await oidcApp.inject({
+              method: 'GET',
+              url: '/api/v1/commercial/rating/rate-plans',
+              headers: headers(),
+            });
+            expect(response.statusCode, response.body).toBe(200);
+          },
+          measured,
+        );
+        await measure(
+          'RATE_PLAN_DETAIL_MS',
+          async () => {
+            const response = await oidcApp.inject({
+              method: 'GET',
+              url: `/api/v1/commercial/rating/rate-plans/${plan.id}`,
+              headers: headers(),
+            });
+            expect(response.statusCode, response.body).toBe(200);
+          },
+          measured,
+        );
+        await measure(
+          'RATE_PLAN_DRAFT_UPDATE_MS',
+          async () => {
+            const updated = await updatePlan(
+              plan,
+              randomUUID(),
+              `Performance updated ${randomUUID().slice(0, 8)}`,
+            );
+            plan = updated.plan;
+          },
+          measured,
+        );
+        for (const [action, token, metric] of [
+          ['submit', aliceToken, 'RATE_PLAN_SUBMIT_MS'],
+          ['approve', bobToken, 'RATE_PLAN_APPROVE_MS'],
+          ['activate', bobToken, 'RATE_PLAN_ACTIVATE_MS'],
+        ] as const)
+          await measure(
+            metric,
+            async () => {
+              plan = await transition(plan, action, token);
+            },
+            measured,
+          );
+        const lineage = await (async () => {
+          const available = await admin.query<{ subscription_id: string; entitlement_id: string }>(
+            `SELECT e.subscription_id,e.id entitlement_id FROM commercial.entitlements e
+             JOIN commercial.subscriptions s ON s.id=e.subscription_id AND s.tenant_id=e.tenant_id
+             WHERE e.tenant_id=$1 AND e.status='ACTIVE' AND s.status='ACTIVE'
+               AND NOT EXISTS (
+                 SELECT 1 FROM commercial.rating_applicabilities a
+                 WHERE a.tenant_id=s.tenant_id AND a.subscription_id=s.id AND a.effective_to IS NULL
+               )
+             ORDER BY e.id LIMIT 1`,
+            [tenantA],
+          );
+          if (!available.rows[0])
+            throw new Error(
+              'Rating performance fixture requires an active subscription without open applicability.',
+            );
+          return available.rows[0];
+        })();
+        sequence += 1;
+        const priorApplicability = await admin.query<{
+          latest: Date | string | null;
+          open: boolean;
+        }>(
+          `SELECT max(effective_to) latest, bool_or(effective_to IS NULL) open
+           FROM commercial.rating_applicabilities WHERE tenant_id=$1 AND subscription_id=$2`,
+          [tenantA, lineage.subscription_id],
+        );
+        if (priorApplicability.rows[0]?.open)
+          throw new Error('Rating performance fixture requires a bounded applicability window.');
+        const latestEnd = priorApplicability.rows[0]?.latest;
+        const applicabilityStart = new Date(
+          (latestEnd ? new Date(latestEnd).getTime() : Date.UTC(2300, 0, 1)) +
+            sequence * 86_400_000,
+        ).toISOString();
+        const applicabilityEnd = new Date(
+          new Date(applicabilityStart).getTime() + 3_600_000,
+        ).toISOString();
+        await measure(
+          'RATING_APPLICABILITY_ASSIGNMENT_MS',
+          async () => {
+            const key = randomUUID();
+            const response = await oidcApp.inject({
+              method: 'POST',
+              url: '/api/v1/commercial/rating/applicability',
+              headers: headers(key),
+              payload: {
+                subscription_id: lineage.subscription_id,
+                rate_plan_version_id: latest(plan).id,
+                effective_from: applicabilityStart,
+                effective_to: applicabilityEnd,
+              },
+            });
+            expect(response.statusCode, response.body).toBe(200);
+          },
+          measured,
+        );
+      };
+      const engine = async (
+        model: 'FLAT' | 'PER_UNIT' | 'TIERED_GRADUATED',
+        metric: string,
+        options: Parameters<typeof scenario>[1],
+        measured: boolean,
+      ) => {
+        const value = await scenario(model, options);
+        await measure(
+          metric,
+          async () => {
+            const result = await execute(value);
+            expect(result.response.statusCode, result.response.body).toBe(200);
+          },
+          measured,
+        );
+      };
+      const facts = async (measured: boolean) => {
+        const value = await scenario('FLAT', { flatAmount: '12.34' });
+        const executed = await execute(value);
+        expect(executed.response.statusCode, executed.response.body).toBe(200);
+        const fact = ratingResultSchema.parse(executed.response.json()).fact;
+        await measure(
+          'RATED_FACT_LIST_MS',
+          async () => {
+            const response = await oidcApp.inject({
+              method: 'GET',
+              url: '/api/v1/commercial/rating/rated-facts',
+              headers: headers(),
+            });
+            expect(response.statusCode, response.body).toBe(200);
+            expect(
+              ratedFactListEnvelopeSchema
+                .parse(response.json())
+                .data.some(({ id }) => id === fact.id),
+            ).toBe(true);
+          },
+          measured,
+        );
+        await measure(
+          'RATED_FACT_DETAIL_FROM_LIST_MS',
+          async () => {
+            const response = await oidcApp.inject({
+              method: 'GET',
+              url: '/api/v1/commercial/rating/rated-facts',
+              headers: headers(),
+            });
+            expect(response.statusCode, response.body).toBe(200);
+            expect(
+              ratedFactListEnvelopeSchema
+                .parse(response.json())
+                .data.find(({ id }) => id === fact.id),
+            ).toEqual(fact);
+          },
+          measured,
+        );
+        const replayKey = randomUUID();
+        await execute(value, replayKey);
+        await measure(
+          'RATING_IDEMPOTENT_REPLAY_MS',
+          async () => {
+            const replay = await execute(value, replayKey);
+            expect(replay.response.statusCode, replay.response.body).toBe(200);
+          },
+          measured,
+        );
+        await measure(
+          'MANUAL_RERATING_MS',
+          async () => {
+            const rerated = await rerate(
+              fact,
+              value.usageId,
+              `PERFORMANCE_${randomUUID().slice(0, 8)}`,
+            );
+            expect(rerated.response.statusCode, rerated.response.body).toBe(200);
+          },
+          measured,
+        );
+      };
+
+      await lifecycle(false);
+      await engine('FLAT', 'RATING_FLAT_EXECUTION_MS', { flatAmount: '1.005' }, false);
+      await engine(
+        'PER_UNIT',
+        'RATING_PER_UNIT_EXECUTION_MS',
+        { unitRate: '0.102', quantity: '2.5' },
+        false,
+      );
+      await engine(
+        'TIERED_GRADUATED',
+        'RATING_TIERED_GRADUATED_EXECUTION_MS',
+        {
+          quantity: '12',
+          tiers: [
+            { lower: '0', upper: '10', rate: '0.10' },
+            { lower: '10', upper: null, rate: '0.20' },
+          ],
+        },
+        false,
+      );
+      await facts(false);
+      for (let iteration = 0; iteration < 5; iteration += 1) {
+        const journeyStartedAt = performance.now();
+        await lifecycle(true);
+        await engine('FLAT', 'RATING_FLAT_EXECUTION_MS', { flatAmount: '1.005' }, true);
+        await engine(
+          'PER_UNIT',
+          'RATING_PER_UNIT_EXECUTION_MS',
+          { unitRate: '0.102', quantity: '2.5' },
+          true,
+        );
+        await engine(
+          'TIERED_GRADUATED',
+          'RATING_TIERED_GRADUATED_EXECUTION_MS',
+          {
+            quantity: '12',
+            tiers: [
+              { lower: '0', upper: '10', rate: '0.10' },
+              { lower: '10', upper: null, rate: '0.20' },
+            ],
+          },
+          true,
+        );
+        await facts(true);
+        const values = samples.get('RATING_REPRESENTATIVE_JOURNEY_MS') ?? [];
+        values.push(performance.now() - journeyStartedAt);
+        samples.set('RATING_REPRESENTATIVE_JOURNEY_MS', values);
+      }
+      process.stdout.write(
+        `${JSON.stringify({
+          BASELINE_MEASUREMENT_NOT_SLO: true,
+          PERFORMANCE_ENVIRONMENT: 'LOCAL_DISPOSABLE_TEST_ONLY',
+          SIGNED_OIDC: 'PRESERVED',
+          AUTHORIZATION_PORT: 'PRESERVED',
+          TRUSTED_CONTEXT: 'PRESERVED',
+          RLS_FORCE_RLS: 'PRESERVED',
+          TENANT_ISOLATION: 'PRESERVED',
+          SOD: 'PRESERVED',
+          DECIMAL_DETERMINISM: 'PRESERVED',
+          HALF_UP: 'PRESERVED',
+          IDEMPOTENCY: 'PRESERVED',
+          RATED_FACT_IMMUTABILITY: 'PRESERVED',
+          AUDIT: 'PRESERVED',
+          OUTBOX: 'PRESERVED',
+          FINANCIAL_FIREWALL: 'PRESERVED',
+          WARM_UP_COMPLETED: true,
+          ...Object.fromEntries([...samples].map(([name, values]) => [name, summarize(values)])),
+        })}\n`,
+      );
+    }, 120_000);
+  });

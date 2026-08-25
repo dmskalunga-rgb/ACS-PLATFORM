@@ -1,0 +1,82 @@
+name: Phase 2 Rating validation
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24.19.0
+
+jobs:
+  rating-quality:
+    name: Rating contracts, Web, quality and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm --filter @acs/web test
+
+  rating-postgresql-e2e:
+    name: Rating OIDC, RLS, financial firewall and full regression E2E
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: acs_foundation
+          POSTGRES_PASSWORD: acs_ci_ephemeral
+          POSTGRES_USER: acs
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U acs -d acs_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ACS_ENV: test
+      DATABASE_URL: postgresql://acs:acs_ci_ephemeral@localhost:5432/acs_foundation
+      ACS_CONTEXT_RESOLVER_DATABASE_URL: postgresql://acs_phase1_issuer_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_TENANT_DATABASE_URL: postgresql://acs_phase1_tenant_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_TENANT_ADMIN_DATABASE_URL: postgresql://acs_phase1_admin_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_SECURITY_AUDIT_DATABASE_URL: postgresql://acs_phase1_auditor_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_CUSTOMER_DATABASE_URL: postgresql://acs_phase2_customer_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_LEAD_DATABASE_URL: postgresql://acs_phase2_lead_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_PLAN_DATABASE_URL: postgresql://acs_phase2_plan_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_PARTNER_DATABASE_URL: postgresql://acs_phase2_partner_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_OPPORTUNITY_DATABASE_URL: postgresql://acs_phase2_opportunity_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_PROPOSAL_DATABASE_URL: postgresql://acs_phase2_proposal_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_CONTRACT_DATABASE_URL: postgresql://acs_phase2_contract_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_SUBSCRIPTION_DATABASE_URL: postgresql://acs_phase2_subscription_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_ENTITLEMENT_DATABASE_URL: postgresql://acs_phase2_entitlement_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_USAGE_METERING_DATABASE_URL: postgresql://acs_phase2_usage_metering_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL: postgresql://acs_machine_context_issuer_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_RATING_DATABASE_URL: postgresql://acs_phase2_rating_login_test:acs_phase2_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_PUBLISHER_DATABASE_URL: postgresql://acs_event_publisher_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_CONSUMER_DATABASE_URL: postgresql://acs_event_consumer_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_OPERATOR_DATABASE_URL: postgresql://acs_event_operator_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+      ACS_EVENT_RETENTION_DATABASE_URL: postgresql://acs_event_retention_login_test:acs_phase1_test_only@localhost:5432/acs_foundation
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:validate
+      - run: pnpm --filter @acs/platform-api... build
+      - run: pnpm test:phase1:e2e
+      - run: pnpm test:event-foundation:e2e
+      - run: pnpm test:event-foundation:e2e

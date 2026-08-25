@@ -34,4 +34,31 @@ describe('FOUNDATION event envelope', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts a canonical hyphenated segment without relaxing segment boundaries', () => {
+    const base = {
+      event_id: randomUUID(),
+      schema_version: '1.0.0',
+      tenant_id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      correlation_id: randomUUID(),
+      causation_id: null,
+      producer: 'platform-api',
+      classification: 'INTERNAL' as const,
+      payload: {},
+    };
+
+    expect(
+      eventEnvelopeSchema.parse({
+        ...base,
+        event_type: 'commercial.rating.rate-plan.activated',
+      }).event_type,
+    ).toBe('commercial.rating.rate-plan.activated');
+    for (const event_type of [
+      'commercial.rating.-rate-plan.activated',
+      'commercial.rating.rate--plan.activated',
+      'commercial.rating.rate-plan-.activated',
+    ])
+      expect(() => eventEnvelopeSchema.parse({ ...base, event_type })).toThrow();
+  });
 });
