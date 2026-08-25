@@ -9,7 +9,6 @@ import type {
   ContractUpdate,
 } from '@acs/contracts';
 import type { AuthorizationPort } from '@acs/foundation';
-import { emitContractReviseDiagnostic } from './contract-revise-diagnostic.js';
 import {
   IdentityAuthenticationError,
   type IdentityAdapter,
@@ -296,29 +295,20 @@ export class ContractRegistryService {
     meta: ContractMetadata,
     fn: (input: ContractMutation & T & { contractId: string }) => Promise<MutationResult>,
   ) {
-    const diagnose = action === CONTRACT_REVISE;
-    if (diagnose) emitContractReviseDiagnostic('CONTRACT_SERVICE', 'enter');
-    try {
-      const context = await this.authorize(h, t, action, meta);
-      const result = await fn({
-        ...value,
-        actorUserId: context.userId,
-        contextToken: context.contextToken,
-        correlationId: meta.correlationId,
-        idempotencyKey: key,
-        requestHash: hash({ id, ...value }),
-        requestId: meta.requestId,
-        tenantId: t,
-        contractId: id,
-        action,
-      });
-      const envelope = this.envelope(result.contract, meta, result.replay);
-      if (diagnose) emitContractReviseDiagnostic('CONTRACT_SERVICE', 'success');
-      return envelope;
-    } catch (error) {
-      if (diagnose) emitContractReviseDiagnostic('CONTRACT_SERVICE', 'failure', { error });
-      throw error;
-    }
+    const context = await this.authorize(h, t, action, meta);
+    const result = await fn({
+      ...value,
+      actorUserId: context.userId,
+      contextToken: context.contextToken,
+      correlationId: meta.correlationId,
+      idempotencyKey: key,
+      requestHash: hash({ id, ...value }),
+      requestId: meta.requestId,
+      tenantId: t,
+      contractId: id,
+      action,
+    });
+    return this.envelope(result.contract, meta, result.replay);
   }
 }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');

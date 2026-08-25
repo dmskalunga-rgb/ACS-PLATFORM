@@ -13,7 +13,6 @@ import {
   type ContractMutation,
   type ContractRepository,
 } from './contract-registry.js';
-import { emitContractReviseDiagnostic } from './contract-revise-diagnostic.js';
 const { Pool } = pg;
 type Row = Omit<
   Contract,
@@ -45,64 +44,6 @@ export type ContractTestTransactionPhase =
   | 'after-outbox'
   | 'after-revision-snapshot'
   | 'before-commit';
-type ContractDiagnosticPhase =
-  'connect' | 'begin' | 'activate_context' | 'repository_operation' | 'commit';
-const allowedRuntimeErrorCodes = new Set(['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
-const postgresSqlStatePattern = /^[0-9A-Z]{5}$/;
-const emitSafeContractReviseDiagnostic = (
-  error: unknown,
-  action: string,
-  phase: ContractDiagnosticPhase,
-) => {
-  if (
-    process.env.ACS_ENV !== 'test' ||
-    process.env.CI !== 'true' ||
-    process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC !== 'true' ||
-    action !== 'commercial.contract.revise'
-  )
-    return;
-  const candidateCode =
-    typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
-      ? error.code.toUpperCase()
-      : null;
-  const postgresSqlstate =
-    candidateCode !== null && postgresSqlStatePattern.test(candidateCode) ? candidateCode : null;
-  const errorCode =
-    postgresSqlstate ??
-    (candidateCode !== null && allowedRuntimeErrorCodes.has(candidateCode)
-      ? candidateCode
-      : 'UNCLASSIFIED');
-  const errorName =
-    error instanceof ContractRegistryFailure
-      ? 'ContractRegistryFailure'
-      : postgresSqlstate !== null
-        ? 'PostgresError'
-        : error instanceof TypeError
-          ? 'TypeError'
-          : error instanceof Error
-            ? 'Error'
-            : 'UnknownError';
-  const safeRetryClassification =
-    postgresSqlstate === '40001' || postgresSqlstate === '40P01'
-      ? 'RETRYABLE_TRANSACTION'
-      : postgresSqlstate?.startsWith('08') === true ||
-          ['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(errorCode)
-        ? 'RETRYABLE_CONNECTION'
-        : postgresSqlstate === null
-          ? 'UNKNOWN'
-          : 'NON_RETRYABLE';
-  process.stderr.write(
-    `[ACS_SAFE_CONTRACT_DIAGNOSTIC] ${JSON.stringify({
-      error_name: errorName,
-      error_code: errorCode,
-      postgres_sqlstate: postgresSqlstate,
-      operation_label: 'contract.performance.revise',
-      repository_component: 'postgres-contract-registry',
-      phase,
-      safe_retry_classification: safeRetryClassification,
-    })}\n`,
-  );
-};
 const cols =
   'tenant_id,id,source_proposal_id,source_proposal_revision_number,source_proposal_code,title,opportunity_id,customer_id,partner_id,owner_membership_id,created_by_membership_id,currency_code,status,effective_from,effective_until,revision_number,version,contract_subtotal::text,grand_total::text,approved_by_membership_id,approved_at,created_at,updated_at';
 
@@ -299,82 +240,65 @@ export class PostgresContractRegistryRepository implements ContractRepository {
   async transition(
     input: ContractMutation & ContractTransition & { contractId: string; transition: string },
   ) {
-    const diagnose = input.transition === 'revise';
-    if (diagnose) emitContractReviseDiagnostic('CONTRACT_REPOSITORY_ENTRY', 'enter');
-    try {
-      const result = await this.mutate(input, async (c) => {
-        const old = await this.must(c, input.tenantId, input.contractId);
-        this.stale(old, input.expected_version);
-        const transitions: Record<string, { from: string[]; to: string; event: string | null }> = {
-          submit: { from: ['DRAFT'], to: 'PENDING_APPROVAL', event: null },
-          'return-to-draft': { from: ['PENDING_APPROVAL'], to: 'DRAFT', event: null },
-          approve: {
-            from: ['PENDING_APPROVAL'],
-            to: 'APPROVED',
-            event: 'commercial.contract.approved',
-          },
-          revise: {
-            from: ['APPROVED'],
-            to: 'DRAFT',
-            event: 'commercial.contract.revision_created',
-          },
-          activate: { from: ['APPROVED'], to: 'ACTIVE', event: 'commercial.contract.activated' },
-          cancel: { from: ['APPROVED'], to: 'CANCELLED', event: 'commercial.contract.cancelled' },
-          terminate: {
-            from: ['ACTIVE'],
-            to: 'TERMINATED',
-            event: 'commercial.contract.terminated',
-          },
-        };
-        const tr = transitions[input.transition];
-        if (!tr?.from.includes(old.status))
-          throw new ContractRegistryFailure(
-            ['CANCELLED', 'TERMINATED'].includes(old.status)
-              ? 'TERMINAL_CONTRACT'
-              : 'INVALID_TRANSITION',
-            'Contract lifecycle transition is not allowed.',
-          );
-        const actor = await this.actorMembership(c, input.tenantId, input.actorUserId);
-        if (input.transition === 'approve' && actor === old.created_by_membership_id)
-          throw new ContractRegistryFailure(
-            'SOD_DENIED',
-            'Contract creator cannot approve the contract.',
-          );
-        if (input.transition === 'activate') {
-          if (!old.effective_from || new Date(old.effective_from) > new Date())
-            throw new ContractRegistryFailure(
-              'INVALID_VALUE',
-              'Contract cannot activate before its effective date.',
-            );
-          if (old.effective_until && new Date(old.effective_until) <= new Date(old.effective_from))
-            throw new ContractRegistryFailure('INVALID_VALUE', 'Effective date range is invalid.');
-        }
-        if (input.transition === 'revise') {
-          await this.snapshot(c, old);
-          this.testOnlyTransactionFailure?.('after-revision-snapshot');
-        }
-        const clear = ['return-to-draft', 'revise'].includes(input.transition);
-        const approver = input.transition === 'approve' ? actor : null;
-        const r = await c.query<Row>(
-          `UPDATE commercial.contracts SET status=$1,revision_number=revision_number+$2,approved_by_membership_id=CASE WHEN $4 THEN NULL WHEN $3::uuid IS NULL THEN approved_by_membership_id ELSE $3 END,approved_at=CASE WHEN $4 THEN NULL WHEN $3::uuid IS NULL THEN approved_at ELSE clock_timestamp() END,version=version+1,updated_by=$5,updated_at=clock_timestamp() WHERE id=$6 AND tenant_id=$7 RETURNING ${cols}`,
-          [
-            tr.to,
-            input.transition === 'revise' ? 1 : 0,
-            approver,
-            clear,
-            input.actorUserId,
-            input.contractId,
-            input.tenantId,
-          ],
+    return this.mutate(input, async (c) => {
+      const old = await this.must(c, input.tenantId, input.contractId);
+      this.stale(old, input.expected_version);
+      const transitions: Record<string, { from: string[]; to: string; event: string | null }> = {
+        submit: { from: ['DRAFT'], to: 'PENDING_APPROVAL', event: null },
+        'return-to-draft': { from: ['PENDING_APPROVAL'], to: 'DRAFT', event: null },
+        approve: {
+          from: ['PENDING_APPROVAL'],
+          to: 'APPROVED',
+          event: 'commercial.contract.approved',
+        },
+        revise: { from: ['APPROVED'], to: 'DRAFT', event: 'commercial.contract.revision_created' },
+        activate: { from: ['APPROVED'], to: 'ACTIVE', event: 'commercial.contract.activated' },
+        cancel: { from: ['APPROVED'], to: 'CANCELLED', event: 'commercial.contract.cancelled' },
+        terminate: { from: ['ACTIVE'], to: 'TERMINATED', event: 'commercial.contract.terminated' },
+      };
+      const tr = transitions[input.transition];
+      if (!tr?.from.includes(old.status))
+        throw new ContractRegistryFailure(
+          ['CANCELLED', 'TERMINATED'].includes(old.status)
+            ? 'TERMINAL_CONTRACT'
+            : 'INVALID_TRANSITION',
+          'Contract lifecycle transition is not allowed.',
         );
-        return { row: r.rows[0]!, event: tr.event, fields: [input.transition] };
-      });
-      if (diagnose) emitContractReviseDiagnostic('CONTRACT_REPOSITORY_ENTRY', 'success');
-      return result;
-    } catch (error) {
-      if (diagnose) emitContractReviseDiagnostic('CONTRACT_REPOSITORY_ENTRY', 'failure', { error });
-      throw error;
-    }
+      const actor = await this.actorMembership(c, input.tenantId, input.actorUserId);
+      if (input.transition === 'approve' && actor === old.created_by_membership_id)
+        throw new ContractRegistryFailure(
+          'SOD_DENIED',
+          'Contract creator cannot approve the contract.',
+        );
+      if (input.transition === 'activate') {
+        if (!old.effective_from || new Date(old.effective_from) > new Date())
+          throw new ContractRegistryFailure(
+            'INVALID_VALUE',
+            'Contract cannot activate before its effective date.',
+          );
+        if (old.effective_until && new Date(old.effective_until) <= new Date(old.effective_from))
+          throw new ContractRegistryFailure('INVALID_VALUE', 'Effective date range is invalid.');
+      }
+      if (input.transition === 'revise') {
+        await this.snapshot(c, old);
+        this.testOnlyTransactionFailure?.('after-revision-snapshot');
+      }
+      const clear = ['return-to-draft', 'revise'].includes(input.transition);
+      const approver = input.transition === 'approve' ? actor : null;
+      const r = await c.query<Row>(
+        `UPDATE commercial.contracts SET status=$1,revision_number=revision_number+$2,approved_by_membership_id=CASE WHEN $4 THEN NULL WHEN $3::uuid IS NULL THEN approved_by_membership_id ELSE $3 END,approved_at=CASE WHEN $4 THEN NULL WHEN $3::uuid IS NULL THEN approved_at ELSE clock_timestamp() END,version=version+1,updated_by=$5,updated_at=clock_timestamp() WHERE id=$6 AND tenant_id=$7 RETURNING ${cols}`,
+        [
+          tr.to,
+          input.transition === 'revise' ? 1 : 0,
+          approver,
+          clear,
+          input.actorUserId,
+          input.contractId,
+          input.tenantId,
+        ],
+      );
+      return { row: r.rows[0]!, event: tr.event, fields: [input.transition] };
+    });
   }
   private async mutate(
     input: ContractMutation,
@@ -550,32 +474,21 @@ export class PostgresContractRegistryRepository implements ContractRepository {
     );
   }
   private async tx<T>(token: string, action: string, work: (c: pg.PoolClient) => Promise<T>) {
-    let c: pg.PoolClient | undefined;
-    let phase: ContractDiagnosticPhase = 'connect';
-    const diagnose = action === 'commercial.contract.revise';
+    const c = await this.pool.connect();
     try {
-      if (diagnose) emitContractReviseDiagnostic('POSTGRES_TRANSACTION', 'enter');
-      c = await this.pool.connect();
-      phase = 'begin';
       await c.query('BEGIN');
-      phase = 'activate_context';
       const active = await c.query('SELECT * FROM platform.activate_tenant_context($1::uuid,$2)', [
         token,
         action,
       ]);
       if (active.rowCount !== 1)
         throw new ContractRegistryFailure('FORBIDDEN', 'Trusted context activation failed.');
-      phase = 'repository_operation';
       const result = await work(c);
       this.testOnlyTransactionFailure?.('before-commit');
-      phase = 'commit';
       await c.query('COMMIT');
-      if (diagnose) emitContractReviseDiagnostic('POSTGRES_TRANSACTION', 'success');
       return result;
     } catch (error) {
-      emitSafeContractReviseDiagnostic(error, action, phase);
-      if (diagnose) emitContractReviseDiagnostic('POSTGRES_TRANSACTION', 'failure', { error });
-      if (c !== undefined) await c.query('ROLLBACK');
+      await c.query('ROLLBACK');
       if (typeof error === 'object' && error !== null && 'code' in error) {
         if (error.code === '23505')
           throw new ContractRegistryFailure(
@@ -590,7 +503,7 @@ export class PostgresContractRegistryRepository implements ContractRepository {
       }
       throw error;
     } finally {
-      c?.release();
+      c.release();
     }
   }
 }
