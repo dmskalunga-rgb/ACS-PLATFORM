@@ -6791,7 +6791,14 @@ describe.sequential('Contract Registry signed OIDC acceptance matrix', () => {
       timings.set(name, Number((performance.now() - started).toFixed(2)));
       return result;
     };
-    const created = await measure('CONTRACT_CREATE_MS', () => createContract());
+    const created = await (async () => {
+      process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC = 'true';
+      try {
+        return await measure('CONTRACT_CREATE_MS', () => createContract());
+      } finally {
+        delete process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC;
+      }
+    })();
     await measure('CONTRACT_LIST_MS', async () => {
       const response = await oidcApp.inject({
         method: 'GET',

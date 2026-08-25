@@ -44,6 +44,63 @@ export type ContractTestTransactionPhase =
   | 'after-outbox'
   | 'after-revision-snapshot'
   | 'before-commit';
+type ContractDiagnosticPhase = 'begin' | 'activate_context' | 'repository_operation' | 'commit';
+const allowedRuntimeErrorCodes = new Set(['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
+const postgresSqlStatePattern = /^[0-9A-Z]{5}$/;
+const emitSafeContractCreateDiagnostic = (
+  error: unknown,
+  action: string,
+  phase: ContractDiagnosticPhase,
+) => {
+  if (
+    process.env.ACS_ENV !== 'test' ||
+    process.env.CI !== 'true' ||
+    process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC !== 'true' ||
+    action !== 'commercial.contract.create'
+  )
+    return;
+  const candidateCode =
+    typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+      ? error.code.toUpperCase()
+      : null;
+  const postgresSqlstate =
+    candidateCode !== null && postgresSqlStatePattern.test(candidateCode) ? candidateCode : null;
+  const errorCode =
+    postgresSqlstate ??
+    (candidateCode !== null && allowedRuntimeErrorCodes.has(candidateCode)
+      ? candidateCode
+      : 'UNCLASSIFIED');
+  const errorName =
+    error instanceof ContractRegistryFailure
+      ? 'ContractRegistryFailure'
+      : postgresSqlstate !== null
+        ? 'PostgresError'
+        : error instanceof TypeError
+          ? 'TypeError'
+          : error instanceof Error
+            ? 'Error'
+            : 'UnknownError';
+  const safeRetryClassification =
+    postgresSqlstate === '40001' || postgresSqlstate === '40P01'
+      ? 'RETRYABLE_TRANSACTION'
+      : postgresSqlstate?.startsWith('08') === true ||
+          ['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(errorCode)
+        ? 'RETRYABLE_CONNECTION'
+        : postgresSqlstate === null
+          ? 'UNKNOWN'
+          : 'NON_RETRYABLE';
+  process.stderr.write(
+    `[ACS_SAFE_CONTRACT_DIAGNOSTIC] ${JSON.stringify({
+      error_name: errorName,
+      error_code: errorCode,
+      postgres_sqlstate: postgresSqlstate,
+      operation_label: 'contract.performance.create',
+      repository_component: 'postgres-contract-registry',
+      phase,
+      safe_retry_classification: safeRetryClassification,
+    })}\n`,
+  );
+};
 const cols =
   'tenant_id,id,source_proposal_id,source_proposal_revision_number,source_proposal_code,title,opportunity_id,customer_id,partner_id,owner_membership_id,created_by_membership_id,currency_code,status,effective_from,effective_until,revision_number,version,contract_subtotal::text,grand_total::text,approved_by_membership_id,approved_at,created_at,updated_at';
 
@@ -475,19 +532,24 @@ export class PostgresContractRegistryRepository implements ContractRepository {
   }
   private async tx<T>(token: string, action: string, work: (c: pg.PoolClient) => Promise<T>) {
     const c = await this.pool.connect();
+    let phase: ContractDiagnosticPhase = 'begin';
     try {
       await c.query('BEGIN');
+      phase = 'activate_context';
       const active = await c.query('SELECT * FROM platform.activate_tenant_context($1::uuid,$2)', [
         token,
         action,
       ]);
       if (active.rowCount !== 1)
         throw new ContractRegistryFailure('FORBIDDEN', 'Trusted context activation failed.');
+      phase = 'repository_operation';
       const result = await work(c);
       this.testOnlyTransactionFailure?.('before-commit');
+      phase = 'commit';
       await c.query('COMMIT');
       return result;
     } catch (error) {
+      emitSafeContractCreateDiagnostic(error, action, phase);
       await c.query('ROLLBACK');
       if (typeof error === 'object' && error !== null && 'code' in error) {
         if (error.code === '23505')
