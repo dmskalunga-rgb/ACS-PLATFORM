@@ -133,6 +133,7 @@ import {
   ContractRegistryFailure,
   ContractRegistryService,
 } from './contract-registry.js';
+import { emitContractReviseDiagnostic } from './contract-revise-diagnostic.js';
 import {
   SUBSCRIPTION_ACTIVATE,
   SUBSCRIPTION_CANCEL,
@@ -2338,6 +2339,7 @@ export async function buildApp(
     ) => Promise<unknown>,
     line = false,
   ) => {
+    emitContractReviseDiagnostic('HTTP_HANDLER', 'enter');
     if (!contractRegistryService) return contractUnavailable(request, reply);
     const tenant = contractTenant(request),
       id = contractId(request),
@@ -2353,7 +2355,7 @@ export async function buildApp(
     )
       return invalidContract(request, reply);
     try {
-      return contractEnvelopeSchema.parse(
+      const envelope = contractEnvelopeSchema.parse(
         await call(
           contractRegistryService,
           tenant.data,
@@ -2363,7 +2365,10 @@ export async function buildApp(
           parsedLine?.success ? parsedLine.data : undefined,
         ),
       );
+      emitContractReviseDiagnostic('HTTP_HANDLER', 'success', { httpStatus: 200 });
+      return envelope;
     } catch (error) {
+      emitContractReviseDiagnostic('HTTP_HANDLER', 'failure', { error });
       if (error instanceof ContractRegistryFailure) return contractFailure(error, request, reply);
       throw error;
     }
@@ -3434,6 +3439,7 @@ export async function buildApp(
       { error: sanitizeErrorForLog(error), correlation_id: request.correlationId },
       'request failed',
     );
+    emitContractReviseDiagnostic('HTTP_ERROR_MAP', 'failure', { error, httpStatus: 500 });
     const envelope = errorEnvelopeSchema.parse({
       error: {
         code: 'FOUNDATION_INTERNAL_ERROR',

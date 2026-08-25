@@ -50,6 +50,7 @@ import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-
 import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
 import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
 import { PostgresRatingRepository } from './postgres-rating.js';
+import { emitContractReviseDiagnostic } from './contract-revise-diagnostic.js';
 import { calculateRating } from './rating-engine.js';
 import { stableRatingHash } from './rating.js';
 import { PostgresTenantContextRepository } from './postgres-platform-context.js';
@@ -6823,8 +6824,14 @@ describe.sequential('Contract Registry signed OIDC acceptance matrix', () => {
     current = await measure('CONTRACT_APPROVE_MS', () => mutate(current, 'approve', bobToken));
     current = await (async () => {
       process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC = 'true';
+      emitContractReviseDiagnostic('PERFORMANCE_HARNESS', 'enter');
       try {
-        return await measure('CONTRACT_REVISE_MS', () => mutate(current, 'revise'));
+        const revised = await measure('CONTRACT_REVISE_MS', () => mutate(current, 'revise'));
+        emitContractReviseDiagnostic('PERFORMANCE_HARNESS', 'success', { httpStatus: 200 });
+        return revised;
+      } catch (error) {
+        emitContractReviseDiagnostic('PERFORMANCE_HARNESS', 'failure', { error });
+        throw error;
       } finally {
         delete process.env.ACS_CONTRACT_PERFORMANCE_DIAGNOSTIC;
       }
