@@ -18,3 +18,25 @@ export const platformContextSchema = z.object({
 });
 
 export type PlatformContextResponse = z.infer<typeof platformContextSchema>;
+
+export const activeMembershipBootstrapSchema = z.object({
+  data: z.object({
+    memberships: z.array(
+      z.object({
+        membership_id: z.uuid(),
+        status: z.literal('ACTIVE'),
+        tenant: z.object({
+          id: z.uuid(),
+          slug: z.string().min(1),
+          display_name: z.string().min(1),
+        }),
+      }),
+    ),
+  }),
+  meta: z.object({
+    request_id: z.uuid(),
+    correlation_id: z.uuid(),
+  }),
+});
+
+export type ActiveMembershipBootstrapResponse = z.infer<typeof activeMembershipBootstrapSchema>;
