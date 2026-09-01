@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { errorEnvelopeSchema, platformContextSchema } from '@acs/contracts';
+import {
+  activeMembershipBootstrapSchema,
+  errorEnvelopeSchema,
+  platformContextSchema,
+} from '@acs/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { buildApp } from './app.js';
 import type { PlatformConfiguration } from './config.js';
 import {
+  ActiveMembershipBootstrapService,
   PlatformContextService,
   RepositoryAuthorizationPort,
   type TenantContextRepository,
@@ -66,6 +71,107 @@ describe('FOUNDATION platform API', () => {
     expect(errorEnvelopeSchema.parse(response.json()).error.code).toBe(
       'PLATFORM_CONTEXT_NOT_CONFIGURED',
     );
+  });
+
+  it('serves only the authenticated principal active memberships', async () => {
+    const tenantA = randomUUID();
+    const tenantB = randomUUID();
+    const tenantC = randomUUID();
+    const membershipA = randomUUID();
+    const membershipB = randomUUID();
+    const membershipC = randomUUID();
+    const bootstrapApp = await buildApp(configuration, {
+      logger: false,
+      activeMembershipBootstrapService: new ActiveMembershipBootstrapService(
+        new DevelopmentHeaderIdentityAdapter(),
+        {
+          listActiveMembershipsBySubject: (subject) =>
+            Promise.resolve(
+              subject === 'identity-a'
+                ? [
+                    {
+                      membershipId: membershipA,
+                      tenantDisplayName: 'Tenant A',
+                      tenantId: tenantA,
+                      tenantSlug: 'tenant-a',
+                      userId: randomUUID(),
+                    },
+                    {
+                      membershipId: membershipB,
+                      tenantDisplayName: 'Tenant B',
+                      tenantId: tenantB,
+                      tenantSlug: 'tenant-b',
+                      userId: randomUUID(),
+                    },
+                  ]
+                : subject === 'identity-b'
+                  ? [
+                      {
+                        membershipId: membershipC,
+                        tenantDisplayName: 'Tenant C',
+                        tenantId: tenantC,
+                        tenantSlug: 'tenant-c',
+                        userId: randomUUID(),
+                      },
+                    ]
+                  : [],
+            ),
+        },
+      ),
+    });
+    try {
+      const identityA = await bootstrapApp.inject({
+        method: 'GET',
+        url: '/api/v1/platform/memberships',
+        headers: {
+          authorization: 'Bearer dev:identity-a',
+          'x-acs-tenant-id': tenantC,
+          'x-acs-subject': 'identity-b',
+        },
+      });
+      expect(identityA.statusCode).toBe(200);
+      expect(
+        activeMembershipBootstrapSchema
+          .parse(identityA.json())
+          .data.memberships.map((membership) => membership.tenant.id),
+      ).toEqual([tenantA, tenantB]);
+
+      const identityB = await bootstrapApp.inject({
+        method: 'GET',
+        url: '/api/v1/platform/memberships',
+        headers: { authorization: 'Bearer dev:identity-b' },
+      });
+      expect(identityB.statusCode).toBe(200);
+      expect(
+        activeMembershipBootstrapSchema
+          .parse(identityB.json())
+          .data.memberships.map((membership) => membership.tenant.id),
+      ).toEqual([tenantC]);
+
+      const zero = await bootstrapApp.inject({
+        method: 'GET',
+        url: '/api/v1/platform/memberships',
+        headers: { authorization: 'Bearer dev:no-memberships' },
+      });
+      expect(zero.statusCode).toBe(200);
+      expect(activeMembershipBootstrapSchema.parse(zero.json()).data.memberships).toEqual([]);
+
+      expect(
+        (await bootstrapApp.inject({ method: 'GET', url: '/api/v1/platform/memberships' }))
+          .statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await bootstrapApp.inject({
+            method: 'GET',
+            url: '/api/v1/platform/memberships',
+            headers: { authorization: 'Bearer dev:' },
+          })
+        ).statusCode,
+      ).toBe(401);
+    } finally {
+      await bootstrapApp.close();
+    }
   });
 
   it('serves the authenticated and audited tenant context through the versioned API', async () => {

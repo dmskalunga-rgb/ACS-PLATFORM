@@ -1,4 +1,4 @@
-import type { PlatformContextResponse } from '@acs/contracts';
+import type { ActiveMembershipBootstrapResponse, PlatformContextResponse } from '@acs/contracts';
 import type { AuthorizationPort } from '@acs/foundation';
 import { setActiveTenantTraceContext } from '@acs/observability';
 
@@ -34,6 +34,10 @@ export interface ResolvedTenantMembership {
   readonly userId: string;
 }
 
+export interface ActiveTenantMembership extends ResolvedTenantMembership {
+  readonly membershipId: string;
+}
+
 export interface IssuedTenantContext extends ResolvedTenantMembership {
   readonly contextToken: string;
 }
@@ -62,6 +66,70 @@ export interface TenantContextRepository {
     context: IssuedTenantContext,
     metadata: ContextReadMetadata,
   ) => Promise<ResolvedTenantMembership>;
+}
+
+export interface ActiveMembershipRepository {
+  readonly listActiveMembershipsBySubject: (
+    subject: string,
+  ) => Promise<readonly ActiveTenantMembership[]>;
+}
+
+export type ActiveMembershipBootstrapFailureCode = 'IDENTITY_NOT_CONFIGURED' | 'UNAUTHENTICATED';
+
+export class ActiveMembershipBootstrapFailure extends Error {
+  constructor(
+    readonly code: ActiveMembershipBootstrapFailureCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Discovers only the authenticated principal's current tenant choices. It deliberately
+ * does not issue a trusted tenant context or perform tenant-scoped authorization.
+ */
+export class ActiveMembershipBootstrapService {
+  constructor(
+    private readonly identity: IdentityAdapter,
+    private readonly repository: ActiveMembershipRepository,
+  ) {}
+
+  async list(
+    authorizationHeader: string | undefined,
+    metadata: ContextReadMetadata,
+  ): Promise<ActiveMembershipBootstrapResponse> {
+    if (!this.identity.configured) {
+      throw new ActiveMembershipBootstrapFailure(
+        'IDENTITY_NOT_CONFIGURED',
+        'The identity provider is not configured for this environment.',
+      );
+    }
+    let identity: TrustedIdentity | null;
+    try {
+      identity = await this.identity.authenticate(authorizationHeader);
+    } catch {
+      throw new ActiveMembershipBootstrapFailure('UNAUTHENTICATED', 'Authentication is required.');
+    }
+    if (identity === null) {
+      throw new ActiveMembershipBootstrapFailure('UNAUTHENTICATED', 'Authentication is required.');
+    }
+    const memberships = await this.repository.listActiveMembershipsBySubject(identity.subject);
+    return {
+      data: {
+        memberships: memberships.map((membership) => ({
+          membership_id: membership.membershipId,
+          status: 'ACTIVE' as const,
+          tenant: {
+            id: membership.tenantId,
+            slug: membership.tenantSlug,
+            display_name: membership.tenantDisplayName,
+          },
+        })),
+      },
+      meta: { request_id: metadata.requestId, correlation_id: metadata.correlationId },
+    };
+  }
 }
 
 export interface SecurityDenialRecord {

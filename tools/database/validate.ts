@@ -30,6 +30,15 @@ const phase1RollbackPath = resolve(
 );
 const phase1RolesPath = resolve('database/roles/phase1_platform_roles.sql');
 const phase1SeedPath = resolve('database/tests/fixtures/phase1_seed.sql');
+const activeMembershipBootstrapMigrationPath = resolve(
+  'database/migrations/20260831000000_phase1_active_membership_bootstrap.sql',
+);
+const activeMembershipBootstrapRollbackPath = resolve(
+  'database/rollbacks/20260831000000_phase1_active_membership_bootstrap.sql',
+);
+const activeMembershipBootstrapTestPath = resolve(
+  'database/tests/rls/active_membership_bootstrap_isolation.sql',
+);
 const tenantAdminMigrationPath = resolve(
   'database/migrations/20260814000000_phase1_tenant_administration.sql',
 );
@@ -240,11 +249,13 @@ try {
   if (tenantAdminExists.rows[0]?.relation !== null) {
     await client.query(await readFile(tenantAdminRollbackPath, 'utf8'));
   }
+  await client.query(await readFile(activeMembershipBootstrapRollbackPath, 'utf8'));
   await client.query(await readFile(phase1RollbackPath, 'utf8'));
   await client.query(await readFile(rollbackPath, 'utf8'));
   await client.query(await readFile(migrationPath, 'utf8'));
   await client.query(await readFile(phase1RolesPath, 'utf8'));
   await client.query(await readFile(phase1MigrationPath, 'utf8'));
+  await client.query(await readFile(activeMembershipBootstrapMigrationPath, 'utf8'));
   await client.query(await readFile(machinePrincipalRolesPath, 'utf8'));
   await client.query(await readFile(machinePrincipalMigrationPath, 'utf8'));
   await client.query(await readFile(tenantAdminMigrationPath, 'utf8'));
@@ -292,6 +303,7 @@ try {
     'GRANT SELECT, UPDATE, DELETE ON platform.audit_logs, platform.security_audit_logs TO acs_phase1_audit_integrity_test',
   );
   await client.query(await readFile(phase1SeedPath, 'utf8'));
+  await client.query(await readFile(activeMembershipBootstrapTestPath, 'utf8'));
   await client.query(await readFile(customerSeedPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
   await client.query(await readFile(planSeedPath, 'utf8'));

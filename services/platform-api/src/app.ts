@@ -63,6 +63,7 @@ import {
   rerateSchema,
   errorEnvelopeSchema,
   membershipStatusMutationSchema,
+  activeMembershipBootstrapSchema,
   platformContextSchema,
   roleMutationSchema,
   tenantAdministrationSchema,
@@ -86,9 +87,12 @@ import {
   OidcJwtIdentityAdapter,
 } from './identity.js';
 import {
+  ActiveMembershipBootstrapFailure,
+  ActiveMembershipBootstrapService,
   PlatformContextFailure,
   PlatformContextService,
   RepositoryAuthorizationPort,
+  type ActiveMembershipRepository,
   type TenantContextRepository,
   type IdentityAdapter,
 } from './platform-context.js';
@@ -177,6 +181,7 @@ export async function buildApp(
   options: {
     readonly logger?: boolean;
     readonly platformContextService?: PlatformContextService;
+    readonly activeMembershipBootstrapService?: ActiveMembershipBootstrapService;
     readonly tenantAdministrationService?: TenantAdministrationService;
     readonly customerRegistryService?: CustomerRegistryService;
     readonly leadRegistryService?: LeadRegistryService;
@@ -207,9 +212,11 @@ export async function buildApp(
   });
   const { authenticationDuration, authentications, registry, requests } =
     createMetricsRegistry('acs-platform-api');
-  let postgresRepository: (TenantContextRepository & { close(): Promise<void> }) | undefined;
+  let postgresRepository:
+    (TenantContextRepository & ActiveMembershipRepository & { close(): Promise<void> }) | undefined;
   let securityAuditRepository: PostgresSecurityAuditRepository | undefined;
   let platformContextService = options.platformContextService;
+  let activeMembershipBootstrapService = options.activeMembershipBootstrapService;
   let tenantAdministrationService = options.tenantAdministrationService;
   let tenantAdminRepository: PostgresTenantAdminRepository | undefined;
   let customerRepository: PostgresCustomerRepository | undefined;
@@ -268,6 +275,10 @@ export async function buildApp(
       new RepositoryAuthorizationPort(postgresRepository),
       postgresRepository,
       securityAuditRepository,
+    );
+    activeMembershipBootstrapService = new ActiveMembershipBootstrapService(
+      identity,
+      postgresRepository,
     );
     if (configuration.tenantAdminDatabaseUrl !== undefined) {
       tenantAdminRepository = new PostgresTenantAdminRepository(
@@ -596,6 +607,104 @@ export async function buildApp(
       },
     },
   } as const;
+
+  const activeMembershipBootstrapResponseJsonSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['data', 'meta'],
+    properties: {
+      data: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['memberships'],
+        properties: {
+          memberships: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['membership_id', 'status', 'tenant'],
+              properties: {
+                membership_id: { type: 'string', format: 'uuid' },
+                status: { type: 'string', const: 'ACTIVE' },
+                tenant: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['id', 'slug', 'display_name'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    slug: { type: 'string' },
+                    display_name: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      meta: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['request_id', 'correlation_id'],
+        properties: {
+          request_id: { type: 'string', format: 'uuid' },
+          correlation_id: { type: 'string', format: 'uuid' },
+        },
+      },
+    },
+  } as const;
+
+  app.get(
+    '/api/v1/platform/memberships',
+    {
+      schema: {
+        security: [
+          configuration.identityMode === 'oidc' ? { oidcBearer: [] } : { developmentBearer: [] },
+        ],
+        response: {
+          200: activeMembershipBootstrapResponseJsonSchema,
+          401: errorResponseJsonSchema,
+          503: errorResponseJsonSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      if (activeMembershipBootstrapService === undefined) {
+        return reply.status(503).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'ACTIVE_MEMBERSHIP_BOOTSTRAP_NOT_CONFIGURED',
+              message: 'Active membership discovery is not configured.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      }
+      try {
+        return activeMembershipBootstrapSchema.parse(
+          await activeMembershipBootstrapService.list(request.headers.authorization, {
+            correlationId: request.correlationId,
+            requestId: request.id,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof ActiveMembershipBootstrapFailure) {
+          return reply.status(error.code === 'UNAUTHENTICATED' ? 401 : 503).send(
+            errorEnvelopeSchema.parse({
+              error: {
+                code: error.code,
+                message: error.message,
+                request_id: request.id,
+                correlation_id: request.correlationId,
+              },
+            }),
+          );
+        }
+        throw error;
+      }
+    },
+  );
 
   app.get(
     '/api/v1/platform/context',
