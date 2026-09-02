@@ -21,3 +21,4 @@ allowBuilds:
 
 catalog:
   jose: 6.2.8
+  oidc-client-ts: 3.5.0

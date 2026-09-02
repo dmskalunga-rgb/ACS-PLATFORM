@@ -1,9 +1,12 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_API_BASE_URL?: string;
-  readonly VITE_DEV_IDENTITY_SUBJECT?: string;
-  readonly VITE_TENANT_ID?: string;
+  readonly VITE_ACS_API_BASE_URL?: string;
+  readonly VITE_ACS_OIDC_CLIENT_ID?: string;
+  readonly VITE_ACS_OIDC_ISSUER?: string;
+  readonly VITE_ACS_OIDC_POST_LOGOUT_REDIRECT_URI?: string;
+  readonly VITE_ACS_OIDC_REDIRECT_URI?: string;
+  readonly VITE_ACS_OIDC_SCOPE?: string;
 }
 
 interface ImportMeta {
