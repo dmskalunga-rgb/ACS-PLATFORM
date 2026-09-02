@@ -1,9 +1,10 @@
-import { activeMembershipBootstrapSchema } from '@acs/contracts';
+import { activeMembershipBootstrapSchema, platformContextSchema } from '@acs/contracts';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   BrowserAuthContext,
   type AuthenticationState,
   type MembershipState,
+  type TenantContextState,
 } from './auth-context.js';
 import { AuthenticatedApiClient, AuthenticatedApiClientError } from './authenticated-api-client.js';
 import {
@@ -21,30 +22,45 @@ function membershipFailure(error: unknown): MembershipState {
   return { kind: 'unavailable' };
 }
 
+const selectedMembershipStorageKey = 'acs.selected-membership-id';
+
+function contextFailure(error: unknown): TenantContextState {
+  if (error instanceof AuthenticatedApiClientError) {
+    if (error.kind === 'forbidden') return { kind: 'forbidden' };
+    if (error.kind === 'not-found') return { kind: 'not-found' };
+  }
+  return { kind: 'unavailable' };
+}
+
 export function AuthProvider({
   children,
   configuration,
   manager,
   fetchImplementation = fetch,
   location = window.location,
+  sessionStorage = window.sessionStorage,
 }: {
   readonly children: ReactNode;
   readonly configuration: OidcRuntimeConfiguration;
   readonly manager: OidcSessionManager;
   readonly fetchImplementation?: typeof fetch;
   readonly location?: Location;
+  readonly sessionStorage?: Storage;
 }) {
   const [authentication, setAuthentication] = useState<AuthenticationState>('loading');
   const [membership, setMembership] = useState<MembershipState>({ kind: 'not-requested' });
+  const [tenantContext, setTenantContext] = useState<TenantContextState>({ kind: 'not-requested' });
   const callbackHandled = useRef(false);
 
   const clearSession = useCallback(
     async (state: AuthenticationState = 'unauthenticated') => {
       setMembership({ kind: 'not-requested' });
+      setTenantContext({ kind: 'not-requested' });
+      sessionStorage.removeItem(selectedMembershipStorageKey);
       setAuthentication(state);
       await manager.removeUser();
     },
-    [manager],
+    [manager, sessionStorage],
   );
 
   const apiClient = useMemo(
@@ -61,16 +77,64 @@ export function AuthProvider({
     [configuration.apiBaseUrl, fetchImplementation, location.origin, manager],
   );
 
+  const hydrateContext = useCallback(
+    async (selected: {
+      readonly membership_id: string;
+      readonly tenant: { readonly id: string };
+    }) => {
+      setTenantContext({ kind: 'loading' });
+      sessionStorage.setItem(selectedMembershipStorageKey, selected.membership_id);
+      try {
+        const response = await apiClient.request('/api/v1/platform/context', {
+          headers: { 'x-acs-tenant-id': selected.tenant.id },
+        });
+        setTenantContext({
+          kind: 'ready',
+          response: platformContextSchema.parse(await response.json()),
+        });
+      } catch (error) {
+        sessionStorage.removeItem(selectedMembershipStorageKey);
+        if (
+          error instanceof AuthenticatedApiClientError &&
+          error.kind === 'authentication-required'
+        ) {
+          await clearSession('session-expired');
+          return;
+        }
+        setTenantContext(contextFailure(error));
+      }
+    },
+    [apiClient, clearSession, sessionStorage],
+  );
+
   const bootstrapMembership = useCallback(async () => {
     setMembership({ kind: 'loading' });
+    setTenantContext({ kind: 'not-requested' });
     try {
       const response = await apiClient.request('/api/v1/platform/memberships');
       const parsed = activeMembershipBootstrapSchema.parse(await response.json());
-      setMembership(
-        parsed.data.memberships.length === 0
-          ? { kind: 'no-active-membership' }
-          : { kind: 'ready', response: parsed },
+      const memberships = parsed.data.memberships;
+      if (memberships.length === 0) {
+        sessionStorage.removeItem(selectedMembershipStorageKey);
+        setMembership({ kind: 'no-active-membership' });
+        return;
+      }
+      setMembership({ kind: 'ready', response: parsed });
+      if (memberships.length === 1) {
+        const soleMembership = memberships[0];
+        if (soleMembership !== undefined) await hydrateContext(soleMembership);
+        return;
+      }
+      const restoredMembershipId = sessionStorage.getItem(selectedMembershipStorageKey);
+      const restored = memberships.find(
+        (candidate) => candidate.membership_id === restoredMembershipId,
       );
+      if (restored !== undefined) {
+        await hydrateContext(restored);
+        return;
+      }
+      sessionStorage.removeItem(selectedMembershipStorageKey);
+      setTenantContext({ kind: 'selection-required' });
     } catch (error) {
       if (
         error instanceof AuthenticatedApiClientError &&
@@ -81,7 +145,7 @@ export function AuthProvider({
       }
       setMembership(membershipFailure(error));
     }
-  }, [apiClient, clearSession]);
+  }, [apiClient, clearSession, hydrateContext, sessionStorage]);
 
   const establishSession = useCallback(
     async (user: Awaited<ReturnType<OidcSessionManager['getUser']>>) => {
@@ -126,10 +190,27 @@ export function AuthProvider({
     };
   }, [clearSession, configuration.redirectUri, establishSession, location, manager]);
 
+  const selectMembership = useCallback(
+    async (membershipId: string) => {
+      if (membership.kind !== 'ready') return;
+      const selected = membership.response.data.memberships.find(
+        (candidate) => candidate.membership_id === membershipId,
+      );
+      if (selected === undefined) {
+        sessionStorage.removeItem(selectedMembershipStorageKey);
+        setTenantContext({ kind: 'selection-required' });
+        return;
+      }
+      await hydrateContext(selected);
+    },
+    [hydrateContext, membership, sessionStorage],
+  );
+
   const value = useMemo(
     () => ({
       authentication,
       membership,
+      tenantContext,
       signIn: async () => {
         setAuthentication('authenticating');
         try {
@@ -139,17 +220,16 @@ export function AuthProvider({
         }
       },
       signOut: async () => {
-        setMembership({ kind: 'not-requested' });
-        setAuthentication('unauthenticated');
         try {
-          await manager.removeUser();
+          await clearSession();
           await manager.signoutRedirect();
         } catch {
           setAuthentication('error');
         }
       },
+      selectMembership,
     }),
-    [authentication, manager, membership],
+    [authentication, clearSession, manager, membership, selectMembership, tenantContext],
   );
 
   return <BrowserAuthContext.Provider value={value}>{children}</BrowserAuthContext.Provider>;

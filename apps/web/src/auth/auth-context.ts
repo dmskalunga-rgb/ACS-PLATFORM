@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { ActiveMembershipBootstrapResponse } from '@acs/contracts';
+import type { ActiveMembershipBootstrapResponse, PlatformContextResponse } from '@acs/contracts';
 
 export type AuthenticationState =
   | 'loading'
@@ -18,11 +18,22 @@ export type MembershipState =
   | { readonly kind: 'forbidden' }
   | { readonly kind: 'unavailable' };
 
+export type TenantContextState =
+  | { readonly kind: 'not-requested' }
+  | { readonly kind: 'selection-required' }
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly response: PlatformContextResponse }
+  | { readonly kind: 'forbidden' }
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'unavailable' };
+
 export interface BrowserAuthContextValue {
   readonly authentication: AuthenticationState;
   readonly membership: MembershipState;
+  readonly tenantContext: TenantContextState;
   readonly signIn: () => Promise<void>;
   readonly signOut: () => Promise<void>;
+  readonly selectMembership: (membershipId: string) => Promise<void>;
 }
 
 export const BrowserAuthContext = createContext<BrowserAuthContextValue | undefined>(undefined);
