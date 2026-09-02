@@ -1,21 +1,14 @@
 export interface ContextClientConfiguration {
-  readonly accessToken?: string;
-  readonly developmentIdentitySubject?: string;
-  readonly onSignIn?: () => void;
-  readonly onSignOut?: () => void | Promise<void>;
-  readonly tenantId?: string;
+  readonly apiBaseUrl: string;
 }
 
+/** The browser only accepts a same-origin API base; Vite forwards `/api` locally. */
 export function resolveContextClientConfiguration(input: {
-  readonly developmentIdentitySubject?: string;
-  readonly isDevelopment: boolean;
-  readonly tenantId?: string;
+  readonly apiBaseUrl?: string;
 }): ContextClientConfiguration {
-  if (!input.isDevelopment) return {};
-  return {
-    ...(input.developmentIdentitySubject === undefined
-      ? {}
-      : { developmentIdentitySubject: input.developmentIdentitySubject }),
-    ...(input.tenantId === undefined ? {} : { tenantId: input.tenantId }),
-  };
+  const apiBaseUrl = input.apiBaseUrl?.trim() || '/api';
+  if (!apiBaseUrl.startsWith('/') || apiBaseUrl.startsWith('//')) {
+    throw new Error('The browser API base must be a same-origin relative path.');
+  }
+  return { apiBaseUrl: apiBaseUrl.replace(/\/$/, '') };
 }

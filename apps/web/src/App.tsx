@@ -1,20 +1,5 @@
-import { platformContextSchema, type PlatformContextResponse } from '@acs/contracts';
 import { useEffect, useState } from 'react';
-import {
-  resolveContextClientConfiguration,
-  type ContextClientConfiguration,
-} from './context-client-configuration.js';
-import { TenantAdministrationPanel } from './TenantAdministration.js';
-import { CustomerRegistryPanel } from './CustomerRegistry.js';
-import { LeadRegistryPanel } from './LeadRegistry.js';
-import { PlanCatalogPanel } from './PlanCatalog.js';
-import { PartnerRegistryPanel } from './PartnerRegistry.js';
-import { OpportunityRegistryPanel } from './OpportunityRegistry.js';
-import { ProposalRegistryPanel } from './ProposalRegistry.js';
-import { ContractRegistryPanel } from './ContractRegistry.js';
-import { SubscriptionRegistryPanel } from './SubscriptionRegistry.js';
-import { EntitlementRegistryPanel } from './EntitlementRegistry.js';
-import { UsageMeteringRegistryPanel } from './UsageMeteringRegistry.js';
+import { useBrowserAuth } from './auth/auth-context.js';
 
 interface HealthResponse {
   readonly component: 'FOUNDATION';
@@ -28,44 +13,9 @@ type HealthState =
   | { readonly kind: 'available'; readonly response: HealthResponse }
   | { readonly kind: 'unavailable' };
 
-type ContextState =
-  | { readonly kind: 'loading' }
-  | { readonly kind: 'available'; readonly response: PlatformContextResponse }
-  | { readonly kind: 'expired' }
-  | { readonly kind: 'forbidden' }
-  | { readonly kind: 'signed-out' }
-  | { readonly kind: 'not-configured' }
-  | { readonly kind: 'identity-unavailable' }
-  | { readonly kind: 'unavailable' };
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api';
-const defaultContextConfiguration: ContextClientConfiguration = import.meta.env.DEV
-  ? resolveContextClientConfiguration({
-      isDevelopment: true,
-      ...(import.meta.env.VITE_DEV_IDENTITY_SUBJECT === undefined
-        ? {}
-        : { developmentIdentitySubject: import.meta.env.VITE_DEV_IDENTITY_SUBJECT }),
-      ...(import.meta.env.VITE_TENANT_ID === undefined
-        ? {}
-        : { tenantId: import.meta.env.VITE_TENANT_ID }),
-    })
-  : {};
-
-export function App({
-  contextConfiguration = defaultContextConfiguration,
-}: {
-  readonly contextConfiguration?: ContextClientConfiguration;
-}) {
+export function App({ apiBaseUrl = '/api' }: { readonly apiBaseUrl?: string }) {
+  const { authentication, membership, signIn, signOut } = useBrowserAuth();
   const [health, setHealth] = useState<HealthState>({ kind: 'loading' });
-  const [sessionActive, setSessionActive] = useState(true);
-  const hasCredential =
-    contextConfiguration.accessToken !== undefined ||
-    contextConfiguration.developmentIdentitySubject !== undefined;
-  const [context, setContext] = useState<ContextState>(
-    !hasCredential || contextConfiguration.tenantId === undefined
-      ? { kind: 'not-configured' }
-      : { kind: 'loading' },
-  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -83,53 +33,10 @@ export function App({
       }
     })();
     return () => controller.abort();
-  }, []);
+  }, [apiBaseUrl]);
 
-  useEffect(() => {
-    const accessToken = contextConfiguration.accessToken;
-    const subject = contextConfiguration.developmentIdentitySubject;
-    const tenantId = contextConfiguration.tenantId;
-    if (!sessionActive || tenantId === undefined) return;
-    const authorization =
-      accessToken === undefined
-        ? subject === undefined
-          ? undefined
-          : `Bearer dev:${subject}`
-        : `Bearer ${accessToken}`;
-    if (authorization === undefined) return;
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/v1/platform/context`, {
-          headers: { accept: 'application/json', authorization, 'x-acs-tenant-id': tenantId },
-          signal: controller.signal,
-        });
-        if (response.status === 401) return setContext({ kind: 'expired' });
-        if (response.status === 403) return setContext({ kind: 'forbidden' });
-        if (response.status === 503) return setContext({ kind: 'identity-unavailable' });
-        if (!response.ok) throw new Error('Tenant context endpoint is unavailable.');
-        setContext({
-          kind: 'available',
-          response: platformContextSchema.parse(await response.json()),
-        });
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        setContext({ kind: 'unavailable' });
-      }
-    })();
-    return () => controller.abort();
-  }, [
-    contextConfiguration.accessToken,
-    contextConfiguration.developmentIdentitySubject,
-    contextConfiguration.tenantId,
-    sessionActive,
-  ]);
-
-  const signOut = async () => {
-    setSessionActive(false);
-    setContext({ kind: 'signed-out' });
-    await contextConfiguration.onSignOut?.();
-  };
+  const firstMembership =
+    membership.kind === 'ready' ? membership.response.data.memberships[0] : undefined;
 
   return (
     <main className="shell">
@@ -137,10 +44,9 @@ export function App({
         <p className="eyebrow">ACS · Enterprise AI-Driven Cyber Defense Platform</p>
         <h1 id="foundation-title">Platform Foundation</h1>
         <p className="lede">
-          Phase 2 begins with one governed, tenant-scoped Commercial Customer Registry vertical
-          slice.
+          Authenticated access is established by OIDC and active membership discovery.
         </p>
-        <span className="badge">PHASE 2 · CUSTOMER REGISTRY</span>
+        <span className="badge">PHASE 1 · IDENTITY FOUNDATION</span>
       </section>
       <div className="status-grid">
         <section className="status-card" aria-live="polite" aria-busy={health.kind === 'loading'}>
@@ -166,177 +72,57 @@ export function App({
             <p className="warning">Technical service disconnected. No status was fabricated.</p>
           )}
         </section>
-        <section className="status-card" aria-live="polite" aria-busy={context.kind === 'loading'}>
-          <h2>Tenant context</h2>
-          {context.kind === 'loading' && <p>Authenticating and resolving tenant membership…</p>}
-          {context.kind === 'not-configured' && (
-            <>
-              <p className="warning">NOT_CONFIGURED — no authenticated session is available.</p>
-              {contextConfiguration.onSignIn !== undefined && (
-                <button type="button" onClick={contextConfiguration.onSignIn}>
-                  Sign in
-                </button>
-              )}
-            </>
+        <section
+          className="status-card"
+          aria-live="polite"
+          aria-busy={authentication === 'loading' || membership.kind === 'loading'}
+        >
+          <h2>Tenant membership</h2>
+          {(authentication === 'loading' || authentication === 'callback-processing') && (
+            <p>Restoring authenticated session…</p>
           )}
-          {context.kind === 'expired' && <p className="warning">Session expired. Sign in again.</p>}
-          {context.kind === 'forbidden' && (
-            <p className="warning">Access forbidden. No tenant information was disclosed.</p>
+          {authentication === 'unauthenticated' && (
+            <button type="button" onClick={() => void signIn()}>
+              Sign in
+            </button>
           )}
-          {context.kind === 'signed-out' && (
-            <p className="warning">Signed out. The in-memory session is no longer usable.</p>
+          {authentication === 'authenticating' && <p>Redirecting to the identity provider…</p>}
+          {authentication === 'session-expired' && (
+            <p className="warning">Session expired. Sign in again.</p>
           )}
-          {context.kind === 'identity-unavailable' && (
-            <p className="warning">Identity service unavailable. Access remains closed.</p>
+          {authentication === 'error' && (
+            <p className="warning">Authentication could not be completed. Access remains closed.</p>
           )}
-          {context.kind === 'unavailable' && (
-            <p className="warning">Tenant context disconnected. No data was fabricated.</p>
+          {authentication === 'authenticated' && membership.kind === 'loading' && (
+            <p>Resolving active memberships…</p>
           )}
-          {context.kind === 'available' && (
+          {authentication === 'authenticated' && membership.kind === 'no-active-membership' && (
+            <p className="warning">NO_ACTIVE_MEMBERSHIP</p>
+          )}
+          {authentication === 'authenticated' && membership.kind === 'forbidden' && (
+            <p className="warning">Membership access is forbidden.</p>
+          )}
+          {authentication === 'authenticated' && membership.kind === 'unavailable' && (
+            <p className="warning">Membership service unavailable. Access remains closed.</p>
+          )}
+          {firstMembership !== undefined && (
             <>
               <dl>
                 <div>
                   <dt>Tenant</dt>
-                  <dd>{context.response.data.tenant.display_name}</dd>
+                  <dd>{firstMembership.tenant.display_name}</dd>
                 </div>
                 <div>
                   <dt>Membership</dt>
-                  <dd>{context.response.data.membership.status}</dd>
-                </div>
-                <div>
-                  <dt>Authorized action</dt>
-                  <dd>{context.response.data.permissions[0]}</dd>
+                  <dd>{firstMembership.status}</dd>
                 </div>
               </dl>
-              {contextConfiguration.accessToken !== undefined && (
-                <button type="button" onClick={() => void signOut()}>
-                  Sign out
-                </button>
-              )}
+              <button type="button" onClick={() => void signOut()}>
+                Sign out
+              </button>
             </>
           )}
         </section>
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <TenantAdministrationPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <CustomerRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <LeadRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <PlanCatalogPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <PartnerRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <OpportunityRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <ProposalRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <ContractRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <SubscriptionRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <EntitlementRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
-        {context.kind === 'available' && contextConfiguration.tenantId !== undefined && (
-          <UsageMeteringRegistryPanel
-            apiBaseUrl={apiBaseUrl}
-            tenantId={contextConfiguration.tenantId}
-            authorization={
-              contextConfiguration.accessToken === undefined
-                ? `Bearer dev:${contextConfiguration.developmentIdentitySubject ?? ''}`
-                : `Bearer ${contextConfiguration.accessToken}`
-            }
-          />
-        )}
       </div>
     </main>
   );
