@@ -3,14 +3,17 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { AuthProvider } from './auth/auth-provider.js';
 import { createOidcSessionManager, resolveOidcRuntimeConfiguration } from './auth/oidc-session.js';
-import { resolveContextClientConfiguration } from './context-client-configuration.js';
+import {
+  productionOidcRuntimeEnvironment,
+  resolveContextClientConfiguration,
+} from './context-client-configuration.js';
 import './styles.css';
 
 const root = document.querySelector<HTMLDivElement>('#root');
 if (root === null) throw new Error('ACS web root element is missing.');
 
 try {
-  const oidc = resolveOidcRuntimeConfiguration(import.meta.env);
+  const oidc = resolveOidcRuntimeConfiguration(productionOidcRuntimeEnvironment());
   const context = resolveContextClientConfiguration({ apiBaseUrl: oidc.apiBaseUrl });
   const manager = createOidcSessionManager(oidc);
   createRoot(root).render(

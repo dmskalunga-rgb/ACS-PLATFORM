@@ -4,6 +4,7 @@ import {
   isOidcCallback,
   resolveOidcRuntimeConfiguration,
 } from './oidc-session.js';
+import { allowOidcRuntimeEnvironment } from '../context-client-configuration.js';
 
 describe('OIDC runtime configuration', () => {
   const environment = {
@@ -22,6 +23,23 @@ describe('OIDC runtime configuration', () => {
     const missingIssuer = { ...environment } as Partial<typeof environment>;
     delete missingIssuer.VITE_ACS_OIDC_ISSUER;
     expect(() => resolveOidcRuntimeConfiguration(missingIssuer)).toThrow(OidcConfigurationError);
+  });
+  it('retains only the production OIDC/API allowlist from a broader environment', () => {
+    const allowed = allowOidcRuntimeEnvironment({
+      ...environment,
+      VITE_DEV_IDENTITY_SUBJECT: 'phase1-production-guard-sentinel',
+      VITE_TENANT_ID: '00000000-0000-4000-8000-000000000011',
+    } as typeof environment);
+    expect(allowed).toEqual({
+      VITE_ACS_API_BASE_URL: undefined,
+      VITE_ACS_OIDC_CLIENT_ID: 'acs-web',
+      VITE_ACS_OIDC_ISSUER: 'https://idp.acs.local:8443/realms/acs',
+      VITE_ACS_OIDC_POST_LOGOUT_REDIRECT_URI: 'http://localhost:5173/',
+      VITE_ACS_OIDC_REDIRECT_URI: 'http://localhost:5173/auth/callback',
+      VITE_ACS_OIDC_SCOPE: undefined,
+    });
+    expect(allowed).not.toHaveProperty('VITE_DEV_IDENTITY_SUBJECT');
+    expect(allowed).not.toHaveProperty('VITE_TENANT_ID');
   });
   it('recognizes only a code-and-state callback at the configured path', () => {
     expect(

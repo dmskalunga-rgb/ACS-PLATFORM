@@ -22,12 +22,12 @@ export interface OidcSessionManager {
 }
 
 type OidcEnvironment = {
-  readonly VITE_ACS_API_BASE_URL?: string;
-  readonly VITE_ACS_OIDC_CLIENT_ID?: string;
-  readonly VITE_ACS_OIDC_ISSUER?: string;
-  readonly VITE_ACS_OIDC_POST_LOGOUT_REDIRECT_URI?: string;
-  readonly VITE_ACS_OIDC_REDIRECT_URI?: string;
-  readonly VITE_ACS_OIDC_SCOPE?: string;
+  readonly VITE_ACS_API_BASE_URL?: string | undefined;
+  readonly VITE_ACS_OIDC_CLIENT_ID?: string | undefined;
+  readonly VITE_ACS_OIDC_ISSUER?: string | undefined;
+  readonly VITE_ACS_OIDC_POST_LOGOUT_REDIRECT_URI?: string | undefined;
+  readonly VITE_ACS_OIDC_REDIRECT_URI?: string | undefined;
+  readonly VITE_ACS_OIDC_SCOPE?: string | undefined;
 };
 
 export class OidcConfigurationError extends Error {
