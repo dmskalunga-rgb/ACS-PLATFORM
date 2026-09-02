@@ -14,8 +14,10 @@ type HealthState =
   | { readonly kind: 'unavailable' };
 
 export function App({ apiBaseUrl = '/api' }: { readonly apiBaseUrl?: string }) {
-  const { authentication, membership, signIn, signOut } = useBrowserAuth();
+  const { authentication, membership, tenantContext, signIn, signOut, selectMembership } =
+    useBrowserAuth();
   const [health, setHealth] = useState<HealthState>({ kind: 'loading' });
+  const activeMemberships = membership.kind === 'ready' ? membership.response.data.memberships : [];
 
   useEffect(() => {
     const controller = new AbortController();
@@ -34,9 +36,6 @@ export function App({ apiBaseUrl = '/api' }: { readonly apiBaseUrl?: string }) {
     })();
     return () => controller.abort();
   }, [apiBaseUrl]);
-
-  const firstMembership =
-    membership.kind === 'ready' ? membership.response.data.memberships[0] : undefined;
 
   return (
     <main className="shell">
@@ -75,7 +74,11 @@ export function App({ apiBaseUrl = '/api' }: { readonly apiBaseUrl?: string }) {
         <section
           className="status-card"
           aria-live="polite"
-          aria-busy={authentication === 'loading' || membership.kind === 'loading'}
+          aria-busy={
+            authentication === 'loading' ||
+            membership.kind === 'loading' ||
+            tenantContext.kind === 'loading'
+          }
         >
           <h2>Tenant membership</h2>
           {(authentication === 'loading' || authentication === 'callback-processing') && (
@@ -105,22 +108,72 @@ export function App({ apiBaseUrl = '/api' }: { readonly apiBaseUrl?: string }) {
           {authentication === 'authenticated' && membership.kind === 'unavailable' && (
             <p className="warning">Membership service unavailable. Access remains closed.</p>
           )}
-          {firstMembership !== undefined && (
+          {authentication === 'authenticated' &&
+            tenantContext.kind === 'selection-required' &&
+            membership.kind === 'ready' && (
+              <>
+                <p>Select an active tenant to continue.</p>
+                <ul>
+                  {activeMemberships.map((candidate) => (
+                    <li key={candidate.membership_id}>
+                      <button
+                        type="button"
+                        onClick={() => void selectMembership(candidate.membership_id)}
+                      >
+                        {candidate.tenant.display_name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          {authentication === 'authenticated' && tenantContext.kind === 'loading' && (
+            <p>Establishing server-authorized tenant context…</p>
+          )}
+          {authentication === 'authenticated' && tenantContext.kind === 'forbidden' && (
+            <p className="warning">Tenant context access is forbidden.</p>
+          )}
+          {authentication === 'authenticated' && tenantContext.kind === 'not-found' && (
+            <p className="warning">Selected tenant context is unavailable.</p>
+          )}
+          {authentication === 'authenticated' && tenantContext.kind === 'unavailable' && (
+            <p className="warning">Tenant context service unavailable. Access remains closed.</p>
+          )}
+          {tenantContext.kind === 'ready' && (
             <>
               <dl>
                 <div>
                   <dt>Tenant</dt>
-                  <dd>{firstMembership.tenant.display_name}</dd>
+                  <dd>{tenantContext.response.data.tenant.display_name}</dd>
                 </div>
                 <div>
                   <dt>Membership</dt>
-                  <dd>{firstMembership.status}</dd>
+                  <dd>{tenantContext.response.data.membership.status}</dd>
                 </div>
               </dl>
-              <button type="button" onClick={() => void signOut()}>
-                Sign out
-              </button>
+              {activeMemberships.length > 1 && (
+                <>
+                  <p>Switch tenant</p>
+                  <ul>
+                    {activeMemberships.map((candidate) => (
+                      <li key={candidate.membership_id}>
+                        <button
+                          type="button"
+                          onClick={() => void selectMembership(candidate.membership_id)}
+                        >
+                          {candidate.tenant.display_name}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </>
+          )}
+          {authentication === 'authenticated' && (
+            <button type="button" onClick={() => void signOut()}>
+              Sign out
+            </button>
           )}
         </section>
       </div>

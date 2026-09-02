@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.js';
+import { BrowserAuthContext } from './auth/auth-context.js';
 import { AuthProvider } from './auth/auth-provider.js';
 import type { OidcRuntimeConfiguration, OidcSessionManager } from './auth/oidc-session.js';
 
@@ -26,7 +27,63 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('P1-B application shell', () => {
+describe('P1-C application shell', () => {
+  it('does not render a tenant as application-ready before server context hydration', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              component: 'FOUNDATION',
+              service: 'acs-platform-api',
+              status: 'ok',
+              version: '1',
+            }),
+            { status: 200 },
+          ),
+        ),
+      ),
+    );
+    render(
+      <BrowserAuthContext.Provider
+        value={{
+          authentication: 'authenticated',
+          membership: {
+            kind: 'ready',
+            response: {
+              data: {
+                memberships: [
+                  {
+                    membership_id: '30000000-0000-4000-8000-0000000000a1',
+                    status: 'ACTIVE',
+                    tenant: {
+                      id: '00000000-0000-4000-8000-000000000011',
+                      slug: 'tenant-a',
+                      display_name: 'Tenant A',
+                    },
+                  },
+                ],
+              },
+              meta: {
+                request_id: '50000000-0000-4000-8000-000000000011',
+                correlation_id: '60000000-0000-4000-8000-000000000011',
+              },
+            },
+          },
+          tenantContext: { kind: 'loading' },
+          signIn: vi.fn(),
+          signOut: vi.fn(),
+          selectMembership: vi.fn(),
+        }}
+      >
+        <App />
+      </BrowserAuthContext.Provider>,
+    );
+    expect(await screen.findByText('Establishing server-authorized tenant context…')).toBeVisible();
+    expect(screen.queryByText('Tenant A')).not.toBeInTheDocument();
+  });
+
   it('does not render tenant data before authenticated membership readiness', async () => {
     vi.stubGlobal(
       'fetch',
