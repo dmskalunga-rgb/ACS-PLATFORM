@@ -11,7 +11,8 @@ RUN pnpm --filter @acs/platform-api deploy --prod /runtime
 FROM node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN rm -rf \
+RUN apk upgrade --no-cache libcrypto3 libssl3 \
+    && rm -rf \
       /usr/local/lib/node_modules/npm \
       /usr/local/lib/node_modules/corepack \
       /usr/local/bin/npm \
