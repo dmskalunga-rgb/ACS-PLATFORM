@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import type {
+  ActiveTenantMembership,
+  ActiveMembershipRepository,
   ContextReadMetadata,
   IssuedTenantContext,
   ResolvedTenantMembership,
@@ -14,19 +16,33 @@ const { Pool } = pg;
 
 interface ContextRow {
   context_token?: string;
+  membership_id?: string;
   tenant_display_name: string;
   tenant_id: string;
   tenant_slug: string;
   user_id: string;
 }
 
-export class PostgresTenantContextRepository implements TenantContextRepository {
+export class PostgresTenantContextRepository
+  implements TenantContextRepository, ActiveMembershipRepository
+{
   private readonly issuerPool: pg.Pool;
   private readonly tenantPool: pg.Pool;
 
   constructor(issuerDatabaseUrl: string, tenantDatabaseUrl: string) {
     this.issuerPool = new Pool({ connectionString: issuerDatabaseUrl, max: 5 });
     this.tenantPool = new Pool({ connectionString: tenantDatabaseUrl, max: 10 });
+  }
+
+  async listActiveMembershipsBySubject(
+    subject: string,
+  ): Promise<readonly ActiveTenantMembership[]> {
+    const result = await this.issuerPool.query<ContextRow>(
+      `SELECT membership_id, user_id, tenant_id, tenant_slug, tenant_display_name
+       FROM platform.list_active_tenant_memberships($1)`,
+      [subject],
+    );
+    return result.rows.map(mapActiveMembership);
   }
 
   async resolveMembership(
@@ -172,4 +188,10 @@ function mapRequiredContext(row: ContextRow): ResolvedTenantMembership {
     tenantSlug: row.tenant_slug,
     userId: row.user_id,
   };
+}
+
+function mapActiveMembership(row: ContextRow): ActiveTenantMembership {
+  if (row.membership_id === undefined)
+    throw new Error('active membership identifier was not returned');
+  return { ...mapRequiredContext(row), membershipId: row.membership_id };
 }
