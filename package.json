@@ -29,6 +29,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "turbo run lint",
+    "lint:web": "turbo run lint --filter=@acs/web",
     "sbom:generate": "pnpm sbom --sbom-format cyclonedx --lockfile-only --out artifacts/sbom.cdx.json",
     "test": "turbo run test --concurrency=2",
     "test:coverage": "turbo run test:coverage",
