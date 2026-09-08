@@ -47,4 +47,12 @@ describe('FOUNDATION configuration', () => {
     expect(configuration.identityMode).toBe('oidc');
     expect(configuration.oidc?.allowedAlgorithms).toEqual(['RS256', 'PS256']);
   });
+
+  it('binds MPA only through its dedicated database URL', () => {
+    const configuration = loadConfiguration({
+      ACS_MPA_DATABASE_URL: 'postgresql://mpa.example/acs_test_mpa',
+    });
+    expect(configuration.mpaDatabaseUrl).toBe('postgresql://mpa.example/acs_test_mpa');
+    expect(loadConfiguration({}).mpaDatabaseUrl).toBeUndefined();
+  });
 });
