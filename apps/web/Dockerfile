@@ -10,7 +10,7 @@ RUN pnpm --filter @acs/web... build
 FROM nginx:stable-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46 AS runtime
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html
-RUN apk upgrade --no-cache libcrypto3 libssl3 libexpat \
+RUN apk upgrade --no-cache libcrypto3 libssl3 libexpat libuuid \
     && chown -R 101:101 \
       /var/cache/nginx \
       /var/log/nginx \

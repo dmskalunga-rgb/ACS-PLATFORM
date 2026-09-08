@@ -54,6 +54,15 @@ const eventRollbackPath = resolve(
   'database/rollbacks/20260818000000_event_delivery_foundation.sql',
 );
 const eventTestPath = resolve('database/tests/event_foundation_lifecycle.sql');
+const mpaRolesPath = resolve('database/roles/platform_mpa_roles.sql');
+const mpaMigrationPath = resolve(
+  'database/migrations/20260901000000_platform_multi_person_authorization.sql',
+);
+const mpaRollbackPath = resolve(
+  'database/rollbacks/20260901000000_platform_multi_person_authorization.sql',
+);
+const mpaSeedPath = resolve('database/tests/fixtures/platform_mpa_seed.sql');
+const mpaTestPath = resolve('database/tests/rls/platform_multi_person_authorization_isolation.sql');
 const customerRolesPath = resolve('database/roles/phase2_customer_registry_roles.sql');
 const customerMigrationPath = resolve(
   'database/migrations/20260818010000_phase2_customer_registry.sql',
@@ -185,6 +194,8 @@ const testRoles = [
   'acs_phase2_entitlement_registry',
   'acs_phase2_usage_metering',
   'acs_machine_context_issuer',
+  'acs_platform_mpa_login_test',
+  'acs_platform_mpa',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -200,6 +211,12 @@ async function dropTestRoles(): Promise<void> {
 await client.connect();
 try {
   await dropTestRoles();
+  const mpaExists = await client.query(
+    "SELECT to_regclass('platform.mpa_authorization_envelopes') AS relation",
+  );
+  if (mpaExists.rows[0]?.relation !== null) {
+    await client.query(await readFile(mpaRollbackPath, 'utf8'));
+  }
   const customerRegistryExists = await client.query(
     "SELECT to_regclass('commercial.customers') AS relation",
   );
@@ -247,6 +264,8 @@ try {
   await client.query(await readFile(tenantAdminMigrationPath, 'utf8'));
   await client.query(await readFile(eventRolesPath, 'utf8'));
   await client.query(await readFile(eventMigrationPath, 'utf8'));
+  await client.query(await readFile(mpaRolesPath, 'utf8'));
+  await client.query(await readFile(mpaMigrationPath, 'utf8'));
   await client.query(await readFile(customerRolesPath, 'utf8'));
   await client.query(await readFile(customerMigrationPath, 'utf8'));
   await client.query(await readFile(leadRolesPath, 'utf8'));
@@ -287,6 +306,7 @@ try {
     'GRANT SELECT, UPDATE, DELETE ON platform.audit_logs, platform.security_audit_logs TO acs_phase1_audit_integrity_test',
   );
   await client.query(await readFile(phase1SeedPath, 'utf8'));
+  await client.query(await readFile(mpaSeedPath, 'utf8'));
   await client.query(await readFile(activeMembershipBootstrapTestPath, 'utf8'));
   await client.query(await readFile(customerSeedPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
@@ -297,6 +317,7 @@ try {
   await client.query(await readFile(phase1TestPath, 'utf8'));
   await client.query(await readFile(tenantAdminTestPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
+  await client.query(await readFile(mpaTestPath, 'utf8'));
   await client.query(await readFile(customerTestPath, 'utf8'));
   await client.query(await readFile(leadTestPath, 'utf8'));
   await client.query(await readFile(planTestPath, 'utf8'));
@@ -482,9 +503,11 @@ try {
     GRANT acs_phase2_usage_metering TO acs_phase2_usage_metering_login_test;
     CREATE ROLE acs_machine_context_issuer_login_test LOGIN INHERIT PASSWORD 'acs_phase2_test_only';
     GRANT acs_machine_context_issuer TO acs_machine_context_issuer_login_test;
+    CREATE ROLE acs_platform_mpa_login_test LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD 'acs_phase1_test_only';
+    GRANT acs_platform_mpa TO acs_platform_mpa_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', machine_trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED', usage_metering_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', machine_trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', mpa: 'VERIFIED', mpa_rls: 'VERIFIED', mpa_force_rls: 'VERIFIED', mpa_least_privilege: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED', usage_metering_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();

@@ -55,6 +55,9 @@ describe('FOUNDATION platform API', () => {
     const document = z.object({ paths: z.record(z.string(), z.unknown()) }).parse(response.json());
     expect(document.paths['/health']).toBeDefined();
     expect(document.paths['/api/v1/platform/context']).toBeDefined();
+    expect(
+      document.paths['/api/v1/platform/tenants/{tenantId}/multi-person-authorizations'],
+    ).toBeDefined();
     expect(document.paths['/api/v1/commercial/customers']).toBeDefined();
     expect(document.paths['/api/v1/commercial/customers/{customerId}']).toBeDefined();
     expect(response.body).toContain('developmentBearer');
@@ -71,6 +74,15 @@ describe('FOUNDATION platform API', () => {
     expect(errorEnvelopeSchema.parse(response.json()).error.code).toBe(
       'PLATFORM_CONTEXT_NOT_CONFIGURED',
     );
+  });
+
+  it('fails closed when the MPA runtime binding is absent', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/platform/tenants/${randomUUID()}/multi-person-authorizations/${randomUUID()}`,
+    });
+    expect(response.statusCode).toBe(503);
+    expect(errorEnvelopeSchema.parse(response.json()).error.code).toBe('MPA_NOT_CONFIGURED');
   });
 
   it('serves only the authenticated principal active memberships', async () => {

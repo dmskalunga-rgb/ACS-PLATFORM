@@ -63,6 +63,10 @@ import {
   platformContextSchema,
   roleMutationSchema,
   tenantAdministrationSchema,
+  multiPersonAuthorizationDecisionSchema,
+  multiPersonAuthorizationEnvelopeSchema,
+  multiPersonAuthorizationRequestSchema,
+  multiPersonAuthorizationTerminalDecisionSchema,
 } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import {
@@ -107,6 +111,7 @@ import { PostgresContractRegistryRepository } from './postgres-contract-registry
 import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-registry.js';
 import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
 import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
+import { PostgresMultiPersonAuthorizationRepository } from './postgres-multi-person-authorization.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -161,6 +166,11 @@ import {
   TenantAdministrationFailure,
   TenantAdministrationService,
 } from './tenant-administration.js';
+import {
+  MultiPersonAuthorizationFailure,
+  MultiPersonAuthorizationService,
+  NotConfiguredPhysicalHumanAttestation,
+} from './multi-person-authorization.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -188,6 +198,7 @@ export async function buildApp(
     readonly entitlementRegistryService?: EntitlementRegistryService;
     readonly usageMeteringService?: UsageMeteringService;
     readonly machineUsageIngestionService?: MachineUsageIngestionService;
+    readonly multiPersonAuthorizationService?: MultiPersonAuthorizationService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -229,6 +240,8 @@ export async function buildApp(
   let usageMeteringRepository: PostgresUsageMeteringRepository | undefined;
   let usageMeteringService = options.usageMeteringService;
   let machineUsageIngestionService = options.machineUsageIngestionService;
+  let mpaRepository: PostgresMultiPersonAuthorizationRepository | undefined;
+  let multiPersonAuthorizationService = options.multiPersonAuthorizationService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -276,6 +289,18 @@ export async function buildApp(
         new RepositoryAuthorizationPort(postgresRepository),
         postgresRepository,
         tenantAdminRepository,
+        securityAuditRepository,
+      );
+    }
+    if (configuration.mpaDatabaseUrl !== undefined) {
+      mpaRepository = new PostgresMultiPersonAuthorizationRepository(configuration.mpaDatabaseUrl);
+      multiPersonAuthorizationService = new MultiPersonAuthorizationService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        postgresRepository,
+        mpaRepository,
+        new NotConfiguredPhysicalHumanAttestation(),
         securityAuditRepository,
       );
     }
@@ -413,6 +438,7 @@ export async function buildApp(
         subscriptionRepository?.close(),
         entitlementRepository?.close(),
         usageMeteringRepository?.close(),
+        mpaRepository?.close(),
       ]);
     });
   }
@@ -977,6 +1003,203 @@ export async function buildApp(
         }
       },
     });
+
+  const mpaRouteSchema = {
+    security: [
+      configuration.identityMode === 'oidc' ? { oidcBearer: [] } : { developmentBearer: [] },
+    ],
+    params: {
+      type: 'object',
+      required: ['tenantId'],
+      properties: {
+        tenantId: { type: 'string', format: 'uuid' },
+        authorizationId: { type: 'string', format: 'uuid' },
+      },
+    },
+    headers: {
+      type: 'object',
+      properties: {
+        authorization: { type: 'string' },
+        'idempotency-key': { type: 'string', format: 'uuid' },
+      },
+    },
+  } as const;
+  const mpaError = (
+    error: MultiPersonAuthorizationFailure,
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'NOT_FOUND'
+          ? 404
+          : error.code === 'STALE_VERSION' || error.code === 'IDEMPOTENCY_CONFLICT'
+            ? 409
+            : 403;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  const mpaUnavailable = (
+    request: { id: string; correlationId: string },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'MPA_NOT_CONFIGURED',
+          message: 'Multi-person authorization dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const idempotencyKey = (request: FastifyRequest) => {
+    const value = request.headers['idempotency-key'];
+    return typeof value === 'string' && uuidSchema.safeParse(value).success ? value : null;
+  };
+
+  app.post(
+    '/api/v1/platform/tenants/:tenantId/multi-person-authorizations',
+    { schema: mpaRouteSchema },
+    async (request, reply) => {
+      if (!multiPersonAuthorizationService) return mpaUnavailable(request, reply);
+      const { tenantId } = request.params as { tenantId: string };
+      const key = idempotencyKey(request);
+      const body = multiPersonAuthorizationRequestSchema.safeParse(request.body);
+      if (key === null || !body.success)
+        return reply.status(400).send(
+          errorEnvelopeSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'A valid request and UUID idempotency key are required.',
+              request_id: request.id,
+              correlation_id: request.correlationId,
+            },
+          }),
+        );
+      try {
+        return reply
+          .status(201)
+          .send(
+            multiPersonAuthorizationEnvelopeSchema.parse(
+              await multiPersonAuthorizationService.request(
+                request.headers.authorization,
+                tenantId,
+                body.data,
+                key,
+                metadata(request),
+              ),
+            ),
+          );
+      } catch (error) {
+        if (error instanceof MultiPersonAuthorizationFailure)
+          return mpaError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+
+  app.get(
+    '/api/v1/platform/tenants/:tenantId/multi-person-authorizations/:authorizationId',
+    { schema: mpaRouteSchema },
+    async (request, reply) => {
+      if (!multiPersonAuthorizationService) return mpaUnavailable(request, reply);
+      const { tenantId, authorizationId } = request.params as {
+        tenantId: string;
+        authorizationId: string;
+      };
+      try {
+        return multiPersonAuthorizationEnvelopeSchema.parse(
+          await multiPersonAuthorizationService.read(
+            request.headers.authorization,
+            tenantId,
+            authorizationId,
+            metadata(request),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof MultiPersonAuthorizationFailure)
+          return mpaError(error, request, reply);
+        throw error;
+      }
+    },
+  );
+
+  for (const operation of ['approve', 'reject', 'revoke'] as const)
+    app.post(
+      `/api/v1/platform/tenants/:tenantId/multi-person-authorizations/:authorizationId/${operation}`,
+      { schema: mpaRouteSchema },
+      async (request, reply) => {
+        if (!multiPersonAuthorizationService) return mpaUnavailable(request, reply);
+        const { tenantId, authorizationId } = request.params as {
+          tenantId: string;
+          authorizationId: string;
+        };
+        const key = idempotencyKey(request);
+        const body =
+          operation === 'approve'
+            ? multiPersonAuthorizationDecisionSchema.safeParse(request.body)
+            : multiPersonAuthorizationTerminalDecisionSchema.safeParse(request.body);
+        if (key === null || !body.success)
+          return reply.status(400).send(
+            errorEnvelopeSchema.parse({
+              error: {
+                code: 'INVALID_REQUEST',
+                message: 'A valid lifecycle request and UUID idempotency key are required.',
+                request_id: request.id,
+                correlation_id: request.correlationId,
+              },
+            }),
+          );
+        try {
+          const attestationCandidate: unknown = Reflect.get(body.data, 'attestation_reference');
+          const attestationReference =
+            typeof attestationCandidate === 'string' ? attestationCandidate : '';
+          const result =
+            operation === 'approve'
+              ? await multiPersonAuthorizationService.approve(
+                  request.headers.authorization,
+                  tenantId,
+                  authorizationId,
+                  body.data.expected_version,
+                  attestationReference,
+                  key,
+                  metadata(request),
+                )
+              : operation === 'reject'
+                ? await multiPersonAuthorizationService.reject(
+                    request.headers.authorization,
+                    tenantId,
+                    authorizationId,
+                    body.data.expected_version,
+                    key,
+                    metadata(request),
+                  )
+                : await multiPersonAuthorizationService.revoke(
+                    request.headers.authorization,
+                    tenantId,
+                    authorizationId,
+                    body.data.expected_version,
+                    key,
+                    metadata(request),
+                  );
+          return multiPersonAuthorizationEnvelopeSchema.parse(result);
+        } catch (error) {
+          if (error instanceof MultiPersonAuthorizationFailure)
+            return mpaError(error, request, reply);
+          throw error;
+        }
+      },
+    );
 
   const customerRouteSchema = {
     security: [
