@@ -1,7 +1,7 @@
 # ADR-0027: Cognitive Cyber Fusion M0 contract boundary
 
 - Canonical baseline status: Accepted and canonically integrated
-- Local closure status: Content complete, ready for controlled publication, not yet canonically integrated
+- Local closure status: Canonically integrated and verified
 - Date: 2026-09-09
 - Capability: ACS-XCAP-011
 

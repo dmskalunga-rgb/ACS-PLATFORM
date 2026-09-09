@@ -1,8 +1,8 @@
 # ACS-XCAP-011 — Cognitive Cyber Fusion & Cross-Domain Reasoning M0 Definition of Done
 
 **Canonical baseline governance:** `APPROVED_AND_CANONICALLY_INTEGRATED`
-**Local closure governance:** `CONTENT_COMPLETE_READY_FOR_CONTROLLED_PUBLICATION`
-**Local closure canonical integration:** `NO`
+**Local closure governance:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
+**Local closure canonical integration:** `YES`
 **Status:** `MACHINE_EXECUTABLE_ACCEPTANCE_GATE`
 **Capability:** `ACS-XCAP-011`
 **Maturity:** `M0`

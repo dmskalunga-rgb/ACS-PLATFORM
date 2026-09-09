@@ -1,14 +1,14 @@
 # ACS-XCAP-011 — Cognitive Cyber Fusion & Cross-Domain Reasoning M0 Definition of Ready
 
 **Canonical baseline governance:** `APPROVED_AND_CANONICALLY_INTEGRATED`
-**Local closure governance:** `CONTENT_COMPLETE_READY_FOR_CONTROLLED_PUBLICATION`
-**Local closure canonical integration:** `NO`
-**Implementation readiness:** `PENDING_CONTROLLED_PUBLICATION`
+**Local closure governance:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
+**Local closure canonical integration:** `YES`
+**Implementation readiness:** `IMPLEMENTATION_AUTHORIZATION_READY`
 **Capability:** `ACS-XCAP-011`
 **Maturity:** `M0_CONTRACT_VALIDATION_AND_BOUNDED_IDEMPOTENCY_RECEIPT`
 **Implementation authorization:** `NOT AUTHORIZED`
 **Runtime status:** `NOT_IMPLEMENTED`
-**Closure delta custody:** `LOCAL_UNPUBLISHED_GOVERNANCE_REMEDIATION`
+**Closure delta custody:** `CANONICAL_DEVELOP`
 
 ## Canonical authority chain
 
@@ -178,7 +178,7 @@ permitted aggregate token/cost measures. Sensitive or high-cardinality labels ar
 - implementation receives a separate explicit authorization.
 
 `GOVERNANCE_CONTENT_COMPLETE = YES`
-`READY_FOR_CONTROLLED_PUBLICATION = YES`
-`CANONICALLY_INTEGRATED = NO`
-`IMPLEMENTATION_READY = PENDING_CONTROLLED_PUBLICATION`
+`READY_FOR_CONTROLLED_PUBLICATION = SUPERSEDED_BY_CANONICAL_INTEGRATION`
+`CANONICALLY_INTEGRATED = YES`
+`IMPLEMENTATION_READY = YES`
 `IMPLEMENTATION_AUTHORIZED = NO`
