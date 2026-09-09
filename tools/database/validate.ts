@@ -63,6 +63,17 @@ const mpaRollbackPath = resolve(
 );
 const mpaSeedPath = resolve('database/tests/fixtures/platform_mpa_seed.sql');
 const mpaTestPath = resolve('database/tests/rls/platform_multi_person_authorization_isolation.sql');
+const xcap005RolesPath = resolve('database/roles/xcap005_evidence_roles.sql');
+const xcap005MigrationPath = resolve(
+  'database/migrations/20260902000000_xcap005_evidence_chain_of_custody.sql',
+);
+const xcap005RollbackPath = resolve(
+  'database/rollbacks/20260902000000_xcap005_evidence_chain_of_custody.sql',
+);
+const xcap005SeedPath = resolve('database/tests/fixtures/xcap005_evidence_seed.sql');
+const xcap005TestPath = resolve(
+  'database/tests/rls/xcap005_evidence_chain_of_custody_isolation.sql',
+);
 const customerRolesPath = resolve('database/roles/phase2_customer_registry_roles.sql');
 const customerMigrationPath = resolve(
   'database/migrations/20260818010000_phase2_customer_registry.sql',
@@ -196,6 +207,8 @@ const testRoles = [
   'acs_machine_context_issuer',
   'acs_platform_mpa_login_test',
   'acs_platform_mpa',
+  'acs_xcap005_evidence_login_test',
+  'acs_xcap005_evidence',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -211,6 +224,11 @@ async function dropTestRoles(): Promise<void> {
 await client.connect();
 try {
   await dropTestRoles();
+  const xcap005Exists = await client.query(
+    "SELECT to_regclass('cyberdefense.evidence_records') AS relation",
+  );
+  if (xcap005Exists.rows[0]?.relation !== null)
+    await client.query(await readFile(xcap005RollbackPath, 'utf8'));
   const mpaExists = await client.query(
     "SELECT to_regclass('platform.mpa_authorization_envelopes') AS relation",
   );
@@ -266,6 +284,8 @@ try {
   await client.query(await readFile(eventMigrationPath, 'utf8'));
   await client.query(await readFile(mpaRolesPath, 'utf8'));
   await client.query(await readFile(mpaMigrationPath, 'utf8'));
+  await client.query(await readFile(xcap005RolesPath, 'utf8'));
+  await client.query(await readFile(xcap005MigrationPath, 'utf8'));
   await client.query(await readFile(customerRolesPath, 'utf8'));
   await client.query(await readFile(customerMigrationPath, 'utf8'));
   await client.query(await readFile(leadRolesPath, 'utf8'));
@@ -307,6 +327,7 @@ try {
   );
   await client.query(await readFile(phase1SeedPath, 'utf8'));
   await client.query(await readFile(mpaSeedPath, 'utf8'));
+  await client.query(await readFile(xcap005SeedPath, 'utf8'));
   await client.query(await readFile(activeMembershipBootstrapTestPath, 'utf8'));
   await client.query(await readFile(customerSeedPath, 'utf8'));
   await client.query(await readFile(leadSeedPath, 'utf8'));
@@ -318,6 +339,8 @@ try {
   await client.query(await readFile(tenantAdminTestPath, 'utf8'));
   await client.query(await readFile(eventTestPath, 'utf8'));
   await client.query(await readFile(mpaTestPath, 'utf8'));
+  await client.query(await readFile(xcap005TestPath, 'utf8'));
+  await client.query(await readFile(xcap005RollbackPath, 'utf8'));
   await client.query(await readFile(customerTestPath, 'utf8'));
   await client.query(await readFile(leadTestPath, 'utf8'));
   await client.query(await readFile(planTestPath, 'utf8'));
@@ -458,6 +481,10 @@ try {
   await client.query(await readFile(usageMeteringMigrationPath, 'utf8'));
   await client.query(await readFile(usageMeteringSeedPath, 'utf8'));
   await client.query(await readFile(usageMeteringTestPath, 'utf8'));
+  await client.query(await readFile(xcap005RolesPath, 'utf8'));
+  await client.query(await readFile(xcap005MigrationPath, 'utf8'));
+  await client.query(await readFile(xcap005SeedPath, 'utf8'));
+  await client.query(await readFile(xcap005TestPath, 'utf8'));
   const durableDenials = await client.query(
     "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
   );
@@ -507,7 +534,7 @@ try {
     GRANT acs_platform_mpa TO acs_platform_mpa_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', machine_trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', mpa: 'VERIFIED', mpa_rls: 'VERIFIED', mpa_force_rls: 'VERIFIED', mpa_least_privilege: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED', usage_metering_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', machine_trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', mpa: 'VERIFIED', mpa_rls: 'VERIFIED', mpa_force_rls: 'VERIFIED', mpa_least_privilege: 'VERIFIED', xcap005_evidence: 'VERIFIED', xcap005_rls: 'VERIFIED', xcap005_force_rls: 'VERIFIED', xcap005_rollback: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED', usage_metering_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();

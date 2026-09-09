@@ -32,6 +32,8 @@ const configurationSchema = z.object({
   ACS_USAGE_METERING_DATABASE_URL: z.url().optional(),
   ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL: z.url().optional(),
   ACS_MPA_DATABASE_URL: z.url().optional(),
+  ACS_XCAP005_EVIDENCE_DATABASE_URL: z.url().optional(),
+  ACS_XCAP005_MAX_EVIDENCE_BYTES: z.coerce.number().int().positive().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -60,6 +62,8 @@ export interface PlatformConfiguration {
   readonly usageMeteringDatabaseUrl?: string;
   readonly machineContextIssuerDatabaseUrl?: string;
   readonly mpaDatabaseUrl?: string;
+  readonly xcap005EvidenceDatabaseUrl?: string;
+  readonly xcap005MaximumEvidenceBytes?: number;
   readonly webOrigin: string;
 }
 
@@ -123,6 +127,14 @@ export function loadConfiguration(
       jwksUri: parsed.ACS_OIDC_JWKS_URI,
     };
   }
+  if (
+    (parsed.ACS_XCAP005_EVIDENCE_DATABASE_URL === undefined) !==
+    (parsed.ACS_XCAP005_MAX_EVIDENCE_BYTES === undefined)
+  ) {
+    throw new Error(
+      'XCAP-005 evidence runtime requires both its dedicated database URL and maximum evidence size.',
+    );
+  }
   return {
     ...(parsed.DATABASE_URL === undefined ? {} : { databaseUrl: parsed.DATABASE_URL }),
     environment: parsed.ACS_ENV,
@@ -182,6 +194,12 @@ export function loadConfiguration(
     ...(parsed.ACS_MPA_DATABASE_URL === undefined
       ? {}
       : { mpaDatabaseUrl: parsed.ACS_MPA_DATABASE_URL }),
+    ...(parsed.ACS_XCAP005_EVIDENCE_DATABASE_URL === undefined
+      ? {}
+      : { xcap005EvidenceDatabaseUrl: parsed.ACS_XCAP005_EVIDENCE_DATABASE_URL }),
+    ...(parsed.ACS_XCAP005_MAX_EVIDENCE_BYTES === undefined
+      ? {}
+      : { xcap005MaximumEvidenceBytes: parsed.ACS_XCAP005_MAX_EVIDENCE_BYTES }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

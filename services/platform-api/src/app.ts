@@ -67,6 +67,19 @@ import {
   multiPersonAuthorizationEnvelopeSchema,
   multiPersonAuthorizationRequestSchema,
   multiPersonAuthorizationTerminalDecisionSchema,
+  evidenceClassificationDecisionSchema,
+  evidenceCollectSchema,
+  evidenceDeriveSchema,
+  evidenceExpectedVersionSchema,
+  evidenceLegalHoldReleaseSchema,
+  evidenceMpaOperationSchema,
+  evidenceMutationEnvelopeSchema,
+  evidenceReadEnvelopeSchema,
+  evidenceReasonedTransitionSchema,
+  evidenceRetentionBindingSchema,
+  evidenceSourceCreateSchema,
+  evidenceSourceEnvelopeSchema,
+  evidenceSourceTransitionSchema,
 } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import {
@@ -112,6 +125,7 @@ import { PostgresSubscriptionRegistryRepository } from './postgres-subscription-
 import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-registry.js';
 import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
 import { PostgresMultiPersonAuthorizationRepository } from './postgres-multi-person-authorization.js';
+import { PostgresEvidenceChainOfCustodyRepository } from './postgres-evidence-chain-of-custody.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -171,6 +185,10 @@ import {
   MultiPersonAuthorizationService,
   NotConfiguredPhysicalHumanAttestation,
 } from './multi-person-authorization.js';
+import {
+  EvidenceChainOfCustodyFailure,
+  EvidenceChainOfCustodyService,
+} from './evidence-chain-of-custody.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -199,6 +217,7 @@ export async function buildApp(
     readonly usageMeteringService?: UsageMeteringService;
     readonly machineUsageIngestionService?: MachineUsageIngestionService;
     readonly multiPersonAuthorizationService?: MultiPersonAuthorizationService;
+    readonly evidenceChainOfCustodyService?: EvidenceChainOfCustodyService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -242,6 +261,8 @@ export async function buildApp(
   let machineUsageIngestionService = options.machineUsageIngestionService;
   let mpaRepository: PostgresMultiPersonAuthorizationRepository | undefined;
   let multiPersonAuthorizationService = options.multiPersonAuthorizationService;
+  let evidenceRepository: PostgresEvidenceChainOfCustodyRepository | undefined;
+  let evidenceChainOfCustodyService = options.evidenceChainOfCustodyService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -302,6 +323,24 @@ export async function buildApp(
         mpaRepository,
         new NotConfiguredPhysicalHumanAttestation(),
         securityAuditRepository,
+      );
+    }
+    if (
+      configuration.xcap005EvidenceDatabaseUrl !== undefined &&
+      configuration.xcap005MaximumEvidenceBytes !== undefined
+    ) {
+      evidenceRepository = new PostgresEvidenceChainOfCustodyRepository(
+        configuration.xcap005EvidenceDatabaseUrl,
+      );
+      evidenceChainOfCustodyService = new EvidenceChainOfCustodyService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        postgresRepository,
+        evidenceRepository,
+        { verify: () => Promise.resolve({ verified: false }) },
+        securityAuditRepository,
+        configuration.xcap005MaximumEvidenceBytes,
       );
     }
     if (configuration.customerDatabaseUrl !== undefined) {
@@ -439,6 +478,7 @@ export async function buildApp(
         entitlementRepository?.close(),
         usageMeteringRepository?.close(),
         mpaRepository?.close(),
+        evidenceRepository?.close(),
       ]);
     });
   }
@@ -1200,6 +1240,352 @@ export async function buildApp(
         }
       },
     );
+
+  const evidenceUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'XCAP005_NOT_CONFIGURED',
+          message: 'Evidence custody dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const evidenceError = (
+    error: EvidenceChainOfCustodyFailure,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'FORBIDDEN' || error.code === 'MPA_DENIED'
+          ? 403
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : error.code === 'STALE_VERSION' || error.code === 'IDEMPOTENCY_CONFLICT'
+              ? 409
+              : 422;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  const evidenceKey = (request: FastifyRequest) => {
+    const value = request.headers['idempotency-key'];
+    return typeof value === 'string' && uuidSchema.safeParse(value).success ? value : null;
+  };
+  const evidenceInvalid = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'A valid request and UUID idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const evidenceMutation = (request: FastifyRequest, receipt: { data: unknown; replay: boolean }) =>
+    evidenceMutationEnvelopeSchema.parse({
+      data: receipt.data,
+      meta: {
+        request_id: request.id,
+        correlation_id: request.correlationId,
+        replay: receipt.replay,
+      },
+    });
+  const sourceMutation = (request: FastifyRequest, receipt: { data: unknown; replay: boolean }) =>
+    evidenceSourceEnvelopeSchema.parse({
+      data: receipt.data,
+      meta: {
+        request_id: request.id,
+        correlation_id: request.correlationId,
+        replay: receipt.replay,
+      },
+    });
+  const withEvidenceFailure = async <T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    operation: () => Promise<T>,
+  ) => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof EvidenceChainOfCustodyFailure)
+        return evidenceError(error, request, reply);
+      throw error;
+    }
+  };
+
+  app.post('/api/v1/cyberdefense/tenants/:tenantId/evidence-sources', async (request, reply) => {
+    if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+    const { tenantId } = request.params as { tenantId: string };
+    const key = evidenceKey(request);
+    const body = evidenceSourceCreateSchema.safeParse(request.body);
+    if (!uuidSchema.safeParse(tenantId).success || key === null || !body.success)
+      return evidenceInvalid(request, reply);
+    return withEvidenceFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          sourceMutation(
+            request,
+            await evidenceChainOfCustodyService.registerSource(
+              request.headers.authorization,
+              tenantId,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+  app.post(
+    '/api/v1/cyberdefense/tenants/:tenantId/evidence-sources/:sourceId/status',
+    async (request, reply) => {
+      if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+      const { tenantId, sourceId } = request.params as { tenantId: string; sourceId: string };
+      const key = evidenceKey(request);
+      const body = evidenceSourceTransitionSchema.safeParse(request.body);
+      if (
+        !uuidSchema.safeParse(tenantId).success ||
+        !uuidSchema.safeParse(sourceId).success ||
+        key === null ||
+        !body.success
+      )
+        return evidenceInvalid(request, reply);
+      return withEvidenceFailure(request, reply, async () =>
+        sourceMutation(
+          request,
+          await evidenceChainOfCustodyService.transitionSource(
+            request.headers.authorization,
+            tenantId,
+            sourceId,
+            body.data,
+            key,
+            metadata(request),
+          ),
+        ),
+      );
+    },
+  );
+  app.post('/api/v1/cyberdefense/tenants/:tenantId/evidence', async (request, reply) => {
+    if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+    const { tenantId } = request.params as { tenantId: string };
+    const key = evidenceKey(request);
+    const body = evidenceCollectSchema.safeParse(request.body);
+    if (!uuidSchema.safeParse(tenantId).success || key === null || !body.success)
+      return evidenceInvalid(request, reply);
+    return withEvidenceFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          evidenceMutation(
+            request,
+            await evidenceChainOfCustodyService.collect(
+              request.headers.authorization,
+              tenantId,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+  app.get('/api/v1/cyberdefense/tenants/:tenantId/evidence/:evidenceId', async (request, reply) => {
+    if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+    const { tenantId, evidenceId } = request.params as { tenantId: string; evidenceId: string };
+    if (!uuidSchema.safeParse(tenantId).success || !uuidSchema.safeParse(evidenceId).success)
+      return evidenceInvalid(request, reply);
+    return withEvidenceFailure(request, reply, async () =>
+      evidenceReadEnvelopeSchema.parse({
+        data: await evidenceChainOfCustodyService.read(
+          request.headers.authorization,
+          tenantId,
+          evidenceId,
+          metadata(request),
+        ),
+        meta: { request_id: request.id, correlation_id: request.correlationId },
+      }),
+    );
+  });
+  app.get(
+    '/api/v1/cyberdefense/tenants/:tenantId/evidence/:evidenceId/content',
+    async (request, reply) => {
+      if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+      const { tenantId, evidenceId } = request.params as { tenantId: string; evidenceId: string };
+      if (!uuidSchema.safeParse(tenantId).success || !uuidSchema.safeParse(evidenceId).success)
+        return evidenceInvalid(request, reply);
+      return withEvidenceFailure(request, reply, async () =>
+        reply
+          .type('application/octet-stream')
+          .send(
+            await evidenceChainOfCustodyService.readContent(
+              request.headers.authorization,
+              tenantId,
+              evidenceId,
+              metadata(request),
+            ),
+          ),
+      );
+    },
+  );
+  app.post(
+    '/api/v1/cyberdefense/tenants/:tenantId/evidence/:evidenceId/verify',
+    async (request, reply) => {
+      if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+      const { tenantId, evidenceId } = request.params as { tenantId: string; evidenceId: string };
+      const key = evidenceKey(request);
+      const body = evidenceExpectedVersionSchema.safeParse(request.body);
+      if (key === null || !body.success) return evidenceInvalid(request, reply);
+      return withEvidenceFailure(request, reply, async () =>
+        evidenceMutation(
+          request,
+          await evidenceChainOfCustodyService.verify(
+            request.headers.authorization,
+            tenantId,
+            evidenceId,
+            body.data.expected_version,
+            key,
+            metadata(request),
+          ),
+        ),
+      );
+    },
+  );
+  app.post(
+    '/api/v1/cyberdefense/tenants/:tenantId/evidence/:evidenceId/derivations',
+    async (request, reply) => {
+      if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+      const { tenantId, evidenceId } = request.params as { tenantId: string; evidenceId: string };
+      const key = evidenceKey(request);
+      const body = evidenceDeriveSchema.safeParse(request.body);
+      if (key === null || !body.success) return evidenceInvalid(request, reply);
+      return withEvidenceFailure(request, reply, async () =>
+        reply
+          .status(201)
+          .send(
+            evidenceMutation(
+              request,
+              await evidenceChainOfCustodyService.derive(
+                request.headers.authorization,
+                tenantId,
+                evidenceId,
+                body.data,
+                key,
+                metadata(request),
+              ),
+            ),
+          ),
+      );
+    },
+  );
+  const evidenceFacts = [
+    ['classifications', 'CLASSIFY', evidenceClassificationDecisionSchema],
+    ['retention', 'RETENTION_APPLIED', evidenceRetentionBindingSchema],
+    ['legal-holds', 'LEGAL_HOLD_APPLIED', evidenceReasonedTransitionSchema],
+  ] as const;
+  for (const [suffix, action, schema] of evidenceFacts)
+    app.post(
+      `/api/v1/cyberdefense/tenants/:tenantId/evidence/:evidenceId/${suffix}`,
+      async (request, reply) => {
+        if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+        const { tenantId, evidenceId } = request.params as { tenantId: string; evidenceId: string };
+        const key = evidenceKey(request);
+        const body = schema.safeParse(request.body);
+        if (key === null || !body.success) return evidenceInvalid(request, reply);
+        const data = body.data as {
+          expected_version: number;
+          reason_reference: string;
+          classification?: never;
+          retention_policy_id?: never;
+        };
+        return withEvidenceFailure(request, reply, async () =>
+          evidenceMutation(
+            request,
+            await evidenceChainOfCustodyService.governanceFact(
+              request.headers.authorization,
+              tenantId,
+              evidenceId,
+              {
+                action,
+                expectedVersion: data.expected_version,
+                reasonReference: data.reason_reference,
+                ...('classification' in data ? { classification: data.classification } : {}),
+                ...('retention_policy_id' in data
+                  ? { retentionPolicyId: data.retention_policy_id }
+                  : {}),
+              },
+              key,
+              metadata(request),
+            ),
+          ),
+        );
+      },
+    );
+  for (const [suffix, action] of [
+    ['exports', 'EXPORT'],
+    ['retention-overrides', 'RETENTION_OVERRIDE'],
+    ['destruction-authorizations', 'DESTROY'],
+  ] as const)
+    app.post(
+      `/api/v1/cyberdefense/tenants/:tenantId/evidence/:evidenceId/${suffix}`,
+      async (request, reply) => {
+        if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+        const { tenantId, evidenceId } = request.params as { tenantId: string; evidenceId: string };
+        const key = evidenceKey(request);
+        const body = evidenceMpaOperationSchema.safeParse(request.body);
+        if (key === null || !body.success) return evidenceInvalid(request, reply);
+        return withEvidenceFailure(request, reply, async () =>
+          evidenceMutation(
+            request,
+            await evidenceChainOfCustodyService.protectedOperation(
+              request.headers.authorization,
+              tenantId,
+              evidenceId,
+              action,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        );
+      },
+    );
+  app.post(
+    '/api/v1/cyberdefense/tenants/:tenantId/evidence/:evidenceId/legal-hold-releases',
+    async (request, reply) => {
+      if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);
+      const { tenantId, evidenceId } = request.params as { tenantId: string; evidenceId: string };
+      const key = evidenceKey(request);
+      const body = evidenceLegalHoldReleaseSchema.safeParse(request.body);
+      if (key === null || !body.success) return evidenceInvalid(request, reply);
+      return withEvidenceFailure(request, reply, async () =>
+        evidenceMutation(
+          request,
+          await evidenceChainOfCustodyService.protectedOperation(
+            request.headers.authorization,
+            tenantId,
+            evidenceId,
+            'LEGAL_HOLD_RELEASE',
+            body.data,
+            key,
+            metadata(request),
+          ),
+        ),
+      );
+    },
+  );
 
   const customerRouteSchema = {
     security: [
