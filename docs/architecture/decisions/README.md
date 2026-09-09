@@ -31,3 +31,11 @@ the decision becomes repository policy only after controlled review and merge.
 | ADR-0024 | Tenant-scoped Usage / Metering (`PROPOSED`)                 |
 | ADR-0025 | Tenant-scoped Commercial Rating (`PROPOSED`)                |
 | ADR-0026 | Canonical MPA consumption transaction boundary (`ACCEPTED`) |
+| ADR-0027 | Cognitive Cyber Fusion M0 contract boundary (`PROPOSED`)    |
+
+## AI and security decision records
+
+| Record    | Decision                                                                         |
+| --------- | -------------------------------------------------------------------------------- |
+| AIDR-0001 | Cognitive Cyber Fusion and canonical AI Core/Gateway boundary (`PROPOSED`)       |
+| SDR-0001  | Fusion tenant, authorization, evidence-trust and poisoning boundary (`PROPOSED`) |
