@@ -40,9 +40,11 @@ fail-closed degradation. No row claims any of these are implemented.
 The canonical registry and gate are located in
 [`docs/governance/cyberdefense`](../governance/cyberdefense/).
 
-## Pending ACS-XCAP-011 M0 governance delta
+## Integrated ACS-XCAP-011 M0 governance delta
 
-The authored M0 package is subordinate to this frozen matrix and remains pending human review:
+The human-approved, merged and verified M0 package is subordinate to this frozen matrix. Its
+machine-complete contracts are implementation-authorization ready; no runtime implementation is
+authorized or evidenced:
 
 | Capability delta | DoR/DoD                                               | Decisions                     | Contracts and acceptance                                                                          | Traceability effect                                                                          |
 | ---------------- | ----------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |

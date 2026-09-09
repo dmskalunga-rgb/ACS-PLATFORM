@@ -35,6 +35,10 @@ the decision becomes repository policy only after controlled review and merge.
 
 ## AI and security decision records
 
+The ACS-XCAP-011 M0 decision set (`ADR-0027`, `AIDR-0001`, `SDR-0001`) is
+`ACCEPTED_AND_CANONICALLY_INTEGRATED`; implementation authorization remains separate and runtime is
+not implemented.
+
 | Record    | Decision                                                                         |
 | --------- | -------------------------------------------------------------------------------- |
 | AIDR-0001 | Cognitive Cyber Fusion and canonical AI Core/Gateway boundary (`PROPOSED`)       |

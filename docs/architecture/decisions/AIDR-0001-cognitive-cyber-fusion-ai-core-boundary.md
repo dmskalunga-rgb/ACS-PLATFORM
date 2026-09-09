@@ -1,6 +1,7 @@
 # AIDR-0001: Cognitive Cyber Fusion and AI Core boundary
 
-- Status: Proposed for human governance review
+- Canonical baseline status: Accepted and canonically integrated
+- Local closure status: Content complete, ready for controlled publication, not yet canonically integrated
 - Date: 2026-09-09
 - Capability: ACS-XCAP-011 M0
 
@@ -43,3 +44,7 @@ selection are not introduced by M0.
 `PARALLEL_AI_PLATFORM = PROHIBITED`
 `DIRECT_PROVIDER_INTEGRATION = PROHIBITED`
 `M0_MODEL_EXECUTION = NONE`
+
+For M0 acceptance, AI Gateway unavailability, model unavailability and untrusted provider/model
+identity are contract-level boundary tests. They prove bounded denial and absence of direct-provider
+fallback; they do not invoke a provider or claim model execution.
