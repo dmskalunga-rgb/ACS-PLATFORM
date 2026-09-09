@@ -39,3 +39,15 @@ fail-closed degradation. No row claims any of these are implemented.
 
 The canonical registry and gate are located in
 [`docs/governance/cyberdefense`](../governance/cyberdefense/).
+
+## Pending ACS-XCAP-011 M0 governance delta
+
+The authored M0 package is subordinate to this frozen matrix and remains pending human review:
+
+| Capability delta | DoR/DoD                                               | Decisions                     | Contracts and acceptance                                                                          | Traceability effect                                                                          |
+| ---------------- | ----------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| ACS-XCAP-011 M0  | `ACS-XCAP-011-COGNITIVE-CYBER-FUSION-M0-{DOR,DOD}.md` | ADR-0027, AIDR-0001, SDR-0001 | M0 Policy and Contract Registry; 10 positive, 21 negative/security and 12 failure-injection cases | Dedicated M0 RTM links root/Cyberdefense authority to every requirement and future evidence. |
+
+This delta does not alter the frozen maturity sequence: M0 before CYB-001 is allowed; M1 before
+CYB-001 is blocked; M2 requires XCAP-006 and M3 requires XCAP-007. It provides no implementation
+or production evidence.
