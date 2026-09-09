@@ -16,8 +16,7 @@ event, storage, KMS or PKI system.
 
 The original entries were proposals prepared for human governance. Decisions 001–007 were later
 approved and implemented; that historical proposal state is not current authority. The bounded
-Fusion projection below is a local governance definition approved for controlled publication but
-is not yet published or implemented.
+Fusion projection below is canonically published governance but is not implemented.
 
 `HUMAN_DECISIONS_REQUIRED = NONE_FOR_EXISTING_XCAP005_RUNTIME`
 `IMPLEMENTATION_AUTHORIZED = NO`
@@ -112,12 +111,12 @@ through `Xcap005FusionEvidenceResolutionPort`. It is a closed object with these 
 The projection contract is independently versioned as `1.0.0`; it does not rename or reinterpret
 the existing opaque XCAP-005 canonicalization identifier.
 
-`FUSION_PROJECTION_GOVERNANCE_DEFINITION = APPROVED_FOR_CONTROLLED_PUBLICATION`
+`FUSION_PROJECTION_GOVERNANCE_DEFINITION = APPROVED_AND_CANONICALLY_INTEGRATED`
 `FUSION_PROJECTION_OWNER = ACS-XCAP-005`
 `FUSION_PROJECTION_AUTHORITY = EXISTING_XCAP005_READ_AUTHORITY`
-`FUSION_PROJECTION_PUBLICATION = PENDING`
+`FUSION_PROJECTION_PUBLICATION = COMPLETE`
 `FUSION_PROJECTION_RUNTIME = NOT_IMPLEMENTED`
-`GOVERNANCE_CONTENT_READY_FOR_PUBLICATION = YES`
+`GOVERNANCE_CONTENT_CANONICALLY_INTEGRATED = YES`
 
 XCAP-005 derives `provenance_state` in this exact precedence order from its authoritative immutable
 record, latest append-only integrity fact, source, custody and derivation facts:

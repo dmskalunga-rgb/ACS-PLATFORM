@@ -77,7 +77,7 @@ architectural justification.
 | ACS-XCAP-008 | Audit, Compliance & Governance                  | `EXISTING_ACS_FOUNDATION_WITH_GAPS`                 | Audit records, governance catalogs, ADRs                                                                                                                                        |
 | ACS-XCAP-009 | Reporting, Analytics & Intelligence             | `GAP_ARCHITECTURE_REQUIRED`                         | Authorized operational data products only                                                                                                                                       |
 | ACS-XCAP-010 | Notification, Escalation & Case Orchestration   | `GAP_ARCHITECTURE_REQUIRED`                         | Event Fabric, Authorization, Audit                                                                                                                                              |
-| ACS-XCAP-011 | Cognitive Cyber Fusion & Cross-Domain Reasoning | `M0_LOCAL_GOVERNANCE_CLOSURE_READY_FOR_PUBLICATION` | M0 deterministic contract validation and bounded idempotency receipt use XCAP-004/005/008; later stages consume XCAP-003/006/007/009/010; derives, never replaces, domain truth |
+| ACS-XCAP-011 | Cognitive Cyber Fusion & Cross-Domain Reasoning | `M0_GOVERNANCE_CANONICALLY_INTEGRATED_AND_VERIFIED` | M0 deterministic contract validation and bounded idempotency receipt use XCAP-004/005/008; later stages consume XCAP-003/006/007/009/010; derives, never replaces, domain truth |
 
 ## Transversal maturity assessment
 

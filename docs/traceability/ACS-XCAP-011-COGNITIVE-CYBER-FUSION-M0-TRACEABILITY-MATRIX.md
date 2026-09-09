@@ -1,9 +1,9 @@
 # ACS-XCAP-011 — Cognitive Cyber Fusion M0 Traceability Matrix
 
 **Canonical baseline governance:** `APPROVED_AND_CANONICALLY_INTEGRATED`
-**Local closure governance:** `CONTENT_COMPLETE_READY_FOR_CONTROLLED_PUBLICATION`
-**Local closure canonical integration:** `NO`
-**Status:** `PUBLICATION_PENDING_NOT_IMPLEMENTATION_EVIDENCE`
+**Local closure governance:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
+**Local closure canonical integration:** `YES`
+**Status:** `IMPLEMENTATION_AUTHORIZATION_READY_NOT_IMPLEMENTATION_EVIDENCE`
 
 ## Canonical authority chain
 

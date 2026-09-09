@@ -1,7 +1,7 @@
 # AIDR-0001: Cognitive Cyber Fusion and AI Core boundary
 
 - Canonical baseline status: Accepted and canonically integrated
-- Local closure status: Content complete, ready for controlled publication, not yet canonically integrated
+- Local closure status: Canonically integrated and verified
 - Date: 2026-09-09
 - Capability: ACS-XCAP-011 M0
 

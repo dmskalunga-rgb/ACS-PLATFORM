@@ -1,13 +1,13 @@
 # ACS-XCAP-011 — Cognitive Cyber Fusion M0 Policy and Contract Registry
 
 **Baseline governance status:** `APPROVED_AND_CANONICALLY_INTEGRATED`
-**Local closure content:** `COMPLETE_READY_FOR_CONTROLLED_PUBLICATION`
-**Local closure canonical integration:** `NO`
-**Implementation governance:** `CONTENT_COMPLETE_PUBLICATION_PENDING`
-**Implementation readiness:** `READY_AFTER_CONTROLLED_PUBLICATION`
+**Local closure content:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
+**Local closure canonical integration:** `YES`
+**Implementation governance:** `CLOSED`
+**Implementation readiness:** `IMPLEMENTATION_AUTHORIZATION_READY`
 **Implementation authorization:** `NOT AUTHORIZED`
 **Runtime status:** `NOT_IMPLEMENTED`
-**Closure delta custody:** `LOCAL_UNPUBLISHED_GOVERNANCE_REMEDIATION`
+**Closure delta custody:** `CANONICAL_DEVELOP`
 **Registry version:** `1.0.0`
 
 ## Canonical authority chain
