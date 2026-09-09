@@ -55,4 +55,16 @@ describe('FOUNDATION configuration', () => {
     expect(configuration.mpaDatabaseUrl).toBe('postgresql://mpa.example/acs_test_mpa');
     expect(loadConfiguration({}).mpaDatabaseUrl).toBeUndefined();
   });
+
+  it('fails closed unless the XCAP-005 database and bounded size are configured together', () => {
+    expect(() =>
+      loadConfiguration({ ACS_XCAP005_EVIDENCE_DATABASE_URL: 'postgresql://xcap005.example/acs' }),
+    ).toThrow(/maximum evidence size/);
+    const configuration = loadConfiguration({
+      ACS_XCAP005_EVIDENCE_DATABASE_URL: 'postgresql://xcap005.example/acs',
+      ACS_XCAP005_MAX_EVIDENCE_BYTES: '1048576',
+    });
+    expect(configuration.xcap005EvidenceDatabaseUrl).toBe('postgresql://xcap005.example/acs');
+    expect(configuration.xcap005MaximumEvidenceBytes).toBe(1_048_576);
+  });
 });
