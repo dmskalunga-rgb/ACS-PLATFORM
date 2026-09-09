@@ -1,6 +1,7 @@
 # SDR-0001: Cognitive Cyber Fusion tenant, authorization and evidence-trust boundary
 
-- Status: Proposed for human governance review
+- Canonical baseline status: Accepted and canonically integrated
+- Local closure status: Content complete, ready for controlled publication, not yet canonically integrated
 - Date: 2026-09-09
 - Capability: ACS-XCAP-011 M0
 
@@ -56,3 +57,7 @@ operational authority classes where the protected operation requires separation.
 The positive, negative/security and failure-injection matrices are mandatory. Future persistence,
 if authorized, must use least privilege and tenant RLS/FORCE RLS. Security controls may not be
 relaxed by fallback, dependency degradation or emergency paths.
+
+The M0 Policy and Contract Registry is normative for bounded failure codes, provenance hashing,
+confidence validation, context freshness, untrusted-content wrappers and sensitive-content
+redaction. Unknown classification, provenance, tenant binding or policy version fails closed.

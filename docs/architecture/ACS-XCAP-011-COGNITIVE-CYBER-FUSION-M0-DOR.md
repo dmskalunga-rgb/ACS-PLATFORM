@@ -1,9 +1,14 @@
 # ACS-XCAP-011 — Cognitive Cyber Fusion & Cross-Domain Reasoning M0 Definition of Ready
 
-**Status:** `READY_FOR_HUMAN_GOVERNANCE_REVIEW`
+**Canonical baseline governance:** `APPROVED_AND_CANONICALLY_INTEGRATED`
+**Local closure governance:** `CONTENT_COMPLETE_READY_FOR_CONTROLLED_PUBLICATION`
+**Local closure canonical integration:** `NO`
+**Implementation readiness:** `PENDING_CONTROLLED_PUBLICATION`
 **Capability:** `ACS-XCAP-011`
-**Maturity:** `M0_CONTRACT_AND_GOVERNANCE_ONLY`
+**Maturity:** `M0_CONTRACT_VALIDATION_AND_BOUNDED_IDEMPOTENCY_RECEIPT`
 **Implementation authorization:** `NOT AUTHORIZED`
+**Runtime status:** `NOT_IMPLEMENTED`
+**Closure delta custody:** `LOCAL_UNPUBLISHED_GOVERNANCE_REMEDIATION`
 
 ## Canonical authority chain
 
@@ -24,43 +29,60 @@ Cyberdefense authority, Capability Registry, Architecture Readiness Gate, Depend
 Cyberdefense RTM, ADR-0006/0007/0008/0009/0011/0012/0013/0026, canonical XCAP-005 Evidence
 and Chain of Custody, and canonical platform MPA governance/runtime. It authorizes no runtime.
 
-M0 defines only versioned Fusion request/result contracts, reference-only integrations,
-provenance, confidence, uncertainty, explainability, failure semantics, ports, candidate events,
-bounded observability, acceptance, and traceability.
+M0 defines versioned Fusion request/result contracts, deterministic validation,
+reference-only integrations, provenance, confidence, uncertainty, explainability, failure
+semantics, finalized Event Foundation contracts, bounded observability, acceptance, and
+traceability. The machine-complete schemas and acceptance dispositions are normative in the M0
+Policy and Contract Registry.
 
 `M0_BEFORE_CYB001 = ALLOWED`
 `M1_BEFORE_CYB001 = BLOCKED`
 
 ## 2. Frozen boundary
 
-M0 excludes runtime implementation, persistence, entity normalization or ownership, asset
+M0 excludes persistence except the bounded command receipt, entity normalization or ownership, asset
 authority, operational correlation, graph storage, model execution, direct AI-provider access,
 autonomous response, CYB-001, production AI, and claims of complete cross-domain intelligence.
 It may define typed references, but cannot create parallel evidence, AI, correlation, graph,
 event, audit, authorization, identity, or tenant authorities.
 
-| Boundary           | Canonical authority                             | M0 rule                                                                                                    |
-| ------------------ | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Evidence           | XCAP-005                                        | Reference only; raw mutation/custody bypass prohibited; durable derivation uses XCAP-005.                  |
-| AI/model execution | XCAP-003 and AI Gateway                         | XCAP-011 orchestrates Fusion; M0 performs no model execution or direct provider call.                      |
-| Correlation        | XCAP-006                                        | Optional typed references only; required before M2.                                                        |
-| Graph              | XCAP-007                                        | Optional typed references only; required before M3.                                                        |
-| Identity/tenant    | OIDC, ACTIVE membership, trusted server context | Client fields never establish authority; cross-tenant Fusion denied by default.                            |
-| Authorization      | `AuthorizationPort`                             | Proposed permissions are `cyberdefense.fusion.request` and `.read`; registration/assignment is later work. |
-| Critical action    | Canonical MPA plus operation owner              | Fusion recommendation is neither authorization nor execution.                                              |
-| Events             | Event Foundation                                | Candidate contracts only; no parallel publication mechanism.                                               |
-| Audit/telemetry    | Canonical audit and observability               | Bounded metadata only; content and secrets prohibited.                                                     |
+The bounded receipt uses `cyberdefense.fusion_command_receipts`, dedicated role
+`acs_xcap011_fusion`, runtime binding `ACS_XCAP011_DATABASE_URL`, RLS/FORCE RLS and the exact
+receipt/lifetime/locking rules in the Policy and Contract Registry. The ordered future migration is
+`database/migrations/20260909000000_xcap011_cognitive_fusion_m0.sql`; it also registers the two
+approved permissions and assigns neither by default.
+
+| Boundary           | Canonical authority                             | M0 rule                                                                                                                                             |
+| ------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Evidence           | XCAP-005                                        | Reference only; raw mutation/custody bypass prohibited; durable derivation uses XCAP-005.                                                           |
+| AI/model execution | XCAP-003 and AI Gateway                         | XCAP-011 orchestrates Fusion; M0 performs no model execution or direct provider call.                                                               |
+| Correlation        | XCAP-006                                        | Optional typed references only; required before M2.                                                                                                 |
+| Graph              | XCAP-007                                        | Optional typed references only; required before M3.                                                                                                 |
+| Identity/tenant    | OIDC, ACTIVE membership, trusted server context | Client fields never establish authority; cross-tenant Fusion denied by default.                                                                     |
+| Authorization      | `AuthorizationPort`                             | Approved keys are `cyberdefense.fusion.request` and `.read`; ordered permission registration is implementation work and default assignment is none. |
+| Critical action    | Canonical MPA plus operation owner              | Fusion recommendation is neither authorization nor execution.                                                                                       |
+| Events             | Event Foundation                                | Final schema `1.0.0` contracts only; no parallel publication mechanism.                                                                             |
+| Audit/telemetry    | Canonical audit and observability               | Bounded metadata only; content and secrets prohibited.                                                                                              |
 
 ## 3. Governed request contract
 
 The stable request contract identifier is `cyberdefense.fusion.request`; its initial
-`schema_version` is `1.0.0`. That contract MUST contain:
+`schema_version` is `1.0.0`. Exact types, bounds, ownership, normalization, failure mapping and
+reference rules are frozen in the M0 Policy and Contract Registry. The contract MUST contain:
 
 - `schema_version`, `tenant_id`, `fusion_request_id`, `request_id`, `correlation_id`;
 - `reasoning_purpose`, `requested_reasoning_mode`, `policy_version`;
 - typed arrays `evidence_references`, `observable_references`, `entity_references`,
   `correlation_references`, and `graph_references`;
 - optional typed `case_reference`, `time_window`, and `context_snapshot_reference`.
+- `idempotency_key`, owned by the capability-local bounded command receipt with tenant-scoped
+  request-hash binding, row locking, replay, conflict and bounded expiry semantics.
+
+For M0, `reasoning_purpose` is the closed enum `EVIDENCE_REFERENCE_VALIDATION` or
+`EVIDENCE_METADATA_SYNTHESIS`; it pairs respectively and exclusively with
+`REFERENCE_VALIDATION` or `DETERMINISTIC_SYNTHESIS`. Request, reasoning, provenance, confidence,
+context-snapshot, result and event policy/schema versions are the literal `1.0.0`. The client does
+not select another version.
 
 Every reference is tenant-bound, authorized, provenance-aware, integrity-aware, and resolved
 through its canonical owner. `tenant_id` and authority-bearing context are server-derived or
@@ -70,7 +92,8 @@ embedding is prohibited by default.
 ## 4. Governed result contract
 
 The stable result contract identifier is `cyberdefense.fusion.result`; its initial
-`schema_version` is `1.0.0`. That contract MUST contain `schema_version`, `fusion_result_id`,
+`schema_version` is `1.0.0`. Exact nested schemas are frozen in the M0 Policy and Contract
+Registry. That contract MUST contain `schema_version`, `fusion_result_id`,
 originating request identity, `status`, generated timestamp, contract/policy versions, assertions,
 hypotheses, supporting and contradicting references, cross-domain assertions, explanation,
 evidence gaps, assumptions, recommended investigation actions, optional response candidates,
@@ -102,6 +125,11 @@ grants authority. Production thresholds remain `TBD_BY_GOVERNED_POLICY`.
 
 Confidence is system-derived under governed computation/policy versions. Client-supplied,
 malformed or out-of-contract confidence is rejected; permitted absence is explicit `UNKNOWN`.
+Because M0 executes no model or inference, every valid M0 result carries all six confidence
+dimensions as `UNKNOWN`, with `value = null` and computation/policy version `1.0.0`. The
+deterministic synthesis rules, context-snapshot authority, provenance-binding schema, sensitive
+content decision matrix and exact acceptance outcomes are normative in the Policy and Contract
+Registry.
 
 Every result explains why each assertion exists, its supporting/contradicting inputs, contributing
 domains, missing evidence, assumptions, and remaining uncertainty. “AI says so” is invalid.
@@ -128,9 +156,9 @@ confidence, stale context, replay, and divergent idempotency all fail closed wit
 Idempotent replay may return the same safe result; divergent reuse is rejected. No failure path
 can authorize or execute a response.
 
-## 8. Candidate events and observability
+## 8. Final events and observability
 
-Reserved Event Foundation candidates are `cyberdefense.fusion.requested`, `.completed`, `.failed`,
+Finalized M0 Event Foundation contracts are `cyberdefense.fusion.requested`, `.completed`, `.failed`,
 `.hypothesis_generated`, and `.hypothesis_superseded`. Payloads contain bounded identifiers,
 versions, state/reason codes, counts and references—not raw evidence, prompts, credentials,
 secrets, or unrestricted model responses.
@@ -141,12 +169,16 @@ permitted aggregate token/cost measures. Sensitive or high-cardinality labels ar
 
 ## 9. Readiness gates for future M0 implementation
 
-- this DoR, DoD, registry, ADR, AIDR, SDR, catalogs, RTM and acceptance matrices receive human approval;
-- contract versions, owners, compatibility and failure policies are approved;
-- proposed permissions receive separate authorization before registration;
+- this DoR, DoD, registry, ADR, AIDR, SDR, catalogs, RTM and acceptance matrices remain aligned;
+- contract versions, owners, compatibility and failure policies remain frozen;
+- approved permission keys use the ordered `platform.permissions` migration pattern during
+  separately authorized implementation and have no default assignment;
 - no dependency is represented as implemented unless canonical evidence exists;
 - security/privacy threat controls and test evidence plan are accepted; and
 - implementation receives a separate explicit authorization.
 
-`IMPLEMENTATION_READY = GOVERNANCE_REVIEW_PENDING`
+`GOVERNANCE_CONTENT_COMPLETE = YES`
+`READY_FOR_CONTROLLED_PUBLICATION = YES`
+`CANONICALLY_INTEGRATED = NO`
+`IMPLEMENTATION_READY = PENDING_CONTROLLED_PUBLICATION`
 `IMPLEMENTATION_AUTHORIZED = NO`
