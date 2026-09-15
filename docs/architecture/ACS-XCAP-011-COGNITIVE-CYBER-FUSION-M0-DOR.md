@@ -3,11 +3,11 @@
 **Canonical baseline governance:** `APPROVED_AND_CANONICALLY_INTEGRATED`
 **Local closure governance:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
 **Local closure canonical integration:** `YES`
-**Implementation readiness:** `IMPLEMENTATION_AUTHORIZATION_READY`
+**Implementation readiness:** `IMPLEMENTATION_CLOSED`
 **Capability:** `ACS-XCAP-011`
 **Maturity:** `M0_CONTRACT_VALIDATION_AND_BOUNDED_IDEMPOTENCY_RECEIPT`
-**Implementation authorization:** `NOT AUTHORIZED`
-**Runtime status:** `NOT_IMPLEMENTED`
+**Implementation authorization:** `M0 CLOSED`
+**Runtime status:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
 **Closure delta custody:** `CANONICAL_DEVELOP`
 
 ## Canonical authority chain
@@ -21,13 +21,16 @@ This artifact is subordinate, in order, to:
 5. this `ACS-XCAP-011 M0 Definition of Ready` artifact.
 
 This artifact is not an independent source of truth and cannot override an upstream authority.
+The separately authorized M0 implementation subsequently satisfied this gate and is now part of
+the canonical integrated baseline. This status reconciliation grants no M1 authority.
 
 ## 1. Authority and purpose
 
 This DoR is subordinate to the ACS Master Engineering Specification v5.3, the frozen
 Cyberdefense authority, Capability Registry, Architecture Readiness Gate, Dependency Graph,
 Cyberdefense RTM, ADR-0006/0007/0008/0009/0011/0012/0013/0026, canonical XCAP-005 Evidence
-and Chain of Custody, and canonical platform MPA governance/runtime. It authorizes no runtime.
+and Chain of Custody, and canonical platform MPA governance/runtime. It records the closed M0
+readiness boundary and authorizes no additional runtime or later maturity.
 
 M0 defines versioned Fusion request/result contracts, deterministic validation,
 reference-only integrations, provenance, confidence, uncertainty, explainability, failure

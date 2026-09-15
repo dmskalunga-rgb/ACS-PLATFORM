@@ -65,35 +65,35 @@ architectural justification.
 
 ## Transversal capability registry
 
-| ID           | Capability                                      | State                                               | Initial dependency boundary                                                                                                                                                     |
-| ------------ | ----------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ACS-XCAP-001 | Identity, Tenant & Trusted Context              | `EXISTING_ACS_FOUNDATION`                           | ADR-0007, ADR-0011, ADR-0013                                                                                                                                                    |
-| ACS-XCAP-002 | Authorization & Policy Decision                 | `EXISTING_ACS_FOUNDATION`                           | ADR-0007, ADR-0012, ADR-0026                                                                                                                                                    |
-| ACS-XCAP-003 | Cognitive AI Core                               | `GAP_ARCHITECTURE_REQUIRED`                         | Must reuse ADR-0008 AI Gateway                                                                                                                                                  |
-| ACS-XCAP-004 | Event & Integration Fabric                      | `EXISTING_ACS_FOUNDATION`                           | ADR-0006, Event Foundation                                                                                                                                                      |
-| ACS-XCAP-005 | Evidence & Chain of Custody                     | `GAP_ARCHITECTURE_REQUIRED`                         | Audit/evidence extension; no isolated store                                                                                                                                     |
-| ACS-XCAP-006 | Detection & Correlation Core                    | `GAP_ARCHITECTURE_REQUIRED`                         | Event Fabric and Evidence; graph enrichment is a later consumer/integration, not a prerequisite for core correlation                                                            |
-| ACS-XCAP-007 | Knowledge / Attack Graph                        | `GAP_ARCHITECTURE_REQUIRED`                         | Authoritative domain data and Evidence                                                                                                                                          |
-| ACS-XCAP-008 | Audit, Compliance & Governance                  | `EXISTING_ACS_FOUNDATION_WITH_GAPS`                 | Audit records, governance catalogs, ADRs                                                                                                                                        |
-| ACS-XCAP-009 | Reporting, Analytics & Intelligence             | `GAP_ARCHITECTURE_REQUIRED`                         | Authorized operational data products only                                                                                                                                       |
-| ACS-XCAP-010 | Notification, Escalation & Case Orchestration   | `GAP_ARCHITECTURE_REQUIRED`                         | Event Fabric, Authorization, Audit                                                                                                                                              |
-| ACS-XCAP-011 | Cognitive Cyber Fusion & Cross-Domain Reasoning | `M0_GOVERNANCE_CANONICALLY_INTEGRATED_AND_VERIFIED` | M0 deterministic contract validation and bounded idempotency receipt use XCAP-004/005/008; later stages consume XCAP-003/006/007/009/010; derives, never replaces, domain truth |
+| ID           | Capability                                      | State                                                | Initial dependency boundary                                                                                                                                    |
+| ------------ | ----------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ACS-XCAP-001 | Identity, Tenant & Trusted Context              | `EXISTING_ACS_FOUNDATION`                            | ADR-0007, ADR-0011, ADR-0013                                                                                                                                   |
+| ACS-XCAP-002 | Authorization & Policy Decision                 | `EXISTING_ACS_FOUNDATION`                            | ADR-0007, ADR-0012, ADR-0026                                                                                                                                   |
+| ACS-XCAP-003 | Cognitive AI Core                               | `GAP_ARCHITECTURE_REQUIRED`                          | Must reuse ADR-0008 AI Gateway                                                                                                                                 |
+| ACS-XCAP-004 | Event & Integration Fabric                      | `EXISTING_ACS_FOUNDATION`                            | ADR-0006, Event Foundation                                                                                                                                     |
+| ACS-XCAP-005 | Evidence & Chain of Custody                     | `IMPLEMENTED_CANONICALLY_INTEGRATED_AND_VERIFIED`    | Canonical evidence identity, integrity, provenance, immutable raw evidence and append-only custody runtime; no isolated parallel store                         |
+| ACS-XCAP-006 | Detection & Correlation Core                    | `GAP_ARCHITECTURE_REQUIRED`                          | Event Fabric and Evidence; graph enrichment is a later consumer/integration, not a prerequisite for core correlation                                           |
+| ACS-XCAP-007 | Knowledge / Attack Graph                        | `GAP_ARCHITECTURE_REQUIRED`                          | Authoritative domain data and Evidence                                                                                                                         |
+| ACS-XCAP-008 | Audit, Compliance & Governance                  | `EXISTING_ACS_FOUNDATION_WITH_GAPS`                  | Audit records, governance catalogs, ADRs                                                                                                                       |
+| ACS-XCAP-009 | Reporting, Analytics & Intelligence             | `GAP_ARCHITECTURE_REQUIRED`                          | Authorized operational data products only                                                                                                                      |
+| ACS-XCAP-010 | Notification, Escalation & Case Orchestration   | `GAP_ARCHITECTURE_REQUIRED`                          | Event Fabric, Authorization, Audit                                                                                                                             |
+| ACS-XCAP-011 | Cognitive Cyber Fusion & Cross-Domain Reasoning | `M0_IMPLEMENTED_CANONICALLY_INTEGRATED_AND_VERIFIED` | M0 deterministic contract validation and bounded idempotency receipt use XCAP-004/005/008; M1 is not authorized; later stages consume XCAP-003/006/007/009/010 |
 
 ## Transversal maturity assessment
 
-| Capability   | Maturity      | Evidence boundary                                                                                                              |
-| ------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| ACS-XCAP-001 | `EXISTING`    | Phase 1 identity, active membership and trusted tenant context.                                                                |
-| ACS-XCAP-002 | `EXISTING`    | Server-side authorization and governed dual-control foundation.                                                                |
-| ACS-XCAP-003 | `PARTIAL`     | AI Gateway boundary exists; no cognitive-cyber contract exists.                                                                |
-| ACS-XCAP-004 | `EXISTING`    | Event Foundation and transactional delivery contracts exist.                                                                   |
-| ACS-XCAP-005 | `GAP`         | No approved platform-wide cyber evidence/custody contract.                                                                     |
-| ACS-XCAP-006 | `GAP`         | No approved cyber detection/correlation contract.                                                                              |
-| ACS-XCAP-007 | `GAP`         | No approved knowledge/attack graph authority.                                                                                  |
-| ACS-XCAP-008 | `PARTIAL`     | Audit, observability and governance primitives exist; cyber compliance model is not defined.                                   |
-| ACS-XCAP-009 | `GAP`         | No approved cyber reporting/data-product architecture.                                                                         |
-| ACS-XCAP-010 | `GAP`         | No approved notification/escalation/case orchestration contract.                                                               |
-| ACS-XCAP-011 | `M0 GOVERNED` | Machine-complete M0 contracts and acceptance gate are integrated; implementation is not authorized and runtime does not exist. |
+| Capability   | Maturity      | Evidence boundary                                                                                                               |
+| ------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| ACS-XCAP-001 | `EXISTING`    | Phase 1 identity, active membership and trusted tenant context.                                                                 |
+| ACS-XCAP-002 | `EXISTING`    | Server-side authorization and governed dual-control foundation.                                                                 |
+| ACS-XCAP-003 | `PARTIAL`     | AI Gateway boundary exists; no cognitive-cyber contract exists.                                                                 |
+| ACS-XCAP-004 | `EXISTING`    | Event Foundation and transactional delivery contracts exist.                                                                    |
+| ACS-XCAP-005 | `IMPLEMENTED` | Canonical contracts, PostgreSQL persistence, RLS/FORCE RLS, immutable raw evidence and append-only custody are integrated.      |
+| ACS-XCAP-006 | `GAP`         | No approved cyber detection/correlation contract.                                                                               |
+| ACS-XCAP-007 | `GAP`         | No approved knowledge/attack graph authority.                                                                                   |
+| ACS-XCAP-008 | `PARTIAL`     | Audit, observability and governance primitives exist; cyber compliance model is not defined.                                    |
+| ACS-XCAP-009 | `GAP`         | No approved cyber reporting/data-product architecture.                                                                          |
+| ACS-XCAP-010 | `GAP`         | No approved notification/escalation/case orchestration contract.                                                                |
+| ACS-XCAP-011 | `M0 CLOSED`   | M0 contracts, bounded receipt runtime and qualification evidence are canonically integrated and verified; M1 is not authorized. |
 
 ## ACS-XCAP-011 Cognitive Cyber Fusion & Cross-Domain Reasoning contract
 
