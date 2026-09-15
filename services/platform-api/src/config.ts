@@ -34,6 +34,8 @@ const configurationSchema = z.object({
   ACS_MPA_DATABASE_URL: z.url().optional(),
   ACS_XCAP005_EVIDENCE_DATABASE_URL: z.url().optional(),
   ACS_XCAP005_MAX_EVIDENCE_BYTES: z.coerce.number().int().positive().optional(),
+  ACS_XCAP011_DATABASE_URL: z.url().optional(),
+  ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS: z.coerce.number().int().min(300).max(86_400).optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -64,6 +66,8 @@ export interface PlatformConfiguration {
   readonly mpaDatabaseUrl?: string;
   readonly xcap005EvidenceDatabaseUrl?: string;
   readonly xcap005MaximumEvidenceBytes?: number;
+  readonly xcap011DatabaseUrl?: string;
+  readonly xcap011ReceiptLifetimeSeconds?: number;
   readonly webOrigin: string;
 }
 
@@ -93,6 +97,14 @@ export function loadConfiguration(
     parsed.ACS_ENV !== 'test'
   ) {
     throw new Error('The development identity adapter is prohibited in staging and production.');
+  }
+  if (
+    (parsed.ACS_XCAP011_DATABASE_URL === undefined) !==
+    (parsed.ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS === undefined)
+  ) {
+    throw new Error(
+      'XCAP-011 M0 runtime requires both its dedicated database URL and bounded receipt lifetime.',
+    );
   }
   const allowedAlgorithms = parsed.ACS_OIDC_ALLOWED_ALGORITHMS.split(',').map((value) =>
     value.trim(),
@@ -200,6 +212,12 @@ export function loadConfiguration(
     ...(parsed.ACS_XCAP005_MAX_EVIDENCE_BYTES === undefined
       ? {}
       : { xcap005MaximumEvidenceBytes: parsed.ACS_XCAP005_MAX_EVIDENCE_BYTES }),
+    ...(parsed.ACS_XCAP011_DATABASE_URL === undefined
+      ? {}
+      : { xcap011DatabaseUrl: parsed.ACS_XCAP011_DATABASE_URL }),
+    ...(parsed.ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS === undefined
+      ? {}
+      : { xcap011ReceiptLifetimeSeconds: parsed.ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

@@ -15,6 +15,10 @@ export const evidenceSourceStateSchema = z.enum([
 export const evidenceTrustClassificationSchema = z.enum(['UNTRUSTED', 'VALIDATED', 'TRUSTED']);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const boundedReferenceSchema = z.string().trim().min(1).max(512);
+const nonNilLowercaseUuidSchema = z
+  .uuid()
+  .refine((value) => value !== '00000000-0000-0000-0000-000000000000')
+  .refine((value) => value === value.toLowerCase());
 export const evidenceEventTypeSchema = z.enum([
   'cyberdefense.evidence.recorded',
   'cyberdefense.evidence.integrity_verified',
@@ -132,6 +136,33 @@ export const evidenceMutationEnvelopeSchema = z.object({
   data: evidenceRecordSchema,
   meta: z.object({ request_id: z.uuid(), correlation_id: z.uuid(), replay: z.boolean() }),
 });
+
+/** Metadata-only projection owned by XCAP-005 and consumed by XCAP-011 M0. */
+export const xcap005FusionEvidenceProjectionSchema = z
+  .strictObject({
+    projection_schema_version: z.literal('1.0.0'),
+    evidence_id: nonNilLowercaseUuidSchema,
+    tenant_id: nonNilLowercaseUuidSchema,
+    evidence_version: z.number().int().positive(),
+    integrity_state: z.enum(['VERIFIED', 'FAILED', 'UNVERIFIABLE']),
+    provenance_state: z.enum(['VERIFIED', 'INCOMPLETE', 'INVALID', 'TAMPERED', 'UNAVAILABLE']),
+    source_trust_state: evidenceTrustClassificationSchema,
+    derivation_state: z.enum(['ORIGINAL', 'DERIVED']),
+    derivation_id: nonNilLowercaseUuidSchema.nullable(),
+    classification: evidenceClassificationSchema,
+    opaque_blob_reference: nonNilLowercaseUuidSchema,
+    canonical_owner: z.literal('ACS-XCAP-005'),
+    canonicalization_identifier: z.literal('xcap005-evidence-metadata-v1'),
+    resolved_at: z.iso.datetime({ offset: true }),
+  })
+  .superRefine((value, context) => {
+    if ((value.derivation_state === 'DERIVED') !== (value.derivation_id !== null))
+      context.addIssue({
+        code: 'custom',
+        message: 'derivation binding is inconsistent',
+        path: ['derivation_id'],
+      });
+  });
 export const evidenceReadEnvelopeSchema = z.object({
   data: evidenceRecordSchema,
   meta: z.object({ request_id: z.uuid(), correlation_id: z.uuid() }),
@@ -149,3 +180,4 @@ export type EvidenceDerive = z.infer<typeof evidenceDeriveSchema>;
 export type EvidenceRecord = z.infer<typeof evidenceRecordSchema>;
 export type EvidenceSource = z.infer<typeof evidenceSourceSchema>;
 export type EvidenceMpaOperation = z.infer<typeof evidenceMpaOperationSchema>;
+export type Xcap005FusionEvidenceProjection = z.infer<typeof xcap005FusionEvidenceProjectionSchema>;
