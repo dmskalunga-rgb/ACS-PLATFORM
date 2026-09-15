@@ -5,6 +5,7 @@ import type {
   EvidenceCollect,
   EvidenceRecord,
   EvidenceSource,
+  Xcap005FusionEvidenceProjection,
 } from '@acs/contracts';
 import { MultiPersonAuthorizationFailure } from './multi-person-authorization.js';
 import {
@@ -105,6 +106,105 @@ export class PostgresEvidenceChainOfCustodyRepository implements EvidenceReposit
   }
   async close() {
     await this.pool.end();
+  }
+
+  async resolveFusionProjection(
+    input: Parameters<EvidenceRepository['resolveFusionProjection']>[0],
+  ): Promise<Xcap005FusionEvidenceProjection | null> {
+    return this.transaction(input.contextToken, 'cyberdefense.evidence.read', async (c) => {
+      const result = await c.query<{
+        evidence_id: string;
+        tenant_id: string;
+        evidence_source_id: string;
+        parent_evidence_id: string | null;
+        blob_reference_id: string;
+        canonical_metadata: Record<string, unknown>;
+        metadata_sha256: string;
+        raw_bytes: Buffer;
+        content_sha256: string;
+        classification: EvidenceClassification;
+        integrity_state: 'VERIFIED' | 'FAILED' | 'UNVERIFIABLE';
+        trust_state: 'UNTRUSTED' | 'VALIDATED' | 'TRUSTED';
+        version: string | number;
+        derivation_id: string | null;
+        derivation_count: string | number;
+        custody_id: string | null;
+        custody_count: string | number;
+        parent_present: boolean;
+      }>(
+        `SELECT r.evidence_id,r.tenant_id,r.evidence_source_id,r.parent_evidence_id,
+          r.blob_reference_id,r.canonical_metadata,r.metadata_sha256,b.raw_bytes,b.content_sha256,
+          COALESCE((SELECT cd.classification FROM cyberdefense.evidence_classification_decisions cd
+            WHERE cd.tenant_id=r.tenant_id AND cd.evidence_id=r.evidence_id
+            ORDER BY cd.decided_at DESC,cd.decision_id DESC LIMIT 1),r.classification_at_ingest) classification,
+          COALESCE((SELECT iv.outcome FROM cyberdefense.evidence_integrity_verifications iv
+            WHERE iv.tenant_id=r.tenant_id AND iv.evidence_id=r.evidence_id
+            ORDER BY iv.verified_at DESC,iv.verification_id DESC LIMIT 1),'VERIFIED') integrity_state,
+          s.trust_classification trust_state,r.version,
+          (SELECT d.derivation_id FROM cyberdefense.evidence_derivations d
+            WHERE d.tenant_id=r.tenant_id AND d.derived_evidence_id=r.evidence_id LIMIT 1) derivation_id,
+          (SELECT count(*) FROM cyberdefense.evidence_derivations d
+            WHERE d.tenant_id=r.tenant_id AND d.derived_evidence_id=r.evidence_id) derivation_count,
+          (SELECT ce.custody_entry_id FROM cyberdefense.evidence_custody_entries ce
+            WHERE ce.tenant_id=r.tenant_id AND ce.evidence_id=r.evidence_id AND ce.sequence=1 LIMIT 1) custody_id,
+          (SELECT count(*) FROM cyberdefense.evidence_custody_entries ce
+            WHERE ce.tenant_id=r.tenant_id AND ce.evidence_id=r.evidence_id) custody_count,
+          CASE WHEN r.parent_evidence_id IS NULL THEN true ELSE EXISTS(
+            SELECT 1 FROM cyberdefense.evidence_records p
+            WHERE p.tenant_id=r.tenant_id AND p.evidence_id=r.parent_evidence_id) END parent_present
+        FROM cyberdefense.evidence_records r
+        JOIN cyberdefense.evidence_blob_references b USING(tenant_id,blob_reference_id)
+        JOIN cyberdefense.evidence_sources s ON s.tenant_id=r.tenant_id AND s.source_id=r.evidence_source_id
+        WHERE r.tenant_id=$1 AND r.evidence_id=$2`,
+        [input.tenantId, input.evidenceId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      if (Number(row.version) !== input.evidenceVersion)
+        throw new EvidenceChainOfCustodyFailure(
+          'STALE_VERSION',
+          'Evidence version is unavailable.',
+        );
+      const expectedProvenance = row.derivation_id ?? row.custody_id;
+      const bytesHash = createHash('sha256').update(row.raw_bytes).digest('hex');
+      const metadataHash = createHash('sha256')
+        .update(Buffer.from(canonicalizeMetadata(row.canonical_metadata), 'utf8'))
+        .digest('hex');
+      const tampered = bytesHash !== row.content_sha256 || metadataHash !== row.metadata_sha256;
+      const derived = row.parent_evidence_id !== null;
+      const contradictory =
+        (derived && (Number(row.derivation_count) !== 1 || !row.parent_present)) ||
+        (!derived && Number(row.derivation_count) !== 0);
+      const incomplete = Number(row.custody_count) === 0 || (derived && row.derivation_id === null);
+      const provenanceState = tampered
+        ? 'TAMPERED'
+        : contradictory
+          ? 'INVALID'
+          : incomplete
+            ? 'INCOMPLETE'
+            : 'VERIFIED';
+      if (expectedProvenance === null || expectedProvenance !== input.provenanceReference)
+        throw new EvidenceChainOfCustodyFailure(
+          'PROVENANCE_INVALID',
+          'Evidence provenance is unavailable.',
+        );
+      return {
+        projection_schema_version: '1.0.0',
+        evidence_id: row.evidence_id,
+        tenant_id: row.tenant_id,
+        evidence_version: Number(row.version),
+        integrity_state: row.integrity_state,
+        provenance_state: provenanceState,
+        source_trust_state: row.trust_state,
+        derivation_state: derived ? 'DERIVED' : 'ORIGINAL',
+        derivation_id: row.derivation_id,
+        classification: row.classification,
+        opaque_blob_reference: row.blob_reference_id,
+        canonical_owner: 'ACS-XCAP-005',
+        canonicalization_identifier: EVIDENCE_CANONICALIZATION_VERSION,
+        resolved_at: input.resolvedAt,
+      };
+    });
   }
 
   async registerSource(input: Parameters<EvidenceRepository['registerSource']>[0]) {

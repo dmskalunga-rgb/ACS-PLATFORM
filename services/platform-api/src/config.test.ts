@@ -67,4 +67,22 @@ describe('FOUNDATION configuration', () => {
     expect(configuration.xcap005EvidenceDatabaseUrl).toBe('postgresql://xcap005.example/acs');
     expect(configuration.xcap005MaximumEvidenceBytes).toBe(1_048_576);
   });
+
+  it('requires the XCAP-011 dedicated database binding and bounded receipt lifetime together', () => {
+    expect(() =>
+      loadConfiguration({ ACS_XCAP011_DATABASE_URL: 'postgresql://xcap011.example/acs' }),
+    ).toThrow(/bounded receipt lifetime/);
+    expect(() =>
+      loadConfiguration({
+        ACS_XCAP011_DATABASE_URL: 'postgresql://xcap011.example/acs',
+        ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS: '299',
+      }),
+    ).toThrow();
+    const configuration = loadConfiguration({
+      ACS_XCAP011_DATABASE_URL: 'postgresql://xcap011.example/acs',
+      ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS: '300',
+    });
+    expect(configuration.xcap011DatabaseUrl).toBe('postgresql://xcap011.example/acs');
+    expect(configuration.xcap011ReceiptLifetimeSeconds).toBe(300);
+  });
 });

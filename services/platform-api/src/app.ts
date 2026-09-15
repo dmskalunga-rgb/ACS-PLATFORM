@@ -80,6 +80,7 @@ import {
   evidenceSourceCreateSchema,
   evidenceSourceEnvelopeSchema,
   evidenceSourceTransitionSchema,
+  fusionResultSchema,
 } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import {
@@ -126,6 +127,7 @@ import { PostgresEntitlementRegistryRepository } from './postgres-entitlement-re
 import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
 import { PostgresMultiPersonAuthorizationRepository } from './postgres-multi-person-authorization.js';
 import { PostgresEvidenceChainOfCustodyRepository } from './postgres-evidence-chain-of-custody.js';
+import { PostgresCognitiveCyberFusionM0Repository } from './postgres-cognitive-cyber-fusion-m0.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -189,6 +191,10 @@ import {
   EvidenceChainOfCustodyFailure,
   EvidenceChainOfCustodyService,
 } from './evidence-chain-of-custody.js';
+import {
+  CognitiveCyberFusionM0Service,
+  CognitiveFusionFailure,
+} from './cognitive-cyber-fusion-m0.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -218,6 +224,7 @@ export async function buildApp(
     readonly machineUsageIngestionService?: MachineUsageIngestionService;
     readonly multiPersonAuthorizationService?: MultiPersonAuthorizationService;
     readonly evidenceChainOfCustodyService?: EvidenceChainOfCustodyService;
+    readonly cognitiveCyberFusionM0Service?: CognitiveCyberFusionM0Service;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -263,6 +270,8 @@ export async function buildApp(
   let multiPersonAuthorizationService = options.multiPersonAuthorizationService;
   let evidenceRepository: PostgresEvidenceChainOfCustodyRepository | undefined;
   let evidenceChainOfCustodyService = options.evidenceChainOfCustodyService;
+  let fusionRepository: PostgresCognitiveCyberFusionM0Repository | undefined;
+  let cognitiveCyberFusionM0Service = options.cognitiveCyberFusionM0Service;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -342,6 +351,51 @@ export async function buildApp(
         securityAuditRepository,
         configuration.xcap005MaximumEvidenceBytes,
       );
+      if (
+        configuration.xcap011DatabaseUrl !== undefined &&
+        configuration.xcap011ReceiptLifetimeSeconds !== undefined
+      ) {
+        fusionRepository = new PostgresCognitiveCyberFusionM0Repository(
+          configuration.xcap011DatabaseUrl,
+        );
+        cognitiveCyberFusionM0Service = new CognitiveCyberFusionM0Service(
+          identity,
+          new RepositoryAuthorizationPort(postgresRepository),
+          postgresRepository,
+          postgresRepository,
+          {
+            resolve: async (input) => {
+              try {
+                return await evidenceChainOfCustodyService!.resolveFusionProjection(
+                  input.authorizationHeader,
+                  input.tenantId,
+                  input.evidenceId,
+                  input.evidenceVersion,
+                  input.provenanceReference,
+                  input.resolvedAt,
+                  { requestId: input.requestId, correlationId: input.correlationId },
+                );
+              } catch (error) {
+                if (error instanceof EvidenceChainOfCustodyFailure) {
+                  if (error.code === 'NOT_FOUND') return null;
+                  if (error.code === 'FORBIDDEN')
+                    throw new CognitiveFusionFailure('REFERENCE_UNAUTHORIZED');
+                  if (error.code === 'STALE_VERSION')
+                    throw new CognitiveFusionFailure('REFERENCE_VERSION_MISMATCH');
+                  if (error.code === 'INTEGRITY_FAILED')
+                    throw new CognitiveFusionFailure('REFERENCE_INTEGRITY_FAILED');
+                  if (error.code === 'PROVENANCE_INVALID')
+                    throw new CognitiveFusionFailure('REFERENCE_PROVENANCE_INVALID');
+                }
+                throw new CognitiveFusionFailure('REFERENCE_OWNER_UNAVAILABLE');
+              }
+            },
+          },
+          fusionRepository,
+          securityAuditRepository,
+          configuration.xcap011ReceiptLifetimeSeconds,
+        );
+      }
     }
     if (configuration.customerDatabaseUrl !== undefined) {
       customerRepository = new PostgresCustomerRepository(configuration.customerDatabaseUrl);
@@ -479,6 +533,7 @@ export async function buildApp(
         usageMeteringRepository?.close(),
         mpaRepository?.close(),
         evidenceRepository?.close(),
+        fusionRepository?.close(),
       ]);
     });
   }
@@ -1324,6 +1379,81 @@ export async function buildApp(
       throw error;
     }
   };
+
+  const fusionError = (
+    error: CognitiveFusionFailure,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const status =
+      error.code === 'AUTHENTICATION_REQUIRED'
+        ? 401
+        : [
+              'MEMBERSHIP_INACTIVE',
+              'AUTHORIZATION_DENIED',
+              'CROSS_TENANT_REFERENCE',
+              'REFERENCE_UNAUTHORIZED',
+              'TENANT_CONTEXT_INVALID',
+            ].includes(error.code)
+          ? 403
+          : error.code === 'REFERENCE_NOT_FOUND'
+            ? 404
+            : [
+                  'REPLAY_CONFLICT',
+                  'IDEMPOTENCY_CONFLICT',
+                  'REFERENCE_VERSION_MISMATCH',
+                  'CONTEXT_STALE',
+                  'POLICY_VERSION_MISMATCH',
+                ].includes(error.code)
+              ? 409
+              : error.code === 'REFERENCE_OWNER_UNAVAILABLE' ||
+                  error.code === 'DEPENDENCY_UNAVAILABLE'
+                ? 503
+                : error.code === 'DEPENDENCY_TIMEOUT'
+                  ? 504
+                  : 422;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+
+  app.post('/api/v1/cyberdefense/tenants/:tenantId/fusion', async (request, reply) => {
+    if (!cognitiveCyberFusionM0Service)
+      return reply.status(503).send(
+        errorEnvelopeSchema.parse({
+          error: {
+            code: 'XCAP011_M0_NOT_CONFIGURED',
+            message: 'Cognitive Fusion M0 dependencies are not configured.',
+            request_id: request.id,
+            correlation_id: request.correlationId,
+          },
+        }),
+      );
+    const { tenantId } = request.params as { tenantId: string };
+    if (!uuidSchema.safeParse(tenantId).success)
+      return fusionError(new CognitiveFusionFailure('SCHEMA_INVALID'), request, reply);
+    try {
+      const receipt = await cognitiveCyberFusionM0Service.request(
+        request.headers.authorization,
+        tenantId,
+        request.body,
+        metadata(request),
+      );
+      return reply
+        .status(receipt.replay ? 200 : 201)
+        .send(fusionResultSchema.parse(receipt.result));
+    } catch (error) {
+      if (error instanceof CognitiveFusionFailure) return fusionError(error, request, reply);
+      throw error;
+    }
+  });
 
   app.post('/api/v1/cyberdefense/tenants/:tenantId/evidence-sources', async (request, reply) => {
     if (!evidenceChainOfCustodyService) return evidenceUnavailable(request, reply);

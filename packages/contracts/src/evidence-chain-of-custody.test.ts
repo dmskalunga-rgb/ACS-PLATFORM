@@ -4,6 +4,7 @@ import {
   evidenceClassificationSchema,
   evidenceCollectSchema,
   evidenceMpaOperationSchema,
+  xcap005FusionEvidenceProjectionSchema,
 } from './evidence-chain-of-custody.js';
 
 describe('XCAP-005 contracts', () => {
@@ -38,5 +39,32 @@ describe('XCAP-005 contracts', () => {
 
   it('requires MPA identity, versions, attestation and a reason', () => {
     expect(evidenceMpaOperationSchema.safeParse({ expected_version: 1 }).success).toBe(false);
+  });
+
+  it('owns a metadata-only Fusion projection with consistent derivation binding', () => {
+    const projection = {
+      projection_schema_version: '1.0.0',
+      evidence_id: '10000000-0000-4000-8000-000000000001',
+      tenant_id: '10000000-0000-4000-8000-000000000002',
+      evidence_version: 1,
+      integrity_state: 'VERIFIED',
+      provenance_state: 'VERIFIED',
+      source_trust_state: 'TRUSTED',
+      derivation_state: 'ORIGINAL',
+      derivation_id: null,
+      classification: 'INTERNAL',
+      opaque_blob_reference: '10000000-0000-4000-8000-000000000003',
+      canonical_owner: 'ACS-XCAP-005',
+      canonicalization_identifier: 'xcap005-evidence-metadata-v1',
+      resolved_at: '2026-09-09T00:00:00Z',
+    } as const;
+    expect(xcap005FusionEvidenceProjectionSchema.safeParse(projection).success).toBe(true);
+    expect(
+      xcap005FusionEvidenceProjectionSchema.safeParse({
+        ...projection,
+        derivation_state: 'DERIVED',
+      }).success,
+    ).toBe(false);
+    expect(JSON.stringify(projection)).not.toContain('raw_bytes');
   });
 });

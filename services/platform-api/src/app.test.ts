@@ -15,6 +15,8 @@ import {
   type TenantContextRepository,
 } from './platform-context.js';
 import { DevelopmentHeaderIdentityAdapter } from './identity.js';
+import type { CognitiveCyberFusionM0Service } from './cognitive-cyber-fusion-m0.js';
+import { CognitiveFusionFailure } from './cognitive-cyber-fusion-m0.js';
 
 const configuration: PlatformConfiguration = {
   environment: 'test',
@@ -58,6 +60,7 @@ describe('FOUNDATION platform API', () => {
     expect(
       document.paths['/api/v1/platform/tenants/{tenantId}/multi-person-authorizations'],
     ).toBeDefined();
+    expect(document.paths['/api/v1/cyberdefense/tenants/{tenantId}/fusion']).toBeDefined();
     expect(document.paths['/api/v1/commercial/customers']).toBeDefined();
     expect(document.paths['/api/v1/commercial/customers/{customerId}']).toBeDefined();
     expect(response.body).toContain('developmentBearer');
@@ -83,6 +86,42 @@ describe('FOUNDATION platform API', () => {
     });
     expect(response.statusCode).toBe(503);
     expect(errorEnvelopeSchema.parse(response.json()).error.code).toBe('MPA_NOT_CONFIGURED');
+  });
+
+  it('fails closed when the XCAP-011 M0 runtime binding is absent', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/cyberdefense/tenants/${randomUUID()}/fusion`,
+      payload: {},
+    });
+    expect(response.statusCode).toBe(503);
+    expect(errorEnvelopeSchema.parse(response.json()).error.code).toBe('XCAP011_M0_NOT_CONFIGURED');
+  });
+
+  it('keeps XCAP-011 authentication and authorization failures bounded over HTTP', async () => {
+    for (const [code, expectedStatus] of [
+      ['AUTHENTICATION_REQUIRED', 401],
+      ['AUTHORIZATION_DENIED', 403],
+    ] as const) {
+      const boundedApp = await buildApp(configuration, {
+        logger: false,
+        cognitiveCyberFusionM0Service: {
+          request: () => Promise.reject(new CognitiveFusionFailure(code)),
+        } as unknown as CognitiveCyberFusionM0Service,
+      });
+      try {
+        const response = await boundedApp.inject({
+          method: 'POST',
+          url: `/api/v1/cyberdefense/tenants/${randomUUID()}/fusion`,
+          headers: { authorization: 'Bearer opaque' },
+          payload: {},
+        });
+        expect(response.statusCode).toBe(expectedStatus);
+        expect(errorEnvelopeSchema.parse(response.json()).error.code).toBe(code);
+      } finally {
+        await boundedApp.close();
+      }
+    }
   });
 
   it('serves only the authenticated principal active memberships', async () => {

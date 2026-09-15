@@ -40,6 +40,7 @@ export interface ActiveTenantMembership extends ResolvedTenantMembership {
 
 export interface IssuedTenantContext extends ResolvedTenantMembership {
   readonly contextToken: string;
+  readonly validUntil?: string;
 }
 
 export interface ContextReadMetadata {

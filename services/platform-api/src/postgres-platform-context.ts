@@ -16,6 +16,7 @@ const { Pool } = pg;
 
 interface ContextRow {
   context_token?: string;
+  valid_until?: Date | string;
   membership_id?: string;
   tenant_display_name: string;
   tenant_id: string;
@@ -71,15 +72,20 @@ export class PostgresTenantContextRepository
     action: string,
   ): Promise<IssuedTenantContext | null> {
     const result = await this.issuerPool.query<ContextRow>(
-      `SELECT context_token, user_id, tenant_id, tenant_slug, tenant_display_name
+      `SELECT context_token, user_id, tenant_id, tenant_slug, tenant_display_name, valid_until
        FROM platform.issue_tenant_context($1, $2::uuid, $3)`,
       [subject, requestedTenantId, action],
     );
     const row = result.rows[0];
     const context = mapContext(row);
+    const validUntil = canonicalTimestamp(row?.valid_until);
     return context === null || row?.context_token === undefined
       ? null
-      : { ...context, contextToken: row.context_token };
+      : {
+          ...context,
+          contextToken: row.context_token,
+          ...(validUntil === undefined ? {} : { validUntil }),
+        };
   }
 
   async readAndAudit(
@@ -194,4 +200,10 @@ function mapActiveMembership(row: ContextRow): ActiveTenantMembership {
   if (row.membership_id === undefined)
     throw new Error('active membership identifier was not returned');
   return { ...mapRequiredContext(row), membershipId: row.membership_id };
+}
+
+function canonicalTimestamp(value: Date | string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }

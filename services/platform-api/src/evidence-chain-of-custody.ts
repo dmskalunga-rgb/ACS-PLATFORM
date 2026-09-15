@@ -8,6 +8,7 @@ import type {
   EvidenceSource,
   EvidenceSourceCreate,
   EvidenceSourceTransition,
+  Xcap005FusionEvidenceProjection,
 } from '@acs/contracts';
 import type { AuthorizationPort } from '@acs/foundation';
 import type {
@@ -41,6 +42,7 @@ export type EvidenceFailureCode =
   | 'HASH_MISMATCH'
   | 'SOURCE_UNAVAILABLE'
   | 'INTEGRITY_FAILED'
+  | 'PROVENANCE_INVALID'
   | 'LEGAL_HOLD_ACTIVE'
   | 'RETENTION_NOT_ELIGIBLE'
   | 'STALE_VERSION'
@@ -85,6 +87,15 @@ export interface EvidenceMutationReceipt<T> {
 }
 
 export interface EvidenceRepository {
+  resolveFusionProjection(
+    input: EvidenceActor &
+      EvidenceRequestMetadata & {
+        readonly evidenceId: string;
+        readonly evidenceVersion: number;
+        readonly provenanceReference: string;
+        readonly resolvedAt: string;
+      },
+  ): Promise<Xcap005FusionEvidenceProjection | null>;
   registerSource(
     input: EvidenceActor &
       EvidenceRequestMetadata & {
@@ -261,6 +272,26 @@ export class EvidenceChainOfCustodyService {
     if (result === null)
       throw new EvidenceChainOfCustodyFailure('NOT_FOUND', 'Evidence was not found.');
     return result;
+  }
+
+  async resolveFusionProjection(
+    header: string | undefined,
+    tenantId: string,
+    evidenceId: string,
+    evidenceVersion: number,
+    provenanceReference: string,
+    resolvedAt: string,
+    meta: EvidenceRequestMetadata,
+  ) {
+    const actor = await this.actor(header, tenantId, EVIDENCE_PERMISSIONS.read, meta);
+    return this.repository.resolveFusionProjection({
+      ...actor,
+      ...meta,
+      evidenceId,
+      evidenceVersion,
+      provenanceReference,
+      resolvedAt,
+    });
   }
 
   async readContent(

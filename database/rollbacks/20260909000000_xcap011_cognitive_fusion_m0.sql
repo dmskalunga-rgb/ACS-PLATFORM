@@ -1,0 +1,14 @@
+BEGIN;
+DROP POLICY IF EXISTS domain_events_xcap011_insert ON platform.domain_events;
+DROP POLICY IF EXISTS audit_logs_xcap011_insert ON platform.audit_logs;
+DROP POLICY IF EXISTS fusion_receipts_select ON cyberdefense.fusion_command_receipts;
+DROP POLICY IF EXISTS fusion_receipts_insert ON cyberdefense.fusion_command_receipts;
+DROP POLICY IF EXISTS fusion_receipts_update ON cyberdefense.fusion_command_receipts;
+DROP FUNCTION IF EXISTS cyberdefense.cleanup_expired_fusion_receipts(uuid);
+DROP TABLE IF EXISTS cyberdefense.fusion_command_receipts;
+DROP FUNCTION IF EXISTS cyberdefense.has_fusion_context(uuid,text[]);
+DELETE FROM platform.membership_permissions WHERE permission_key IN ('cyberdefense.fusion.request','cyberdefense.fusion.read');
+DELETE FROM platform.role_permissions WHERE permission_key IN ('cyberdefense.fusion.request','cyberdefense.fusion.read');
+DELETE FROM platform.tenant_context_grants WHERE permission_key IN ('cyberdefense.fusion.request','cyberdefense.fusion.read');
+DELETE FROM platform.permissions WHERE permission_key IN ('cyberdefense.fusion.request','cyberdefense.fusion.read');
+COMMIT;
