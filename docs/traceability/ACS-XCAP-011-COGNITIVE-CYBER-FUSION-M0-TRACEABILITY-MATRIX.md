@@ -3,7 +3,7 @@
 **Canonical baseline governance:** `APPROVED_AND_CANONICALLY_INTEGRATED`
 **Local closure governance:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
 **Local closure canonical integration:** `YES`
-**Status:** `IMPLEMENTATION_AUTHORIZATION_READY_NOT_IMPLEMENTATION_EVIDENCE`
+**Status:** `M0_IMPLEMENTATION_CANONICALLY_INTEGRATED_AND_VERIFIED`
 
 ## Canonical authority chain
 
@@ -16,6 +16,9 @@ This artifact is subordinate, in order, to:
 5. this `ACS-XCAP-011 M0 Traceability Matrix` artifact.
 
 This artifact is not an independent source of truth and cannot override an upstream authority.
+The separately authorized M0 implementation completed its local, remote and post-merge evidence
+cycle. The matrix remains a contract/traceability authority; detailed execution evidence remains
+in the canonical tests, migrations, pull request and CI records. M1 remains unauthorized.
 
 | Requirement                                 | Root/Cyberdefense authority                    | Contract/policy                                                                             | Threat/control                                        | Acceptance                                | Future evidence   |
 | ------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------- | ----------------- |
@@ -58,4 +61,5 @@ prefix `XCAP011-M0-`; for example, `POS-005` is exactly `XCAP011-M0-POS-005`.
 `NOT_APPLICABLE_WITH_JUSTIFICATION = 0`
 `MANDATORY_UNEXECUTABLE_CASES = 0`
 `MANDATORY_ACCEPTANCE_SKIPS = 0`
-`IMPLEMENTATION_EVIDENCE = REQUIRED_AT_DOD`
+`IMPLEMENTATION_EVIDENCE = CANONICALLY_INTEGRATED_AND_VERIFIED`
+`M1_AUTHORIZATION = NOT_GRANTED`

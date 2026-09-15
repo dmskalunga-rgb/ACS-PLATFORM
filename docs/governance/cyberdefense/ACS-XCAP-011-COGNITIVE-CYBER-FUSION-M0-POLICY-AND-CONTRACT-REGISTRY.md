@@ -4,9 +4,9 @@
 **Local closure content:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
 **Local closure canonical integration:** `YES`
 **Implementation governance:** `CLOSED`
-**Implementation readiness:** `IMPLEMENTATION_AUTHORIZATION_READY`
-**Implementation authorization:** `NOT AUTHORIZED`
-**Runtime status:** `NOT_IMPLEMENTED`
+**Implementation readiness:** `IMPLEMENTATION_CLOSED`
+**Implementation authorization:** `M0 CLOSED`
+**Runtime status:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
 **Closure delta custody:** `CANONICAL_DEVELOP`
 **Registry version:** `1.0.0`
 
@@ -21,6 +21,8 @@ This artifact is subordinate, in order, to:
 5. this `ACS-XCAP-011 M0 Policy and Contract Registry` artifact.
 
 This artifact is not an independent source of truth and cannot override an upstream authority.
+The registered M0 contracts and bounded runtime are canonically integrated and verified. This
+status grants no M1, provider/model, production-activation or later-capability authority.
 
 ## 1. Contract registrations
 

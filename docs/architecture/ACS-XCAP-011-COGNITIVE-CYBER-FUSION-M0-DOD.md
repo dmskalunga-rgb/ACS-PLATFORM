@@ -3,10 +3,11 @@
 **Canonical baseline governance:** `APPROVED_AND_CANONICALLY_INTEGRATED`
 **Local closure governance:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
 **Local closure canonical integration:** `YES`
-**Status:** `MACHINE_EXECUTABLE_ACCEPTANCE_GATE`
+**Status:** `SATISFIED_CANONICAL_IMPLEMENTATION_GATE`
 **Capability:** `ACS-XCAP-011`
 **Maturity:** `M0`
-**Implementation authorization:** `NOT AUTHORIZED`
+**Implementation authorization:** `M0 CLOSED`
+**Runtime status:** `CANONICALLY_INTEGRATED_AND_VERIFIED`
 
 ## Canonical authority chain
 
@@ -20,8 +21,10 @@ This artifact is subordinate, in order, to:
 
 This artifact is not an independent source of truth and cannot override an upstream authority.
 
-This DoD defines evidence a separately authorized future M0 implementation must supply. Nothing
-in this document is current implementation evidence.
+This DoD defined the evidence supplied by the separately authorized M0 implementation. That
+implementation and its qualification evidence are canonically integrated and verified. Nothing in
+this document authorizes additional implementation, deployment, model execution, destructive
+response or a later maturity.
 
 | Area                         | Mandatory future evidence                                                                                                                                                                               |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
