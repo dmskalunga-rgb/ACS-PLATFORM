@@ -6,10 +6,11 @@
 dual-control and physical-human attestation where policy requires it. XCF creates neither a policy
 engine nor an approval engine.
 
-Future permission concepts, not registrations, include source administration/activation, release
-approval, mapping create/approve/revoke, graph traversal, global administration, tenant knowledge
-read, DecisionEvidence read/export, response recommend, authorization request, tenant-to-global
-promotion and learning-proposal review. Least privilege and default assignment `NONE` are mandatory.
+The exact M1/M2 permission keys, least-privilege role profiles, authority classes and MPA policy
+contracts are frozen in `ACS-XCF-M1-AUTHORITY-SCOPE-AND-MPA-CATALOG-v1.0.md`. Default assignment is
+`NONE`. Runtime registrations remain milestone-specific implementation work and cannot add implied
+grants. Graph traversal, DecisionEvidence, response and learning permissions beyond that catalog
+remain future milestone governance and are not authorized by the M1 catalog.
 
 ## DecisionEvidence
 

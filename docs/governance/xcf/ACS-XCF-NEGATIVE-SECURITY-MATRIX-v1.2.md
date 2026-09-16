@@ -31,8 +31,18 @@ must emit no success event or unauthorized evidence. Current result for every ca
 | `XCF-NEG-020` | Replay or divergent idempotency-key reuse                   | Exact replay stable; divergent reuse conflicts     | Receipt/transaction evidence                   | M1–M8     |
 | `XCF-NEG-021` | Direct database role broadens tenant/global access          | Least privilege and FORCE RLS deny                 | Role matrix and SQL proof                      | M1–M8     |
 | `XCF-NEG-022` | Raw sensitive evidence in normal event/audit/log            | Payload rejected or redacted                       | Event schema and telemetry inspection          | M1–M8     |
+| `XCF-NEG-023` | Malicious parser payload attempts code/resource abuse       | Parser rejects input within bounded resources      | Parser isolation and rejection evidence        | M1–M4     |
+| `XCF-NEG-024` | Compressed artifact exceeds byte/ratio/time limits          | Expansion aborts; release never becomes active     | Bounded resource and inactive-release proof    | M1–M4     |
+| `XCF-NEG-025` | Missing, incompatible or changed source license             | Artifact cannot activate                           | License-policy and activation denial evidence  | M1–M4     |
+| `XCF-NEG-026` | Traversal depth/cardinality amplification                   | Query terminates within governed bounds            | Query budget and telemetry evidence            | M3–M8     |
+| `XCF-NEG-027` | Timing/cardinality inference of foreign relations           | Uniform bounded denial reveals no foreign relation | Side-channel comparison evidence               | M3–M8     |
+| `XCF-NEG-028` | Partial ingestion is presented as complete                  | Partial state remains inactive and invisible       | Transaction and active-version inspection      | M1–M4     |
+| `XCF-NEG-029` | Rollback detaches mapping or provenance history             | Referenced history remains consistent              | Referential and rollback verification          | M1–M8     |
+| `XCF-NEG-030` | Retention/deletion bypasses evidence legal hold             | Deletion denied; custody history remains intact    | XCAP-005 retention/hold evidence               | M5–M8     |
+| `XCF-NEG-031` | Disaster recovery restores incomplete authority/history     | Restored state fails closed until verified         | Restore, integrity and activation evidence     | M1–M8     |
+| `XCF-NEG-032` | Client requests silent contract/schema downgrade            | Unsupported version is rejected                    | Version negotiation and audit evidence         | M1–M8     |
 
-`NEGATIVE_CASES = 22`
+`NEGATIVE_CASES = 32`
 
 `NEGATIVE_CASES_EXECUTED = 0`
 

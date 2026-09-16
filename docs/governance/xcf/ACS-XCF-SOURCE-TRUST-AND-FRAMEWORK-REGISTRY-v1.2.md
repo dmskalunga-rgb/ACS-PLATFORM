@@ -42,4 +42,13 @@ Only `ACTIVE` releases can provide current knowledge. Historical releases remain
 - Partial ingestion remains inactive and invisible to consumers.
 - Revocation and supersession never rewrite historical DecisionEvidence.
 
+## Protected lifecycle authority
+
+Source and release permissions, global custodian roles, activation/revocation MPA policies,
+cardinality and transaction ordering are frozen in
+`ACS-XCF-M1-AUTHORITY-SCOPE-AND-MPA-CATALOG-v1.0.md`. Registration, ingestion and validation never
+imply activation. Activation and revocation require the canonical two-person MPA composition;
+emergency suspension is an authorized fail-closed operation that cannot activate a replacement or
+erase history.
+
 No schema, migration, connector or ingestion runtime is authorized by this document.

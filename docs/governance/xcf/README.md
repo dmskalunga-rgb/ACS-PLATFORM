@@ -20,6 +20,8 @@ draft custody is recorded in `SUPERSESSION.md`.
 - `ACS-XCF-SOURCE-TRUST-AND-FRAMEWORK-REGISTRY-v1.2.md` — external-source and registry governance.
 - `ACS-XCF-DATA-MAPPING-GRAPH-GOVERNANCE-v1.2.md` — mapping, graph and global/tenant rules.
 - `ACS-XCF-AUTHORIZATION-EVIDENCE-EVENT-GOVERNANCE-v1.2.md` — canonical authority reuse.
+- `ACS-XCF-M1-AUTHORITY-SCOPE-AND-MPA-CATALOG-v1.0.md` — frozen M1/M2 boundary,
+  global/tenant permission and role catalogs, and canonical XCF MPA policies.
 - `ACS-XCF-ACCEPTANCE-MATRIX-v1.2.md` — deterministic future acceptance contracts.
 - `ACS-XCF-NEGATIVE-SECURITY-MATRIX-v1.2.md` — canonical negative-security cases.
 - `ACS-XCF-FAILURE-INJECTION-MATRIX-v1.2.md` — canonical failure-injection cases.
