@@ -17,16 +17,16 @@ these drafts.
 The drafts used conflicting milestone identifiers. v1.2 resolves the conflict by treating governance
 canonicalization as `XCF-G0`, not as a runtime milestone. Runtime milestones are:
 
-| Canonical milestone                                | Supersedes architecture v1.0 | Supersedes GEP v1.0 |
-| -------------------------------------------------- | ---------------------------- | ------------------- |
-| `XCF-M1` Framework Registry and mapping foundation | `XCF-M0`                     | `XCF-M1`            |
-| `XCF-M2` Vulnerability Intelligence                | `XCF-M1`                     | `XCF-M2`            |
-| `XCF-M3` Adversary Intelligence                    | `XCF-M2`                     | `XCF-M3`            |
-| `XCF-M4` Defensive Intelligence                    | `XCF-M3`                     | `XCF-M4`            |
-| `XCF-M5` Knowledge/Fusion integration              | `XCF-M4`                     | `XCF-M5`            |
-| `XCF-M6` Cognitive Decision Support                | `XCF-M5`                     | `XCF-M6`            |
-| `XCF-M7` Authorized Response                       | `XCF-M6`                     | `XCF-M7`            |
-| `XCF-M8` Recovery and Controlled Learning          | `XCF-M7`                     | `XCF-M8`            |
+| Canonical milestone                                       | Supersedes architecture v1.0 | Supersedes GEP v1.0 |
+| --------------------------------------------------------- | ---------------------------- | ------------------- |
+| `XCF-M1` Framework Registry and release lifecycle         | `XCF-M0`                     | `XCF-M1`            |
+| `XCF-M2` Mapping, overlays and vulnerability intelligence | `XCF-M1`                     | `XCF-M2`            |
+| `XCF-M3` Adversary intelligence and graph projection      | `XCF-M2`                     | `XCF-M3`            |
+| `XCF-M4` Defensive Intelligence                           | `XCF-M3`                     | `XCF-M4`            |
+| `XCF-M5` Knowledge/Fusion integration                     | `XCF-M4`                     | `XCF-M5`            |
+| `XCF-M6` Cognitive Decision Support                       | `XCF-M5`                     | `XCF-M6`            |
+| `XCF-M7` Authorized Response                              | `XCF-M6`                     | `XCF-M7`            |
+| `XCF-M8` Recovery and Controlled Learning                 | `XCF-M7`                     | `XCF-M8`            |
 
 Rationale: ACS capability maturity identifiers describe runtime capability increments. Governance
 publication is a prerequisite gate and must not be confused with an implemented runtime milestone.

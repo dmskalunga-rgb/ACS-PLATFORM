@@ -79,16 +79,16 @@ engine, AI-provider execution, response automation, deployment or production act
 
 Governance canonicalization is `XCF-G0`. It is not a runtime milestone.
 
-| Milestone | Scope                                                                    | Dependency gate                                    |
-| --------- | ------------------------------------------------------------------------ | -------------------------------------------------- |
-| `XCF-M1`  | Framework Registry, source trust, release/versioning, mapping foundation | G0 canonical and separate implementation authority |
-| `XCF-M2`  | CVE/CWE/CVSS/KEV and prioritization context                              | M1                                                 |
-| `XCF-M3`  | ATT&CK adversary intelligence                                            | M1                                                 |
-| `XCF-M4`  | D3FEND/control/capability mapping                                        | M1 and M3                                          |
-| `XCF-M5`  | Knowledge relations and XCAP-011 enrichment                              | M1–M4 and graph benchmark                          |
-| `XCF-M6`  | Cognitive decision support through AI Gateway                            | M5 and trusted-provider authorization              |
-| `XCF-M7`  | Authorized response composition                                          | M6, AuthorizationPort, MPA and operation owner     |
-| `XCF-M8`  | Recovery and controlled learning proposals                               | M7                                                 |
+| Milestone | Scope                                                                 | Dependency gate                                    |
+| --------- | --------------------------------------------------------------------- | -------------------------------------------------- |
+| `XCF-M1`  | Framework Registry, source trust and release/version lifecycle        | G0 canonical and separate implementation authority |
+| `XCF-M2`  | Mapping runtime, tenant overlays, CVE/CWE/CVSS/KEV and prioritization | M1                                                 |
+| `XCF-M3`  | ATT&CK adversary intelligence and relational graph projection         | M1 and M2                                          |
+| `XCF-M4`  | D3FEND/control/capability mapping                                     | M1 and M3                                          |
+| `XCF-M5`  | Knowledge relations and XCAP-011 enrichment                           | M1–M4 and graph benchmark                          |
+| `XCF-M6`  | Cognitive decision support through AI Gateway                         | M5 and trusted-provider authorization              |
+| `XCF-M7`  | Authorized response composition                                       | M6, AuthorizationPort, MPA and operation owner     |
+| `XCF-M8`  | Recovery and controlled learning proposals                            | M7                                                 |
 
 No milestone transition grants the next milestone automatically.
 
@@ -110,7 +110,7 @@ data/mapping/graph rules, authority/evidence/event rules and acceptance matrices
 | ADR           | Topic                                 | Disposition                |
 | ------------- | ------------------------------------- | -------------------------- |
 | `ADR-XCF-001` | Canonical transversal control plane   | `APPROVED`                 |
-| `ADR-XCF-002` | Global and tenant-scoped governance   | `APPROVED_WITH_REFINEMENT` |
+| `ADR-XCF-002` | Global and tenant-scoped governance   | `APPROVED`                 |
 | `ADR-XCF-003` | Source trust, release and activation  | `APPROVED`                 |
 | `ADR-XCF-004` | PostgreSQL-first graph projection     | `APPROVED_WITH_REFINEMENT` |
 | `ADR-XCF-005` | AuthorizationPort and MPA reuse       | `APPROVED`                 |
@@ -122,7 +122,9 @@ data/mapping/graph rules, authority/evidence/event rules and acceptance matrices
 | `ADR-XCF-011` | DecisionEvidence contract             | `APPROVED_WITH_REFINEMENT` |
 | `ADR-XCF-012` | Maturity and publication gates        | `APPROVED`                 |
 
-The refinements are pre-implementation gates, not defects in this governance package.
+The ADR-XCF-002 refinement is closed by the frozen M1 authority, scope and MPA catalog. Remaining
+refinements apply only before the milestone that first persists the affected graph or
+DecisionEvidence contract.
 
 ## 8. Canonical engineering lifecycle
 

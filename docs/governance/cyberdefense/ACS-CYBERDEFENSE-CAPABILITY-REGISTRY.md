@@ -95,6 +95,18 @@ architectural justification.
 | ACS-XCAP-010 | `GAP`         | No approved notification/escalation/case orchestration contract.                                                                |
 | ACS-XCAP-011 | `M0 CLOSED`   | M0 contracts, bounded receipt runtime and qualification evidence are canonically integrated and verified; M1 is not authorized. |
 
+## ACS-XCF control-plane milestone boundary
+
+`ACS-XCF-CP-001` composes existing transversal capabilities but is not a new `ACS-XCAP` identity.
+Its G0 governance is canonical. The M1 governance preconditions are frozen; runtime implementation
+still requires separate human reconfirmation.
+
+| Milestone | Canonical boundary                                                                                     | Runtime authority                  |
+| --------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `XCF-M1`  | Framework Registry, publisher/source trust and release lifecycle; no mapping or tenant-overlay runtime | `REQUIRES_SEPARATE_RECONFIRMATION` |
+| `XCF-M2`  | Mapping runtime, tenant overlays and vulnerability knowledge                                           | `NOT_AUTHORIZED`                   |
+| `XCF-M3+` | Graph, interpretation, Fusion composition, cognition, response and learning milestones                 | `NOT_AUTHORIZED`                   |
+
 ## ACS-XCAP-011 Cognitive Cyber Fusion & Cross-Domain Reasoning contract
 
 `ACS-XCAP-011` is a `TRANSVERSAL_CAPABILITY`. It is distinct from `ACS-XCAP-003`

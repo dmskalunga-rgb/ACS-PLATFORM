@@ -14,6 +14,11 @@ RLS/FORCE RLS and separate identity from the referenced global object.
 
 ## Mapping contract
 
+Mapping and tenant-overlay runtime begins at M2. M1 defines only the stable framework/source/release
+identities that a later mapping may reference; it cannot persist, activate or revoke a mapping or
+tenant overlay. The boundary and future permission keys are frozen in
+`ACS-XCF-M1-AUTHORITY-SCOPE-AND-MPA-CATALOG-v1.0.md`.
+
 Every future mapping records `mapping_id`, versioned source/target identities, governed relationship,
 source/target versions, mapping class, system-derived confidence when applicable, authoritative source,
 curator, approver, human-validation state, validity, supersession, revocation and provenance.

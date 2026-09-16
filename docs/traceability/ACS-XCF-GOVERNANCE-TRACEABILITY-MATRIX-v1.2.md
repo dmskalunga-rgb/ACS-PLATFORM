@@ -20,13 +20,14 @@ qualification evidence. It does not represent XCF runtime implementation or runt
 | Mapping integrity              | `ACS-XCF-DATA-MAPPING-GRAPH-GOVERNANCE-v1.2.md`           | Classes, precedence, conflict, provenance, supersession and revocation              |
 | Graph governance               | Data/mapping/graph document; `ADR-XCF-004`                | PostgreSQL relational first; new graph technology needs separate ADR                |
 | Global/tenant governance       | Data/mapping/graph document; `ADR-XCF-002`                | Tenant-to-global promotion prohibited without governed review                       |
+| M1 authority/scope closure     | `ACS-XCF-M1-AUTHORITY-SCOPE-AND-MPA-CATALOG-v1.0.md`      | Frozen global/tenant catalogs, MPA composition and M1/M2 boundary                   |
 | Authorization and MPA          | `ACS-XCF-AUTHORIZATION-EVIDENCE-EVENT-GOVERNANCE-v1.2.md` | Canonical AuthorizationPort and MPA only                                            |
 | Evidence/DecisionEvidence      | Authority/evidence/event document; `ADR-XCF-006/011`      | XCAP-005 reuse; no parallel evidence store                                          |
 | Events, audit and outbox       | Authority/evidence/event document; `ADR-XCF-007`          | Canonical Event Foundation and transactional boundaries                             |
 | XCAP-005 status                | Cyberdefense Capability Registry                          | Implemented, canonically integrated and verified                                    |
 | XCAP-011 status/reuse          | Registry plus four M0 governance artifacts                | M0 closed/integrated; M1 not authorized                                             |
 | Deterministic acceptance       | `ACS-XCF-ACCEPTANCE-MATRIX-v1.2.md`                       | 14 future cases; all `NOT_EXECUTED`                                                 |
-| Negative security              | `ACS-XCF-NEGATIVE-SECURITY-MATRIX-v1.2.md`                | 22 future cases; all `NOT_EXECUTED`                                                 |
+| Negative security              | `ACS-XCF-NEGATIVE-SECURITY-MATRIX-v1.2.md`                | 32 future cases; all `NOT_EXECUTED`                                                 |
 | Failure injection              | `ACS-XCF-FAILURE-INJECTION-MATRIX-v1.2.md`                | 18 future cases; all `NOT_EXECUTED`                                                 |
 | No-mock policy                 | GEP `9                                                    | Real infrastructure required for persistence/security/E2E claims                    |
 | Engineering lifecycle          | GEP `8                                                    | Authority through post-merge and next human authorization                           |
