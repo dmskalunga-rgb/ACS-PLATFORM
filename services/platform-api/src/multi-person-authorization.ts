@@ -29,7 +29,7 @@ export interface MultiPersonAuthorizationPolicy {
   readonly id: MultiPersonAuthorizationPolicyId;
   readonly version: '1.0.0';
   readonly operation: ProtectedOperation;
-  readonly requirement: AuthorityClassRequirement;
+  readonly requirements: readonly AuthorityClassRequirement[];
   readonly expirySeconds: 900;
   readonly consumption: 'SINGLE_USE';
 }
@@ -517,6 +517,22 @@ export const MPA_POLICIES: Readonly<
     'cyberdefense.evidence.destroy_authority',
     2,
   ),
+  'xcf.framework_source.activate.standard': compoundPolicy(
+    'xcf.framework_source.activate.standard',
+    'xcf.framework_source.activate',
+  ),
+  'xcf.framework_source.revoke.standard': compoundPolicy(
+    'xcf.framework_source.revoke.standard',
+    'xcf.framework_source.revoke',
+  ),
+  'xcf.framework_release.activate.standard': compoundPolicy(
+    'xcf.framework_release.activate.standard',
+    'xcf.framework_release.activate',
+  ),
+  'xcf.framework_release.revoke.standard': compoundPolicy(
+    'xcf.framework_release.revoke.standard',
+    'xcf.framework_release.revoke',
+  ),
 };
 
 function policy(
@@ -529,7 +545,32 @@ function policy(
     id,
     version: '1.0.0',
     operation,
-    requirement: { authorityClass, count, requesterMustBeIndependent: true },
+    requirements: [{ authorityClass, count, requesterMustBeIndependent: true }],
+    expirySeconds: 900,
+    consumption: 'SINGLE_USE',
+  };
+}
+
+function compoundPolicy(
+  id: MultiPersonAuthorizationPolicyId,
+  operation: ProtectedOperation,
+): MultiPersonAuthorizationPolicy {
+  return {
+    id,
+    version: '1.0.0',
+    operation,
+    requirements: [
+      {
+        authorityClass: 'xcf.knowledge_custodian_authority',
+        count: 1,
+        requesterMustBeIndependent: true,
+      },
+      {
+        authorityClass: 'xcf.security_governance_authority',
+        count: 1,
+        requesterMustBeIndependent: true,
+      },
+    ],
     expirySeconds: 900,
     consumption: 'SINGLE_USE',
   };

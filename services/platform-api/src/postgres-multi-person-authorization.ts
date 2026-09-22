@@ -40,10 +40,11 @@ export class PostgresMultiPersonAuthorizationRepository implements MultiPersonAu
       const replay = await this.replay(client, input);
       if (replay) return replay;
       const policy = await client.query<{ required_count: number; expiry_interval: string }>(
-        `SELECT r.required_count,p.expiry_interval::text
+        `SELECT sum(r.required_count)::int AS required_count,p.expiry_interval::text
            FROM platform.mpa_policies p
            JOIN platform.mpa_policy_authority_requirements r USING(policy_id,policy_version)
-          WHERE p.policy_id=$1 AND p.policy_version=$2 AND p.operation=$3 AND p.status='ACTIVE'`,
+          WHERE p.policy_id=$1 AND p.policy_version=$2 AND p.operation=$3 AND p.status='ACTIVE'
+          GROUP BY p.expiry_interval`,
         [input.binding.policyId, input.binding.policyVersion, input.binding.operation],
       );
       const configured = policy.rows[0];
@@ -94,17 +95,27 @@ export class PostgresMultiPersonAuthorizationRepository implements MultiPersonAu
       if (row.state === 'EXPIRED')
         return { authorization: map(row), binding: null, existingApproverUserIds: [] };
       const requirement = await client.query<{ authority_class_id: string }>(
-        `SELECT authority_class_id
-           FROM platform.mpa_policy_authority_requirements
-          WHERE policy_id=$1 AND policy_version=$2`,
-        [row.policy_id, row.policy_version],
+        `SELECT r.authority_class_id
+           FROM platform.mpa_policy_authority_requirements r
+           JOIN platform.mpa_membership_authorities ma
+             ON ma.tenant_id=$1 AND ma.membership_id=$2
+            AND ma.authority_class_id=r.authority_class_id
+          WHERE r.policy_id=$3 AND r.policy_version=$4
+            AND (SELECT count(*) FROM platform.mpa_authorization_decisions d
+                  WHERE d.tenant_id=$1 AND d.authorization_id=$5
+                    AND d.decision='APPROVE'
+                    AND d.authority_class_id=r.authority_class_id) < r.required_count
+          ORDER BY r.authority_class_id
+          LIMIT 1`,
+        [
+          input.tenantId,
+          input.actorMembershipId,
+          row.policy_id,
+          row.policy_version,
+          input.authorizationId,
+        ],
       );
       const authorityClass = requirement.rows[0]?.authority_class_id;
-      const eligible = await client.query(
-        `SELECT 1 FROM platform.mpa_membership_authorities ma
-         WHERE ma.tenant_id=$1 AND ma.membership_id=$2 AND ma.authority_class_id=$3`,
-        [input.tenantId, input.actorMembershipId, authorityClass],
-      );
       const existing = await client.query<{ actor_user_id: string }>(
         `SELECT actor_user_id FROM platform.mpa_authorization_decisions
           WHERE tenant_id=$1 AND authorization_id=$2 AND decision='APPROVE'`,
@@ -113,7 +124,7 @@ export class PostgresMultiPersonAuthorizationRepository implements MultiPersonAu
       return {
         authorization: map(row),
         binding:
-          eligible.rowCount === 1 && authorityClass !== undefined
+          authorityClass !== undefined
             ? {
                 actorUserId: input.actorUserId,
                 tenantId: input.tenantId,
@@ -144,17 +155,24 @@ export class PostgresMultiPersonAuthorizationRepository implements MultiPersonAu
       const membership = await client.query<{ authority_class_id: string }>(
         `SELECT r.authority_class_id
            FROM platform.mpa_policy_authority_requirements r
-           LEFT JOIN platform.mpa_membership_authorities ma
+           JOIN platform.mpa_membership_authorities ma
              ON ma.tenant_id=$1 AND ma.membership_id=$2
             AND ma.authority_class_id=r.authority_class_id
           WHERE r.policy_id=$3 AND r.policy_version=$4
-            AND ($5::text='REJECT' OR ma.membership_id IS NOT NULL)`,
+            AND ($5::text='REJECT' OR
+              (SELECT count(*) FROM platform.mpa_authorization_decisions d
+                WHERE d.tenant_id=$1 AND d.authorization_id=$6
+                  AND d.decision='APPROVE'
+                  AND d.authority_class_id=r.authority_class_id) < r.required_count)
+          ORDER BY r.authority_class_id
+          LIMIT 1`,
         [
           input.tenantId,
           input.actorMembershipId,
           locked.policyId,
           locked.policyVersion,
           input.decision,
+          input.authorizationId,
         ],
       );
       const actor = membership.rows[0];

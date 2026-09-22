@@ -85,4 +85,43 @@ describe('FOUNDATION configuration', () => {
     expect(configuration.xcap011DatabaseUrl).toBe('postgresql://xcap011.example/acs');
     expect(configuration.xcap011ReceiptLifetimeSeconds).toBe(300);
   });
+
+  it('fails closed unless every XCF M1 server-owned runtime binding is present', () => {
+    expect(() =>
+      loadConfiguration({ ACS_XCF_M1_DATABASE_URL: 'postgresql://xcf.example/acs' }),
+    ).toThrow(/governance tenant/);
+    expect(() =>
+      loadConfiguration({
+        ACS_XCF_M1_DATABASE_URL: 'postgresql://xcf.example/acs',
+        ACS_XCF_GOVERNANCE_TENANT_ID: '00000000-0000-4000-8000-000000000011',
+      }),
+    ).toThrow(/maximum artifact size/);
+    const trustedKeys = JSON.stringify([
+      {
+        reference: 'key:nist:1',
+        publisherId: '10000000-0000-4000-8000-000000000001',
+        algorithm: 'ED25519',
+        publicKeyPem: '-----BEGIN PUBLIC KEY-----\nTEST\n-----END PUBLIC KEY-----',
+        status: 'TRUSTED',
+      },
+    ]);
+    expect(() =>
+      loadConfiguration({
+        ACS_XCF_M1_DATABASE_URL: 'postgresql://xcf.example/acs',
+        ACS_XCF_GOVERNANCE_TENANT_ID: '00000000-0000-4000-8000-000000000011',
+        ACS_XCF_M1_MAX_ARTIFACT_BYTES: '1048576',
+      }),
+    ).toThrow(/trusted-key/i);
+
+    const configuration = loadConfiguration({
+      ACS_XCF_M1_DATABASE_URL: 'postgresql://xcf.example/acs',
+      ACS_XCF_GOVERNANCE_TENANT_ID: '00000000-0000-4000-8000-000000000011',
+      ACS_XCF_M1_MAX_ARTIFACT_BYTES: '1048576',
+      ACS_XCF_M1_TRUSTED_KEYS_JSON: trustedKeys,
+    });
+    expect(configuration.xcfM1DatabaseUrl).toBe('postgresql://xcf.example/acs');
+    expect(configuration.xcfGovernanceTenantId).toBe('00000000-0000-4000-8000-000000000011');
+    expect(configuration.xcfM1MaximumArtifactBytes).toBe(1_048_576);
+    expect(configuration.xcfM1TrustedKeys).toHaveLength(1);
+  });
 });

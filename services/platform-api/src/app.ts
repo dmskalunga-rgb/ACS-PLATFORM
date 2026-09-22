@@ -81,6 +81,12 @@ import {
   evidenceSourceEnvelopeSchema,
   evidenceSourceTransitionSchema,
   fusionResultSchema,
+  xcfExpectedVersionSchema,
+  xcfFrameworkReleaseIngestSchema,
+  xcfFrameworkSourceCreateSchema,
+  xcfMutationEnvelopeSchema,
+  xcfProtectedTransitionSchema,
+  xcfPublisherCreateSchema,
 } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import {
@@ -128,6 +134,7 @@ import { PostgresUsageMeteringRepository } from './postgres-usage-metering.js';
 import { PostgresMultiPersonAuthorizationRepository } from './postgres-multi-person-authorization.js';
 import { PostgresEvidenceChainOfCustodyRepository } from './postgres-evidence-chain-of-custody.js';
 import { PostgresCognitiveCyberFusionM0Repository } from './postgres-cognitive-cyber-fusion-m0.js';
+import { PostgresXcfFrameworkRegistryRepository } from './postgres-xcf-framework-registry.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -195,6 +202,11 @@ import {
   CognitiveCyberFusionM0Service,
   CognitiveFusionFailure,
 } from './cognitive-cyber-fusion-m0.js';
+import { XcfFrameworkRegistryService, XcfM1Failure } from './xcf-framework-registry.js';
+import {
+  ConfiguredXcfTrustedKeyResolver,
+  FetchXcfArtifactAcquisition,
+} from './xcf-framework-artifact.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -225,6 +237,7 @@ export async function buildApp(
     readonly multiPersonAuthorizationService?: MultiPersonAuthorizationService;
     readonly evidenceChainOfCustodyService?: EvidenceChainOfCustodyService;
     readonly cognitiveCyberFusionM0Service?: CognitiveCyberFusionM0Service;
+    readonly xcfFrameworkRegistryService?: XcfFrameworkRegistryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -272,6 +285,8 @@ export async function buildApp(
   let evidenceChainOfCustodyService = options.evidenceChainOfCustodyService;
   let fusionRepository: PostgresCognitiveCyberFusionM0Repository | undefined;
   let cognitiveCyberFusionM0Service = options.cognitiveCyberFusionM0Service;
+  let xcfRepository: PostgresXcfFrameworkRegistryRepository | undefined;
+  let xcfFrameworkRegistryService = options.xcfFrameworkRegistryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -332,6 +347,27 @@ export async function buildApp(
         mpaRepository,
         new NotConfiguredPhysicalHumanAttestation(),
         securityAuditRepository,
+      );
+    }
+    if (
+      configuration.xcfM1DatabaseUrl !== undefined &&
+      configuration.xcfGovernanceTenantId !== undefined &&
+      configuration.xcfM1MaximumArtifactBytes !== undefined &&
+      configuration.xcfM1TrustedKeys !== undefined
+    ) {
+      xcfRepository = new PostgresXcfFrameworkRegistryRepository(configuration.xcfM1DatabaseUrl);
+      xcfFrameworkRegistryService = new XcfFrameworkRegistryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        postgresRepository,
+        xcfRepository,
+        new FetchXcfArtifactAcquisition(configuration.xcfM1MaximumArtifactBytes),
+        new ConfiguredXcfTrustedKeyResolver(configuration.xcfM1TrustedKeys),
+        { verify: () => Promise.resolve({ verified: false }) },
+        securityAuditRepository,
+        configuration.xcfGovernanceTenantId,
+        configuration.xcfM1MaximumArtifactBytes,
       );
     }
     if (
@@ -534,6 +570,7 @@ export async function buildApp(
         mpaRepository?.close(),
         evidenceRepository?.close(),
         fusionRepository?.close(),
+        xcfRepository?.close(),
       ]);
     });
   }
@@ -1716,6 +1753,227 @@ export async function buildApp(
       );
     },
   );
+
+  const xcfUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'XCF_M1_NOT_CONFIGURED',
+          message: 'XCF M1 Framework Registry dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const xcfError = (error: XcfM1Failure, request: FastifyRequest, reply: FastifyReply) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'FORBIDDEN' || error.code === 'MPA_DENIED'
+          ? 403
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : error.code === 'STALE_VERSION' || error.code === 'IDEMPOTENCY_CONFLICT'
+              ? 409
+              : 422;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  const xcfInvalid = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'A valid XCF M1 request and UUID idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const xcfMutation = (request: FastifyRequest, receipt: { data: unknown; replay: boolean }) =>
+    xcfMutationEnvelopeSchema.parse({
+      data: receipt.data,
+      meta: {
+        request_id: request.id,
+        correlation_id: request.correlationId,
+        idempotent_replay: receipt.replay,
+      },
+    });
+  const withXcfFailure = async <T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    operation: () => Promise<T>,
+  ) => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof XcfM1Failure) return xcfError(error, request, reply);
+      throw error;
+    }
+  };
+
+  app.post('/api/v1/xcf/publishers', async (request, reply) => {
+    if (!xcfFrameworkRegistryService) return xcfUnavailable(request, reply);
+    const key = idempotencyKey(request);
+    const body = xcfPublisherCreateSchema.safeParse(request.body);
+    if (key === null || !body.success) return xcfInvalid(request, reply);
+    return withXcfFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          xcfMutation(
+            request,
+            await xcfFrameworkRegistryService.createPublisher(
+              request.headers.authorization,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/xcf/framework-sources', async (request, reply) => {
+    if (!xcfFrameworkRegistryService) return xcfUnavailable(request, reply);
+    const key = idempotencyKey(request);
+    const body = xcfFrameworkSourceCreateSchema.safeParse(request.body);
+    if (key === null || !body.success) return xcfInvalid(request, reply);
+    return withXcfFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          xcfMutation(
+            request,
+            await xcfFrameworkRegistryService.registerSource(
+              request.headers.authorization,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.get('/api/v1/xcf/framework-sources/:sourceId', async (request, reply) => {
+    if (!xcfFrameworkRegistryService) return xcfUnavailable(request, reply);
+    const { sourceId } = request.params as { sourceId: string };
+    if (!uuidSchema.safeParse(sourceId).success) return xcfInvalid(request, reply);
+    return withXcfFailure(request, reply, async () =>
+      xcfMutationEnvelopeSchema.parse({
+        data: await xcfFrameworkRegistryService.readSource(
+          request.headers.authorization,
+          sourceId,
+          metadata(request),
+        ),
+        meta: {
+          request_id: request.id,
+          correlation_id: request.correlationId,
+          idempotent_replay: false,
+        },
+      }),
+    );
+  });
+
+  for (const transition of ['activate', 'suspend', 'revoke'] as const)
+    app.post(`/api/v1/xcf/framework-sources/:sourceId/${transition}`, async (request, reply) => {
+      if (!xcfFrameworkRegistryService) return xcfUnavailable(request, reply);
+      const { sourceId } = request.params as { sourceId: string };
+      const key = idempotencyKey(request);
+      const body = (
+        transition === 'suspend' ? xcfExpectedVersionSchema : xcfProtectedTransitionSchema
+      ).safeParse(request.body);
+      if (key === null || !body.success || !uuidSchema.safeParse(sourceId).success)
+        return xcfInvalid(request, reply);
+      return withXcfFailure(request, reply, async () =>
+        xcfMutation(
+          request,
+          await xcfFrameworkRegistryService.transitionSource(
+            request.headers.authorization,
+            sourceId,
+            transition.toUpperCase() as 'ACTIVATE' | 'SUSPEND' | 'REVOKE',
+            body.data,
+            key,
+            metadata(request),
+          ),
+        ),
+      );
+    });
+
+  app.post('/api/v1/xcf/framework-releases', async (request, reply) => {
+    if (!xcfFrameworkRegistryService) return xcfUnavailable(request, reply);
+    const key = idempotencyKey(request);
+    const body = xcfFrameworkReleaseIngestSchema.safeParse(request.body);
+    if (key === null || !body.success) return xcfInvalid(request, reply);
+    return withXcfFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          xcfMutation(
+            request,
+            await xcfFrameworkRegistryService.ingestRelease(
+              request.headers.authorization,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/xcf/framework-releases/:releaseId/approve', async (request, reply) => {
+    if (!xcfFrameworkRegistryService) return xcfUnavailable(request, reply);
+    const { releaseId } = request.params as { releaseId: string };
+    const key = idempotencyKey(request);
+    const body = xcfExpectedVersionSchema.safeParse(request.body);
+    if (key === null || !body.success || !uuidSchema.safeParse(releaseId).success)
+      return xcfInvalid(request, reply);
+    return withXcfFailure(request, reply, async () =>
+      xcfMutation(
+        request,
+        await xcfFrameworkRegistryService.approveRelease(
+          request.headers.authorization,
+          releaseId,
+          body.data,
+          key,
+          metadata(request),
+        ),
+      ),
+    );
+  });
+
+  for (const transition of ['activate', 'revoke'] as const)
+    app.post(`/api/v1/xcf/framework-releases/:releaseId/${transition}`, async (request, reply) => {
+      if (!xcfFrameworkRegistryService) return xcfUnavailable(request, reply);
+      const { releaseId } = request.params as { releaseId: string };
+      const key = idempotencyKey(request);
+      const body = xcfProtectedTransitionSchema.safeParse(request.body);
+      if (key === null || !body.success || !uuidSchema.safeParse(releaseId).success)
+        return xcfInvalid(request, reply);
+      return withXcfFailure(request, reply, async () =>
+        xcfMutation(
+          request,
+          await xcfFrameworkRegistryService.transitionRelease(
+            request.headers.authorization,
+            releaseId,
+            transition.toUpperCase() as 'ACTIVATE' | 'REVOKE',
+            body.data,
+            key,
+            metadata(request),
+          ),
+        ),
+      );
+    });
 
   const customerRouteSchema = {
     security: [
