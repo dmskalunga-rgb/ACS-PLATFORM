@@ -27,8 +27,8 @@ BEGIN
     SELECT 1 FROM pg_roles WHERE rolname='acs_platform_mpa' AND NOT rolsuper AND NOT rolbypassrls
       AND NOT rolcanlogin AND NOT rolcreatedb AND NOT rolcreaterole
   ) THEN RAISE EXCEPTION 'MPA capability role is not least privilege'; END IF;
-  IF (SELECT count(*) FROM platform.mpa_policies) <> 4 THEN RAISE EXCEPTION 'MPA policy registry mismatch'; END IF;
-  IF (SELECT count(*) FROM platform.mpa_authority_classes) <> 3 THEN RAISE EXCEPTION 'MPA authority registry mismatch'; END IF;
+  IF (SELECT count(*) FROM platform.mpa_policies) <> 8 THEN RAISE EXCEPTION 'MPA policy registry mismatch'; END IF;
+  IF (SELECT count(*) FROM platform.mpa_authority_classes) <> 5 THEN RAISE EXCEPTION 'MPA authority registry mismatch'; END IF;
 END $$;
 
 BEGIN;

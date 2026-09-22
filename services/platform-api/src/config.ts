@@ -36,6 +36,10 @@ const configurationSchema = z.object({
   ACS_XCAP005_MAX_EVIDENCE_BYTES: z.coerce.number().int().positive().optional(),
   ACS_XCAP011_DATABASE_URL: z.url().optional(),
   ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS: z.coerce.number().int().min(300).max(86_400).optional(),
+  ACS_XCF_M1_DATABASE_URL: z.url().optional(),
+  ACS_XCF_GOVERNANCE_TENANT_ID: z.uuid().optional(),
+  ACS_XCF_M1_MAX_ARTIFACT_BYTES: z.coerce.number().int().positive().optional(),
+  ACS_XCF_M1_TRUSTED_KEYS_JSON: z.string().min(2).optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -68,7 +72,19 @@ export interface PlatformConfiguration {
   readonly xcap005MaximumEvidenceBytes?: number;
   readonly xcap011DatabaseUrl?: string;
   readonly xcap011ReceiptLifetimeSeconds?: number;
+  readonly xcfM1DatabaseUrl?: string;
+  readonly xcfGovernanceTenantId?: string;
+  readonly xcfM1MaximumArtifactBytes?: number;
+  readonly xcfM1TrustedKeys?: readonly XcfM1TrustedKeyConfiguration[];
   readonly webOrigin: string;
+}
+
+export interface XcfM1TrustedKeyConfiguration {
+  readonly reference: string;
+  readonly publisherId: string;
+  readonly algorithm: 'ED25519' | 'RSA-SHA256';
+  readonly publicKeyPem: string;
+  readonly status: 'TRUSTED' | 'REVOKED';
 }
 
 export interface OidcConfiguration {
@@ -97,6 +113,44 @@ export function loadConfiguration(
     parsed.ACS_ENV !== 'test'
   ) {
     throw new Error('The development identity adapter is prohibited in staging and production.');
+  }
+  const xcfM1Bindings = [
+    parsed.ACS_XCF_M1_DATABASE_URL,
+    parsed.ACS_XCF_GOVERNANCE_TENANT_ID,
+    parsed.ACS_XCF_M1_MAX_ARTIFACT_BYTES,
+    parsed.ACS_XCF_M1_TRUSTED_KEYS_JSON,
+  ];
+  if (
+    xcfM1Bindings.some((value) => value !== undefined) &&
+    xcfM1Bindings.some((value) => value === undefined)
+  ) {
+    throw new Error(
+      'XCF M1 runtime requires its database URL, server governance tenant, maximum artifact size, and trusted-key configuration.',
+    );
+  }
+  let xcfM1TrustedKeys: readonly XcfM1TrustedKeyConfiguration[] | undefined;
+  if (parsed.ACS_XCF_M1_TRUSTED_KEYS_JSON !== undefined) {
+    const trustedKeySchema = z
+      .array(
+        z.object({
+          reference: z.string().trim().min(1).max(256),
+          publisherId: z.uuid(),
+          algorithm: z.enum(['ED25519', 'RSA-SHA256']),
+          publicKeyPem: z.string().min(1).max(16_384),
+          status: z.enum(['TRUSTED', 'REVOKED']),
+        }),
+      )
+      .min(1)
+      .max(128);
+    let parsedKeys: unknown;
+    try {
+      parsedKeys = JSON.parse(parsed.ACS_XCF_M1_TRUSTED_KEYS_JSON);
+    } catch {
+      throw new Error('XCF M1 trusted-key configuration must be valid JSON.');
+    }
+    xcfM1TrustedKeys = trustedKeySchema.parse(parsedKeys);
+    if (new Set(xcfM1TrustedKeys.map((key) => key.reference)).size !== xcfM1TrustedKeys.length)
+      throw new Error('XCF M1 trusted-key references must be unique.');
   }
   if (
     (parsed.ACS_XCAP011_DATABASE_URL === undefined) !==
@@ -218,6 +272,16 @@ export function loadConfiguration(
     ...(parsed.ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS === undefined
       ? {}
       : { xcap011ReceiptLifetimeSeconds: parsed.ACS_XCAP011_M0_RECEIPT_LIFETIME_SECONDS }),
+    ...(parsed.ACS_XCF_M1_DATABASE_URL === undefined
+      ? {}
+      : { xcfM1DatabaseUrl: parsed.ACS_XCF_M1_DATABASE_URL }),
+    ...(parsed.ACS_XCF_GOVERNANCE_TENANT_ID === undefined
+      ? {}
+      : { xcfGovernanceTenantId: parsed.ACS_XCF_GOVERNANCE_TENANT_ID }),
+    ...(parsed.ACS_XCF_M1_MAX_ARTIFACT_BYTES === undefined
+      ? {}
+      : { xcfM1MaximumArtifactBytes: parsed.ACS_XCF_M1_MAX_ARTIFACT_BYTES }),
+    ...(xcfM1TrustedKeys === undefined ? {} : { xcfM1TrustedKeys }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

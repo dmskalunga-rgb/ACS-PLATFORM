@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  MPA_POLICIES,
   MultiPersonAuthorizationFailure,
   MultiPersonAuthorizationService,
   NotConfiguredPhysicalHumanAttestation,
@@ -188,6 +189,19 @@ function setup(
 }
 
 describe('ACS-PLATFORM-MPA acceptance matrix', () => {
+  it('freezes both independent XCF authority classes for every protected M1 transition', () => {
+    for (const policyId of [
+      'xcf.framework_source.activate.standard',
+      'xcf.framework_source.revoke.standard',
+      'xcf.framework_release.activate.standard',
+      'xcf.framework_release.revoke.standard',
+    ] as const) {
+      expect(MPA_POLICIES[policyId].requirements).toEqual([
+        expect.objectContaining({ authorityClass: 'xcf.knowledge_custodian_authority', count: 1 }),
+        expect.objectContaining({ authorityClass: 'xcf.security_governance_authority', count: 1 }),
+      ]);
+    }
+  });
   it('MPA-POS-001 creates a governed request', async () => {
     const { service } = setup({ userId: 'requester' });
     const result = await service.request(

@@ -15,12 +15,18 @@ export const multiPersonAuthorizationPolicyIdSchema = z.enum([
   'cyberdefense.evidence.export.restricted_security',
   'cyberdefense.evidence.retention_override',
   'cyberdefense.evidence.destroy',
+  'xcf.framework_source.activate.standard',
+  'xcf.framework_source.revoke.standard',
+  'xcf.framework_release.activate.standard',
+  'xcf.framework_release.revoke.standard',
 ]);
 
 export const multiPersonAuthorizationAuthorityClassSchema = z.enum([
   'cyberdefense.evidence.export_authority',
   'cyberdefense.evidence.retention_override_authority',
   'cyberdefense.evidence.destroy_authority',
+  'xcf.knowledge_custodian_authority',
+  'xcf.security_governance_authority',
 ]);
 
 export const multiPersonAuthorizationEventTypeSchema = z.enum([
@@ -37,6 +43,10 @@ export const protectedOperationSchema = z.enum([
   'cyberdefense.evidence.export',
   'cyberdefense.evidence.retention_override',
   'cyberdefense.evidence.destroy',
+  'xcf.framework_source.activate',
+  'xcf.framework_source.revoke',
+  'xcf.framework_release.activate',
+  'xcf.framework_release.revoke',
 ]);
 
 export const multiPersonAuthorizationRequestSchema = z.object({
