@@ -87,6 +87,15 @@ import {
   xcfMutationEnvelopeSchema,
   xcfProtectedTransitionSchema,
   xcfPublisherCreateSchema,
+  aiDatasetCreateSchema,
+  aiDatasetVersionCreateSchema,
+  aiInventoryMutationEnvelopeSchema,
+  aiInventoryUpdateSchema,
+  aiModelCreateSchema,
+  aiModelVersionCreateSchema,
+  aiPromptCreateSchema,
+  aiPromptVersionCreateSchema,
+  aiSystemCreateSchema,
 } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import {
@@ -135,6 +144,7 @@ import { PostgresMultiPersonAuthorizationRepository } from './postgres-multi-per
 import { PostgresEvidenceChainOfCustodyRepository } from './postgres-evidence-chain-of-custody.js';
 import { PostgresCognitiveCyberFusionM0Repository } from './postgres-cognitive-cyber-fusion-m0.js';
 import { PostgresXcfFrameworkRegistryRepository } from './postgres-xcf-framework-registry.js';
+import { PostgresAiInventoryRepository } from './postgres-ai-inventory.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -203,6 +213,7 @@ import {
   CognitiveFusionFailure,
 } from './cognitive-cyber-fusion-m0.js';
 import { XcfFrameworkRegistryService, XcfM1Failure } from './xcf-framework-registry.js';
+import { AiInventoryFailure, AiInventoryService } from './ai-inventory.js';
 import {
   ConfiguredXcfTrustedKeyResolver,
   FetchXcfArtifactAcquisition,
@@ -238,6 +249,7 @@ export async function buildApp(
     readonly evidenceChainOfCustodyService?: EvidenceChainOfCustodyService;
     readonly cognitiveCyberFusionM0Service?: CognitiveCyberFusionM0Service;
     readonly xcfFrameworkRegistryService?: XcfFrameworkRegistryService;
+    readonly aiInventoryService?: AiInventoryService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -287,6 +299,8 @@ export async function buildApp(
   let cognitiveCyberFusionM0Service = options.cognitiveCyberFusionM0Service;
   let xcfRepository: PostgresXcfFrameworkRegistryRepository | undefined;
   let xcfFrameworkRegistryService = options.xcfFrameworkRegistryService;
+  let aiInventoryRepository: PostgresAiInventoryRepository | undefined;
+  let aiInventoryService = options.aiInventoryService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -368,6 +382,17 @@ export async function buildApp(
         securityAuditRepository,
         configuration.xcfGovernanceTenantId,
         configuration.xcfM1MaximumArtifactBytes,
+      );
+    }
+    if (configuration.aiGovM0aDatabaseUrl !== undefined) {
+      aiInventoryRepository = new PostgresAiInventoryRepository(configuration.aiGovM0aDatabaseUrl);
+      aiInventoryService = new AiInventoryService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        postgresRepository,
+        aiInventoryRepository,
+        securityAuditRepository,
       );
     }
     if (
@@ -571,6 +596,7 @@ export async function buildApp(
         evidenceRepository?.close(),
         fusionRepository?.close(),
         xcfRepository?.close(),
+        aiInventoryRepository?.close(),
       ]);
     });
   }
@@ -1974,6 +2000,314 @@ export async function buildApp(
         ),
       );
     });
+
+  const aiInventoryUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'AIGOV_M0A_NOT_CONFIGURED',
+          message: 'AIGOV M0A AI Inventory dependencies are not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const aiInventoryInvalid = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message:
+            'A valid tenant-bound AI Inventory request and UUID idempotency key are required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const aiInventoryError = (
+    error: AiInventoryFailure,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'FORBIDDEN'
+          ? 403
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : error.code === 'STALE_VERSION' ||
+                error.code === 'IDEMPOTENCY_CONFLICT' ||
+                error.code === 'ALREADY_EXISTS'
+              ? 409
+              : 422;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  const withAiInventoryFailure = async <T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    operation: () => Promise<T>,
+  ) => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof AiInventoryFailure) return aiInventoryError(error, request, reply);
+      throw error;
+    }
+  };
+  const aiInventoryMutation = (
+    request: FastifyRequest,
+    receipt: { data: unknown; replay: boolean },
+  ) =>
+    aiInventoryMutationEnvelopeSchema.parse({
+      data: receipt.data,
+      meta: {
+        request_id: request.id,
+        correlation_id: request.correlationId,
+        idempotent_replay: receipt.replay,
+      },
+    });
+  const aiInventoryParams = (request: FastifyRequest) => {
+    const params = request.params as { tenantId: string; assetId?: string };
+    return {
+      tenantId: params.tenantId,
+      assetId: params.assetId,
+      valid:
+        uuidSchema.safeParse(params.tenantId).success &&
+        (params.assetId === undefined || uuidSchema.safeParse(params.assetId).success),
+    };
+  };
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/ai-systems', async (request, reply) => {
+    if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+    const params = aiInventoryParams(request);
+    const key = idempotencyKey(request);
+    const body = aiSystemCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiInventoryInvalid(request, reply);
+    return withAiInventoryFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.createAsset(
+              request.headers.authorization,
+              params.tenantId,
+              { kind: 'AI_SYSTEM', command: body.data },
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/models', async (request, reply) => {
+    if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+    const params = aiInventoryParams(request);
+    const key = idempotencyKey(request);
+    const body = aiModelCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiInventoryInvalid(request, reply);
+    return withAiInventoryFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.createAsset(
+              request.headers.authorization,
+              params.tenantId,
+              { kind: 'MODEL', command: body.data },
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/datasets', async (request, reply) => {
+    if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+    const params = aiInventoryParams(request);
+    const key = idempotencyKey(request);
+    const body = aiDatasetCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiInventoryInvalid(request, reply);
+    return withAiInventoryFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.createAsset(
+              request.headers.authorization,
+              params.tenantId,
+              { kind: 'DATASET', command: body.data },
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/prompts', async (request, reply) => {
+    if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+    const params = aiInventoryParams(request);
+    const key = idempotencyKey(request);
+    const body = aiPromptCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiInventoryInvalid(request, reply);
+    return withAiInventoryFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.createAsset(
+              request.headers.authorization,
+              params.tenantId,
+              { kind: 'PROMPT', command: body.data },
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/model-versions', async (request, reply) => {
+    if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+    const params = aiInventoryParams(request);
+    const key = idempotencyKey(request);
+    const body = aiModelVersionCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiInventoryInvalid(request, reply);
+    return withAiInventoryFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.createVersion(
+              request.headers.authorization,
+              params.tenantId,
+              { kind: 'MODEL_VERSION', command: body.data },
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/dataset-versions', async (request, reply) => {
+    if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+    const params = aiInventoryParams(request);
+    const key = idempotencyKey(request);
+    const body = aiDatasetVersionCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiInventoryInvalid(request, reply);
+    return withAiInventoryFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.createVersion(
+              request.headers.authorization,
+              params.tenantId,
+              { kind: 'DATASET_VERSION', command: body.data },
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/prompt-versions', async (request, reply) => {
+    if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+    const params = aiInventoryParams(request);
+    const key = idempotencyKey(request);
+    const body = aiPromptVersionCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiInventoryInvalid(request, reply);
+    return withAiInventoryFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.createVersion(
+              request.headers.authorization,
+              params.tenantId,
+              { kind: 'PROMPT_VERSION', command: body.data },
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  for (const [path, kind] of [
+    ['ai-systems', 'AI_SYSTEM'],
+    ['models', 'MODEL'],
+    ['datasets', 'DATASET'],
+    ['prompts', 'PROMPT'],
+  ] as const) {
+    app.get(`/api/v1/ai-governance/tenants/:tenantId/${path}/:assetId`, async (request, reply) => {
+      if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+      const params = aiInventoryParams(request);
+      if (!params.valid || params.assetId === undefined) return aiInventoryInvalid(request, reply);
+      return withAiInventoryFailure(request, reply, async () =>
+        aiInventoryMutationEnvelopeSchema.parse({
+          data: await aiInventoryService.readAsset(
+            request.headers.authorization,
+            params.tenantId,
+            kind,
+            params.assetId!,
+            metadata(request),
+          ),
+          meta: {
+            request_id: request.id,
+            correlation_id: request.correlationId,
+            idempotent_replay: false,
+          },
+        }),
+      );
+    });
+    app.patch(
+      `/api/v1/ai-governance/tenants/:tenantId/${path}/:assetId`,
+      async (request, reply) => {
+        if (!aiInventoryService) return aiInventoryUnavailable(request, reply);
+        const params = aiInventoryParams(request);
+        const key = idempotencyKey(request);
+        const body = aiInventoryUpdateSchema.safeParse(request.body);
+        if (!params.valid || params.assetId === undefined || key === null || !body.success)
+          return aiInventoryInvalid(request, reply);
+        return withAiInventoryFailure(request, reply, async () =>
+          aiInventoryMutation(
+            request,
+            await aiInventoryService.updateAsset(
+              request.headers.authorization,
+              params.tenantId,
+              kind,
+              params.assetId!,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   const customerRouteSchema = {
     security: [
