@@ -41,6 +41,7 @@ const configurationSchema = z.object({
   ACS_XCF_M1_MAX_ARTIFACT_BYTES: z.coerce.number().int().positive().optional(),
   ACS_XCF_M1_TRUSTED_KEYS_JSON: z.string().min(2).optional(),
   ACS_AIGOV_M0A_DATABASE_URL: z.url().optional(),
+  ACS_AIGOV_M0B_DATABASE_URL: z.url().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
 });
 
@@ -78,6 +79,7 @@ export interface PlatformConfiguration {
   readonly xcfM1MaximumArtifactBytes?: number;
   readonly xcfM1TrustedKeys?: readonly XcfM1TrustedKeyConfiguration[];
   readonly aiGovM0aDatabaseUrl?: string;
+  readonly aiGovM0bDatabaseUrl?: string;
   readonly webOrigin: string;
 }
 
@@ -287,6 +289,9 @@ export function loadConfiguration(
     ...(parsed.ACS_AIGOV_M0A_DATABASE_URL === undefined
       ? {}
       : { aiGovM0aDatabaseUrl: parsed.ACS_AIGOV_M0A_DATABASE_URL }),
+    ...(parsed.ACS_AIGOV_M0B_DATABASE_URL === undefined
+      ? {}
+      : { aiGovM0bDatabaseUrl: parsed.ACS_AIGOV_M0B_DATABASE_URL }),
     webOrigin: parsed.ACS_WEB_ORIGIN,
   };
 }

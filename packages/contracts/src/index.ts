@@ -15,5 +15,6 @@ export * from './usage-metering.js';
 export * from './multi-person-authorization.js';
 export * from './xcf-framework-registry.js';
 export * from './ai-inventory.js';
+export * from './ai-risk.js';
 export * from './evidence-chain-of-custody.js';
 export * from './cognitive-cyber-fusion-m0.js';
