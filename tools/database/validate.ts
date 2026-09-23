@@ -98,6 +98,15 @@ const xcfM1RollbackPath = resolve(
 );
 const xcfM1SeedPath = resolve('database/tests/fixtures/xcf_m1_framework_registry_seed.sql');
 const xcfM1TestPath = resolve('database/tests/rls/xcf_m1_framework_registry_isolation.sql');
+const aiGovM0aRolesPath = resolve('database/roles/aigov_m0a_ai_inventory_roles.sql');
+const aiGovM0aMigrationPath = resolve(
+  'database/migrations/20260912000000_aigov_m0a_ai_inventory.sql',
+);
+const aiGovM0aRollbackPath = resolve(
+  'database/rollbacks/20260912000000_aigov_m0a_ai_inventory.sql',
+);
+const aiGovM0aSeedPath = resolve('database/tests/fixtures/aigov_m0a_ai_inventory_seed.sql');
+const aiGovM0aTestPath = resolve('database/tests/rls/aigov_m0a_ai_inventory_isolation.sql');
 const customerRolesPath = resolve('database/roles/phase2_customer_registry_roles.sql');
 const customerMigrationPath = resolve(
   'database/migrations/20260818010000_phase2_customer_registry.sql',
@@ -237,6 +246,8 @@ const testRoles = [
   'acs_xcap011_fusion',
   'acs_xcf_m1_registry_login_test',
   'acs_xcf_m1_registry',
+  'acs_aigov_m0a_inventory_login_test',
+  'acs_aigov_m0a_inventory',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -252,6 +263,11 @@ async function dropTestRoles(): Promise<void> {
 await client.connect();
 try {
   await dropTestRoles();
+  const aiGovM0aExists = await client.query(
+    "SELECT to_regclass('ai_governance.ai_systems') AS relation",
+  );
+  if (aiGovM0aExists.rows[0]?.relation !== null)
+    await client.query(await readFile(aiGovM0aRollbackPath, 'utf8'));
   const xcfM1Exists = await client.query(
     "SELECT to_regclass('xcf.framework_releases') AS relation",
   );
@@ -329,6 +345,8 @@ try {
   await client.query(await readFile(xcap011MigrationPath, 'utf8'));
   await client.query(await readFile(xcfM1RolesPath, 'utf8'));
   await client.query(await readFile(xcfM1MigrationPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aRolesPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aMigrationPath, 'utf8'));
   await client.query(await readFile(customerRolesPath, 'utf8'));
   await client.query(await readFile(customerMigrationPath, 'utf8'));
   await client.query(await readFile(leadRolesPath, 'utf8'));
@@ -385,8 +403,11 @@ try {
   await client.query(await readFile(eventTestPath, 'utf8'));
   await client.query(await readFile(mpaTestPath, 'utf8'));
   await client.query(await readFile(xcap005TestPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aSeedPath, 'utf8'));
   await client.query(await readFile(xcap011TestPath, 'utf8'));
   await client.query(await readFile(xcfM1TestPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aTestPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aRollbackPath, 'utf8'));
   await client.query(await readFile(xcfM1RollbackPath, 'utf8'));
   await client.query(await readFile(xcap011RollbackPath, 'utf8'));
   await client.query(await readFile(platformContextExpiryRollbackPath, 'utf8'));
@@ -544,6 +565,10 @@ try {
   await client.query(await readFile(xcfM1MigrationPath, 'utf8'));
   await client.query(await readFile(xcfM1SeedPath, 'utf8'));
   await client.query(await readFile(xcfM1TestPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aRolesPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aMigrationPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aSeedPath, 'utf8'));
+  await client.query(await readFile(aiGovM0aTestPath, 'utf8'));
   const durableDenials = await client.query(
     "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
   );
@@ -593,7 +618,7 @@ try {
     GRANT acs_platform_mpa TO acs_platform_mpa_login_test;
   `);
   process.stdout.write(
-    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', machine_trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', mpa: 'VERIFIED', mpa_rls: 'VERIFIED', mpa_force_rls: 'VERIFIED', mpa_least_privilege: 'VERIFIED', xcap005_evidence: 'VERIFIED', xcap005_rls: 'VERIFIED', xcap005_force_rls: 'VERIFIED', xcap005_rollback: 'VERIFIED', xcap011_fusion: 'VERIFIED', xcap011_rls: 'VERIFIED', xcap011_force_rls: 'VERIFIED', xcap011_rollback: 'VERIFIED', xcf_m1_framework_registry: 'VERIFIED', xcf_m1_rls: 'VERIFIED', xcf_m1_force_rls: 'VERIFIED', xcf_m1_rollback: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED', usage_metering_rls: 'VERIFIED' })}\n`,
+    `${JSON.stringify({ component: 'FOUNDATION_PLATFORM_COMMERCIAL_REGISTRIES_AND_CONTRACT', migration: 'VERIFIED', trusted_context: 'VERIFIED', machine_trusted_context: 'VERIFIED', rls: 'VERIFIED', tenant_isolation: 'VERIFIED', context_spoofing: 'VERIFIED', permission_denial: 'VERIFIED', durable_denial_audit: 'VERIFIED', audit_privileges: 'VERIFIED', audit_append_only_trigger: 'VERIFIED', event_outbox_lifecycle: 'VERIFIED', event_concurrency_claim: 'VERIFIED', event_retry_dlq_replay: 'VERIFIED', consumer_idempotency: 'VERIFIED', event_retention: 'VERIFIED', mpa: 'VERIFIED', mpa_rls: 'VERIFIED', mpa_force_rls: 'VERIFIED', mpa_least_privilege: 'VERIFIED', xcap005_evidence: 'VERIFIED', xcap005_rls: 'VERIFIED', xcap005_force_rls: 'VERIFIED', xcap005_rollback: 'VERIFIED', xcap011_fusion: 'VERIFIED', xcap011_rls: 'VERIFIED', xcap011_force_rls: 'VERIFIED', xcap011_rollback: 'VERIFIED', xcf_m1_framework_registry: 'VERIFIED', xcf_m1_rls: 'VERIFIED', xcf_m1_force_rls: 'VERIFIED', xcf_m1_rollback: 'VERIFIED', aigov_m0a_ai_inventory: 'VERIFIED', aigov_m0a_rls: 'VERIFIED', aigov_m0a_force_rls: 'VERIFIED', aigov_m0a_rollback: 'VERIFIED', customer_registry_rls: 'VERIFIED', lead_registry_rls: 'VERIFIED', plan_catalog_rls: 'VERIFIED', partner_registry_rls: 'VERIFIED', opportunity_registry_rls: 'VERIFIED', proposal_rls: 'VERIFIED', contract_rls: 'VERIFIED', subscription_rls: 'VERIFIED', entitlement_rls: 'VERIFIED', usage_metering_rls: 'VERIFIED' })}\n`,
   );
 } finally {
   await client.end();
