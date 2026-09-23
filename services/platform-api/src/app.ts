@@ -96,6 +96,13 @@ import {
   aiPromptCreateSchema,
   aiPromptVersionCreateSchema,
   aiSystemCreateSchema,
+  aiRiskCreateSchema,
+  aiRiskUpdateSchema,
+  aiRiskAssessmentSchema,
+  aiRiskTreatmentSchema,
+  aiRiskResidualReviewSchema,
+  aiRiskMonitoringSchema,
+  aiRiskProtectedDecisionSchema,
 } from '@acs/contracts';
 import { FOUNDATION_COMPONENT } from '@acs/foundation';
 import {
@@ -145,6 +152,7 @@ import { PostgresEvidenceChainOfCustodyRepository } from './postgres-evidence-ch
 import { PostgresCognitiveCyberFusionM0Repository } from './postgres-cognitive-cyber-fusion-m0.js';
 import { PostgresXcfFrameworkRegistryRepository } from './postgres-xcf-framework-registry.js';
 import { PostgresAiInventoryRepository } from './postgres-ai-inventory.js';
+import { PostgresAiRiskRepository } from './postgres-ai-risk.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -214,6 +222,7 @@ import {
 } from './cognitive-cyber-fusion-m0.js';
 import { XcfFrameworkRegistryService, XcfM1Failure } from './xcf-framework-registry.js';
 import { AiInventoryFailure, AiInventoryService } from './ai-inventory.js';
+import { AiRiskFailure, AiRiskService } from './ai-risk.js';
 import {
   ConfiguredXcfTrustedKeyResolver,
   FetchXcfArtifactAcquisition,
@@ -250,6 +259,7 @@ export async function buildApp(
     readonly cognitiveCyberFusionM0Service?: CognitiveCyberFusionM0Service;
     readonly xcfFrameworkRegistryService?: XcfFrameworkRegistryService;
     readonly aiInventoryService?: AiInventoryService;
+    readonly aiRiskService?: AiRiskService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -301,6 +311,8 @@ export async function buildApp(
   let xcfFrameworkRegistryService = options.xcfFrameworkRegistryService;
   let aiInventoryRepository: PostgresAiInventoryRepository | undefined;
   let aiInventoryService = options.aiInventoryService;
+  let aiRiskRepository: PostgresAiRiskRepository | undefined;
+  let aiRiskService = options.aiRiskService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -392,6 +404,17 @@ export async function buildApp(
         postgresRepository,
         postgresRepository,
         aiInventoryRepository,
+        securityAuditRepository,
+      );
+    }
+    if (configuration.aiGovM0bDatabaseUrl !== undefined) {
+      aiRiskRepository = new PostgresAiRiskRepository(configuration.aiGovM0bDatabaseUrl);
+      aiRiskService = new AiRiskService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        postgresRepository,
+        aiRiskRepository,
         securityAuditRepository,
       );
     }
@@ -597,6 +620,7 @@ export async function buildApp(
         fusionRepository?.close(),
         xcfRepository?.close(),
         aiInventoryRepository?.close(),
+        aiRiskRepository?.close(),
       ]);
     });
   }
@@ -2308,6 +2332,247 @@ export async function buildApp(
       },
     );
   }
+
+  const aiRiskError = (error: AiRiskFailure, request: FastifyRequest, reply: FastifyReply) => {
+    const status =
+      error.code === 'UNAUTHENTICATED'
+        ? 401
+        : error.code === 'FORBIDDEN' || error.code === 'NOT_AUTHORIZED_PENDING_POLICY'
+          ? 403
+          : error.code === 'NOT_FOUND'
+            ? 404
+            : error.code === 'STALE_VERSION' ||
+                error.code === 'ALREADY_EXISTS' ||
+                error.code === 'IDEMPOTENCY_CONFLICT' ||
+                error.code === 'INVALID_RISK_STATE'
+              ? 409
+              : 422;
+    return reply.status(status).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: error.code,
+          message: error.message,
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  };
+  const aiRiskUnavailable = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(503).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'AIGOV_M0B_NOT_CONFIGURED',
+          message: 'AIGOV M0B is not configured.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const aiRiskInvalid = (request: FastifyRequest, reply: FastifyReply) =>
+    reply.status(400).send(
+      errorEnvelopeSchema.parse({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'A valid tenant-bound AI risk request is required.',
+          request_id: request.id,
+          correlation_id: request.correlationId,
+        },
+      }),
+    );
+  const withAiRiskFailure = async <T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    operation: () => Promise<T>,
+  ) => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof AiRiskFailure) return aiRiskError(error, request, reply);
+      throw error;
+    }
+  };
+  const aiRiskEnvelope = (
+    request: FastifyRequest,
+    receipt: { data: unknown; replay: boolean },
+  ) => ({
+    data: receipt.data,
+    meta: {
+      request_id: request.id,
+      correlation_id: request.correlationId,
+      idempotent_replay: receipt.replay,
+    },
+  });
+  const aiRiskParams = (request: FastifyRequest) => {
+    const params = request.params as { tenantId: string; riskId?: string };
+    return {
+      tenantId: params.tenantId,
+      riskId: params.riskId,
+      valid:
+        uuidSchema.safeParse(params.tenantId).success &&
+        (params.riskId === undefined || uuidSchema.safeParse(params.riskId).success),
+    };
+  };
+
+  app.post('/api/v1/ai-governance/tenants/:tenantId/risks', async (request, reply) => {
+    if (!aiRiskService) return aiRiskUnavailable(request, reply);
+    const params = aiRiskParams(request);
+    const key = idempotencyKey(request);
+    const body = aiRiskCreateSchema.safeParse(request.body);
+    if (!params.valid || key === null || !body.success) return aiRiskInvalid(request, reply);
+    return withAiRiskFailure(request, reply, async () =>
+      reply
+        .status(201)
+        .send(
+          aiRiskEnvelope(
+            request,
+            await aiRiskService.create(
+              request.headers.authorization,
+              params.tenantId,
+              body.data,
+              key,
+              metadata(request),
+            ),
+          ),
+        ),
+    );
+  });
+
+  app.get('/api/v1/ai-governance/tenants/:tenantId/risks/:riskId', async (request, reply) => {
+    if (!aiRiskService) return aiRiskUnavailable(request, reply);
+    const params = aiRiskParams(request);
+    if (!params.valid || !params.riskId) return aiRiskInvalid(request, reply);
+    return withAiRiskFailure(request, reply, async () =>
+      aiRiskEnvelope(request, {
+        data: await aiRiskService.read(
+          request.headers.authorization,
+          params.tenantId,
+          params.riskId!,
+          metadata(request),
+        ),
+        replay: false,
+      }),
+    );
+  });
+
+  app.patch('/api/v1/ai-governance/tenants/:tenantId/risks/:riskId', async (request, reply) => {
+    if (!aiRiskService) return aiRiskUnavailable(request, reply);
+    const params = aiRiskParams(request);
+    const key = idempotencyKey(request);
+    const body = aiRiskUpdateSchema.safeParse(request.body);
+    if (!params.valid || !params.riskId || key === null || !body.success)
+      return aiRiskInvalid(request, reply);
+    return withAiRiskFailure(request, reply, async () =>
+      aiRiskEnvelope(
+        request,
+        await aiRiskService.update(
+          request.headers.authorization,
+          params.tenantId,
+          params.riskId!,
+          body.data,
+          key,
+          metadata(request),
+        ),
+      ),
+    );
+  });
+
+  const aiRiskAction = <T>(
+    path: string,
+    schema: ZodType<T>,
+    execute: (
+      request: FastifyRequest,
+      tenantId: string,
+      riskId: string,
+      body: T,
+      key: string,
+    ) => Promise<{ data: unknown; replay: boolean }>,
+  ) => {
+    app.post(
+      `/api/v1/ai-governance/tenants/:tenantId/risks/:riskId/${path}`,
+      async (request, reply) => {
+        if (!aiRiskService) return aiRiskUnavailable(request, reply);
+        const params = aiRiskParams(request);
+        const key = idempotencyKey(request);
+        const body = schema.safeParse(request.body);
+        if (!params.valid || !params.riskId || key === null || !body.success)
+          return aiRiskInvalid(request, reply);
+        return withAiRiskFailure(request, reply, async () =>
+          reply
+            .status(201)
+            .send(
+              aiRiskEnvelope(
+                request,
+                await execute(request, params.tenantId, params.riskId!, body.data, key),
+              ),
+            ),
+        );
+      },
+    );
+  };
+
+  aiRiskAction('assessments', aiRiskAssessmentSchema, (request, tenantId, riskId, body, key) =>
+    aiRiskService!.assess(
+      request.headers.authorization,
+      tenantId,
+      riskId,
+      body,
+      key,
+      metadata(request),
+    ),
+  );
+  aiRiskAction('treatments', aiRiskTreatmentSchema, (request, tenantId, riskId, body, key) =>
+    aiRiskService!.treat(
+      request.headers.authorization,
+      tenantId,
+      riskId,
+      body,
+      key,
+      metadata(request),
+    ),
+  );
+  aiRiskAction(
+    'residual-reviews',
+    aiRiskResidualReviewSchema,
+    (request, tenantId, riskId, body, key) =>
+      aiRiskService!.review(
+        request.headers.authorization,
+        tenantId,
+        riskId,
+        body,
+        key,
+        metadata(request),
+      ),
+  );
+  aiRiskAction('monitoring', aiRiskMonitoringSchema, (request, tenantId, riskId, body, key) =>
+    aiRiskService!.monitor(
+      request.headers.authorization,
+      tenantId,
+      riskId,
+      body,
+      key,
+      metadata(request),
+    ),
+  );
+
+  app.post(
+    '/api/v1/ai-governance/tenants/:tenantId/risks/:riskId/decision',
+    async (request, reply) => {
+      if (!aiRiskService) return aiRiskUnavailable(request, reply);
+      const params = aiRiskParams(request);
+      const key = idempotencyKey(request);
+      const body = aiRiskProtectedDecisionSchema.safeParse(request.body);
+      if (!params.valid || !params.riskId || key === null || !body.success)
+        return aiRiskInvalid(request, reply);
+      return withAiRiskFailure(request, reply, async () =>
+        aiRiskService.decideProtected(
+          request.headers.authorization,
+          params.tenantId,
+          metadata(request),
+        ),
+      );
+    },
+  );
 
   const customerRouteSchema = {
     security: [
