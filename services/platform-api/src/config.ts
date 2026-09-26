@@ -31,6 +31,7 @@ const configurationSchema = z.object({
   ACS_ENTITLEMENT_DATABASE_URL: z.url().optional(),
   ACS_USAGE_METERING_DATABASE_URL: z.url().optional(),
   ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL: z.url().optional(),
+  ACS_MACHINE_AUTH_DATABASE_URL: z.url().optional(),
   ACS_MPA_DATABASE_URL: z.url().optional(),
   ACS_XCAP005_EVIDENCE_DATABASE_URL: z.url().optional(),
   ACS_XCAP005_MAX_EVIDENCE_BYTES: z.coerce.number().int().positive().optional(),
@@ -69,6 +70,7 @@ export interface PlatformConfiguration {
   readonly entitlementDatabaseUrl?: string;
   readonly usageMeteringDatabaseUrl?: string;
   readonly machineContextIssuerDatabaseUrl?: string;
+  readonly machineAuthDatabaseUrl?: string;
   readonly mpaDatabaseUrl?: string;
   readonly xcap005EvidenceDatabaseUrl?: string;
   readonly xcap005MaximumEvidenceBytes?: number;
@@ -261,6 +263,9 @@ export function loadConfiguration(
     ...(parsed.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL === undefined
       ? {}
       : { machineContextIssuerDatabaseUrl: parsed.ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL }),
+    ...(parsed.ACS_MACHINE_AUTH_DATABASE_URL === undefined
+      ? {}
+      : { machineAuthDatabaseUrl: parsed.ACS_MACHINE_AUTH_DATABASE_URL }),
     ...(parsed.ACS_MPA_DATABASE_URL === undefined
       ? {}
       : { mpaDatabaseUrl: parsed.ACS_MPA_DATABASE_URL }),

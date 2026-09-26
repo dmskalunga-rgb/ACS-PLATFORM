@@ -153,6 +153,7 @@ import { PostgresCognitiveCyberFusionM0Repository } from './postgres-cognitive-c
 import { PostgresXcfFrameworkRegistryRepository } from './postgres-xcf-framework-registry.js';
 import { PostgresAiInventoryRepository } from './postgres-ai-inventory.js';
 import { PostgresAiRiskRepository } from './postgres-ai-risk.js';
+import { PostgresMachineAuthenticationRepository } from './postgres-machine-service-auth.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -223,6 +224,8 @@ import {
 import { XcfFrameworkRegistryService, XcfM1Failure } from './xcf-framework-registry.js';
 import { AiInventoryFailure, AiInventoryService } from './ai-inventory.js';
 import { AiRiskFailure, AiRiskService } from './ai-risk.js';
+import { MachineAuthenticationService } from './machine-service-auth.js';
+import { registerMachineServiceAuthRoutes } from './machine-service-auth-http.js';
 import {
   ConfiguredXcfTrustedKeyResolver,
   FetchXcfArtifactAcquisition,
@@ -260,6 +263,7 @@ export async function buildApp(
     readonly xcfFrameworkRegistryService?: XcfFrameworkRegistryService;
     readonly aiInventoryService?: AiInventoryService;
     readonly aiRiskService?: AiRiskService;
+    readonly machineAuthenticationService?: MachineAuthenticationService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -313,6 +317,8 @@ export async function buildApp(
   let aiInventoryService = options.aiInventoryService;
   let aiRiskRepository: PostgresAiRiskRepository | undefined;
   let aiRiskService = options.aiRiskService;
+  let machineAuthenticationRepository: PostgresMachineAuthenticationRepository | undefined;
+  let machineAuthenticationService = options.machineAuthenticationService;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -351,6 +357,22 @@ export async function buildApp(
       identity,
       postgresRepository,
     );
+    if (
+      machineAuthenticationService === undefined &&
+      configuration.machineAuthDatabaseUrl !== undefined &&
+      configuration.machineContextIssuerDatabaseUrl !== undefined
+    ) {
+      machineAuthenticationRepository = new PostgresMachineAuthenticationRepository(
+        configuration.machineAuthDatabaseUrl,
+        configuration.machineContextIssuerDatabaseUrl,
+      );
+      machineAuthenticationService = new MachineAuthenticationService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        machineAuthenticationRepository,
+      );
+    }
     if (configuration.tenantAdminDatabaseUrl !== undefined) {
       tenantAdminRepository = new PostgresTenantAdminRepository(
         configuration.tenantAdminDatabaseUrl,
@@ -621,6 +643,7 @@ export async function buildApp(
         xcfRepository?.close(),
         aiInventoryRepository?.close(),
         aiRiskRepository?.close(),
+        machineAuthenticationRepository?.close(),
       ]);
     });
   }
@@ -4830,6 +4853,11 @@ export async function buildApp(
       if (error instanceof UsageMeteringFailure) return usageFailure(error, request, reply);
       throw error;
     }
+  });
+
+  app.register((instance, _options, done) => {
+    registerMachineServiceAuthRoutes(instance, machineAuthenticationService);
+    done();
   });
 
   app.setNotFoundHandler(async (request, reply) => {
