@@ -205,6 +205,15 @@ const machineAuthRollbackPath = resolve(
 const machineAuthTestPath = resolve(
   'database/tests/rls/platform_machine_service_authentication_isolation.sql',
 );
+const evidenceReferenceMigrationPath = resolve(
+  'database/migrations/20260915000000_xcap005_evidence_reference_validation.sql',
+);
+const evidenceReferenceRollbackPath = resolve(
+  'database/rollbacks/20260915000000_xcap005_evidence_reference_validation.sql',
+);
+const evidenceReferenceTestPath = resolve(
+  'database/tests/rls/xcap005_evidence_reference_validation_isolation.sql',
+);
 const usageMeteringRolesPath = resolve('database/roles/phase2_usage_metering_roles.sql');
 const usageMeteringMigrationPath = resolve(
   'database/migrations/20260829000000_phase2_usage_metering.sql',
@@ -285,6 +294,11 @@ async function dropTestRoles(): Promise<void> {
 await client.connect();
 try {
   await dropTestRoles();
+  const evidenceReferenceExists = await client.query(
+    "SELECT to_regprocedure('cyberdefense.validate_evidence_reference(uuid,uuid,text,text)') AS routine",
+  );
+  if (evidenceReferenceExists.rows[0]?.routine !== null)
+    await client.query(await readFile(evidenceReferenceRollbackPath, 'utf8'));
   const machineAuthExists = await client.query(
     "SELECT to_regclass('platform.machine_credentials') AS relation",
   );
@@ -616,6 +630,16 @@ try {
   await client.query(await readFile(aiGovM0bMigrationPath, 'utf8'));
   await client.query(await readFile(aiGovM0bTestPath, 'utf8'));
   await client.query(await readFile(machineAuthMigrationPath, 'utf8'));
+  await client.query(await readFile(evidenceReferenceMigrationPath, 'utf8'));
+  await client.query(await readFile(evidenceReferenceTestPath, 'utf8'));
+  await client.query(await readFile(evidenceReferenceRollbackPath, 'utf8'));
+  const evidenceReferenceAfterRollback = await client.query(
+    "SELECT to_regprocedure('cyberdefense.validate_evidence_reference(uuid,uuid,text,text)') AS routine",
+  );
+  if (evidenceReferenceAfterRollback.rows[0]?.routine !== null)
+    throw new Error('Evidence reference validator rollback left its routine in place.');
+  await client.query(await readFile(evidenceReferenceMigrationPath, 'utf8'));
+  await client.query(await readFile(evidenceReferenceTestPath, 'utf8'));
   const durableDenials = await client.query(
     "SELECT count(*)::integer AS count FROM platform.security_audit_logs WHERE reason_code = 'TENANT_CONTEXT_DENIED'",
   );

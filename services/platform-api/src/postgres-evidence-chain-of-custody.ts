@@ -8,6 +8,7 @@ import type {
   Xcap005FusionEvidenceProjection,
 } from '@acs/contracts';
 import { MultiPersonAuthorizationFailure } from './multi-person-authorization.js';
+import type { EvidenceReferenceRepository } from './evidence-reference-validator.js';
 import {
   withMultiPersonAuthorizationConsumption,
   type PostgresMpaTransaction,
@@ -96,7 +97,9 @@ export type EvidenceTransactionPhase =
   | 'after-idempotency'
   | 'before-commit';
 
-export class PostgresEvidenceChainOfCustodyRepository implements EvidenceRepository {
+export class PostgresEvidenceChainOfCustodyRepository
+  implements EvidenceRepository, EvidenceReferenceRepository
+{
   private readonly pool: pg.Pool;
   constructor(
     databaseUrl: string,
@@ -106,6 +109,19 @@ export class PostgresEvidenceChainOfCustodyRepository implements EvidenceReposit
   }
   async close() {
     await this.pool.end();
+  }
+  async validateReference(input: Parameters<EvidenceReferenceRepository['validateReference']>[0]) {
+    return this.transaction(
+      input.contextToken,
+      'cyberdefense.evidence.reference.validate',
+      async (client) => {
+        const result = await client.query<{ valid: boolean }>(
+          'SELECT cyberdefense.validate_evidence_reference($1,$2,$3,$4) AS valid',
+          [input.tenantId, input.evidenceId, input.requestId, input.correlationId],
+        );
+        return result.rows[0]?.valid === true;
+      },
+    );
   }
 
   async resolveFusionProjection(
