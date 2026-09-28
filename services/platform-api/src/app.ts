@@ -154,6 +154,19 @@ import { PostgresXcfFrameworkRegistryRepository } from './postgres-xcf-framework
 import { PostgresAiInventoryRepository } from './postgres-ai-inventory.js';
 import { PostgresAiRiskRepository } from './postgres-ai-risk.js';
 import { PostgresMachineAuthenticationRepository } from './postgres-machine-service-auth.js';
+import { PostgresHumanAttestation } from './postgres-human-attestation.js';
+import {
+  PostgresPrincipalClassificationRepository,
+  PrincipalClassificationService,
+} from './principal-classification.js';
+import { PostgresHumanGenesisRepository } from './postgres-human-genesis.js';
+import {
+  HumanGenesisAuthorizationVerifier,
+  HumanGenesisService,
+} from './human-governance-genesis.js';
+import { HumanEvidenceReferenceAdapter } from './human-evidence-reference.js';
+import { EvidenceReferenceValidator } from './evidence-reference-validator.js';
+import { registerHumanPrincipalRoutes } from './human-principal-http.js';
 import { CustomerRegistryFailure, CustomerRegistryService } from './customer-registry.js';
 import { LeadRegistryFailure, LeadRegistryService } from './lead-registry.js';
 import { PlanCatalogFailure, PlanCatalogService } from './plan-catalog.js';
@@ -264,6 +277,8 @@ export async function buildApp(
     readonly aiInventoryService?: AiInventoryService;
     readonly aiRiskService?: AiRiskService;
     readonly machineAuthenticationService?: MachineAuthenticationService;
+    readonly humanGenesisService?: HumanGenesisService;
+    readonly principalClassificationService?: PrincipalClassificationService;
   } = {},
 ) {
   const logger = createStructuredLogger({
@@ -319,6 +334,11 @@ export async function buildApp(
   let aiRiskService = options.aiRiskService;
   let machineAuthenticationRepository: PostgresMachineAuthenticationRepository | undefined;
   let machineAuthenticationService = options.machineAuthenticationService;
+  let humanGenesisService = options.humanGenesisService;
+  let principalClassificationService = options.principalClassificationService;
+  let humanGenesisRepository: PostgresHumanGenesisRepository | undefined;
+  let principalClassificationRepository: PostgresPrincipalClassificationRepository | undefined;
+  let humanAttestationRepository: PostgresHumanAttestation | undefined;
   let identityStatus: () => string = () =>
     configuration.identityMode === 'not-configured' ? 'not-configured' : 'externally-managed';
   if (
@@ -387,13 +407,15 @@ export async function buildApp(
     }
     if (configuration.mpaDatabaseUrl !== undefined) {
       mpaRepository = new PostgresMultiPersonAuthorizationRepository(configuration.mpaDatabaseUrl);
+      if (configuration.humanClassificationDatabaseUrl !== undefined)
+        humanAttestationRepository = new PostgresHumanAttestation(configuration.mpaDatabaseUrl);
       multiPersonAuthorizationService = new MultiPersonAuthorizationService(
         identity,
         new RepositoryAuthorizationPort(postgresRepository),
         postgresRepository,
         postgresRepository,
         mpaRepository,
-        new NotConfiguredPhysicalHumanAttestation(),
+        humanAttestationRepository ?? new NotConfiguredPhysicalHumanAttestation(),
         securityAuditRepository,
       );
     }
@@ -502,6 +524,47 @@ export async function buildApp(
           configuration.xcap011ReceiptLifetimeSeconds,
         );
       }
+    }
+    if (
+      configuration.humanClassificationDatabaseUrl !== undefined &&
+      humanGenesisService === undefined &&
+      principalClassificationService === undefined
+    ) {
+      if (
+        machineAuthenticationService === undefined ||
+        evidenceRepository === undefined ||
+        configuration.humanEvidenceCredentialId === undefined ||
+        configuration.humanEvidenceCredential === undefined
+      )
+        throw new Error('Human principal classification dependencies are not configured.');
+      const evidence = new HumanEvidenceReferenceAdapter(
+        new EvidenceReferenceValidator(machineAuthenticationService, evidenceRepository),
+        configuration.humanEvidenceCredentialId,
+        configuration.humanEvidenceCredential,
+      );
+      humanGenesisRepository = new PostgresHumanGenesisRepository(
+        configuration.humanClassificationDatabaseUrl,
+      );
+      principalClassificationRepository = new PostgresPrincipalClassificationRepository(
+        configuration.humanClassificationDatabaseUrl,
+      );
+      humanGenesisService = new HumanGenesisService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        new HumanGenesisAuthorizationVerifier(humanGenesisRepository),
+        evidence,
+        humanGenesisRepository,
+        securityAuditRepository,
+      );
+      principalClassificationService = new PrincipalClassificationService(
+        identity,
+        new RepositoryAuthorizationPort(postgresRepository),
+        postgresRepository,
+        principalClassificationRepository,
+        evidence,
+        securityAuditRepository,
+      );
     }
     if (configuration.customerDatabaseUrl !== undefined) {
       customerRepository = new PostgresCustomerRepository(configuration.customerDatabaseUrl);
@@ -644,6 +707,9 @@ export async function buildApp(
         aiInventoryRepository?.close(),
         aiRiskRepository?.close(),
         machineAuthenticationRepository?.close(),
+        humanGenesisRepository?.close(),
+        principalClassificationRepository?.close(),
+        humanAttestationRepository?.close(),
       ]);
     });
   }
@@ -4857,6 +4923,7 @@ export async function buildApp(
 
   app.register((instance, _options, done) => {
     registerMachineServiceAuthRoutes(instance, machineAuthenticationService);
+    registerHumanPrincipalRoutes(instance, humanGenesisService, principalClassificationService);
     done();
   });
 

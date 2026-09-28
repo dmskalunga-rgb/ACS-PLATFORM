@@ -33,6 +33,12 @@ const configurationSchema = z.object({
   ACS_MACHINE_CONTEXT_ISSUER_DATABASE_URL: z.url().optional(),
   ACS_MACHINE_AUTH_DATABASE_URL: z.url().optional(),
   ACS_MPA_DATABASE_URL: z.url().optional(),
+  ACS_HUMAN_CLASSIFICATION_DATABASE_URL: z.url().optional(),
+  ACS_HUMAN_EVIDENCE_CREDENTIAL_ID: z.uuid().optional(),
+  ACS_HUMAN_EVIDENCE_CREDENTIAL: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/)
+    .optional(),
   ACS_XCAP005_EVIDENCE_DATABASE_URL: z.url().optional(),
   ACS_XCAP005_MAX_EVIDENCE_BYTES: z.coerce.number().int().positive().optional(),
   ACS_XCAP011_DATABASE_URL: z.url().optional(),
@@ -72,6 +78,9 @@ export interface PlatformConfiguration {
   readonly machineContextIssuerDatabaseUrl?: string;
   readonly machineAuthDatabaseUrl?: string;
   readonly mpaDatabaseUrl?: string;
+  readonly humanClassificationDatabaseUrl?: string;
+  readonly humanEvidenceCredentialId?: string;
+  readonly humanEvidenceCredential?: string;
   readonly xcap005EvidenceDatabaseUrl?: string;
   readonly xcap005MaximumEvidenceBytes?: number;
   readonly xcap011DatabaseUrl?: string;
@@ -207,6 +216,16 @@ export function loadConfiguration(
       'XCAP-005 evidence runtime requires both its dedicated database URL and maximum evidence size.',
     );
   }
+  const humanBindings = [
+    parsed.ACS_HUMAN_CLASSIFICATION_DATABASE_URL,
+    parsed.ACS_HUMAN_EVIDENCE_CREDENTIAL_ID,
+    parsed.ACS_HUMAN_EVIDENCE_CREDENTIAL,
+  ];
+  if (
+    humanBindings.some((value) => value !== undefined) &&
+    humanBindings.some((value) => value === undefined)
+  )
+    throw new Error('Human principal classification requires all dedicated runtime bindings.');
   return {
     ...(parsed.DATABASE_URL === undefined ? {} : { databaseUrl: parsed.DATABASE_URL }),
     environment: parsed.ACS_ENV,
@@ -269,6 +288,15 @@ export function loadConfiguration(
     ...(parsed.ACS_MPA_DATABASE_URL === undefined
       ? {}
       : { mpaDatabaseUrl: parsed.ACS_MPA_DATABASE_URL }),
+    ...(parsed.ACS_HUMAN_CLASSIFICATION_DATABASE_URL === undefined
+      ? {}
+      : { humanClassificationDatabaseUrl: parsed.ACS_HUMAN_CLASSIFICATION_DATABASE_URL }),
+    ...(parsed.ACS_HUMAN_EVIDENCE_CREDENTIAL_ID === undefined
+      ? {}
+      : { humanEvidenceCredentialId: parsed.ACS_HUMAN_EVIDENCE_CREDENTIAL_ID }),
+    ...(parsed.ACS_HUMAN_EVIDENCE_CREDENTIAL === undefined
+      ? {}
+      : { humanEvidenceCredential: parsed.ACS_HUMAN_EVIDENCE_CREDENTIAL }),
     ...(parsed.ACS_XCAP005_EVIDENCE_DATABASE_URL === undefined
       ? {}
       : { xcap005EvidenceDatabaseUrl: parsed.ACS_XCAP005_EVIDENCE_DATABASE_URL }),

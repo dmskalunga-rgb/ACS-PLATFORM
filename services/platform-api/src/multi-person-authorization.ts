@@ -109,12 +109,27 @@ export type PhysicalHumanAttestationResult =
 export interface PhysicalHumanIndependenceAttestationPort {
   verify(input: {
     readonly reference: string;
+    readonly contextToken: string;
     readonly tenantId: string;
+    readonly authorizationId: string;
+    readonly operation: ProtectedOperation;
     readonly policyId: MultiPersonAuthorizationPolicyId;
+    readonly policyVersion: string;
     readonly requesterUserId: string;
     readonly approverUserId: string;
+    readonly approvalRequestKey: string;
     readonly existingApproverUserIds: readonly string[];
   }): Promise<PhysicalHumanAttestationResult>;
+  issue?(input: {
+    readonly contextToken: string;
+    readonly tenantId: string;
+    readonly actorUserId: string;
+    readonly authorizationId: string;
+    readonly approvalRequestKey: string;
+    readonly expectedVersion: number;
+    readonly requestId: string;
+    readonly correlationId: string;
+  }): Promise<{ readonly reference: string; readonly expiresAt: string } | null>;
 }
 
 export class NotConfiguredPhysicalHumanAttestation implements PhysicalHumanIndependenceAttestationPort {
@@ -306,12 +321,24 @@ export class MultiPersonAuthorizationService {
         'Duplicate approval is prohibited.',
       );
     }
+    const attestationContext = await this.contexts.issueContext(
+      actor.subject,
+      tenantId,
+      'platform.mpa.approve',
+    );
+    if (attestationContext === null)
+      return this.deny(actor.subject, tenantId, 'platform.mpa.approve', metadata);
     const verified = await this.attestation.verify({
       reference: attestationReference,
+      contextToken: attestationContext.contextToken,
       tenantId,
+      authorizationId,
+      operation: current.operation,
       policyId: current.policyId,
+      policyVersion: current.policyVersion,
       requesterUserId: current.requesterUserId,
       approverUserId: actor.userId,
+      approvalRequestKey: idempotencyKey,
       existingApproverUserIds: existing,
     });
     if (!verified.verified) {
@@ -346,6 +373,65 @@ export class MultiPersonAuthorizationService {
       ),
       metadata,
     );
+  }
+
+  async attest(
+    header: string | undefined,
+    tenantId: string,
+    authorizationId: string,
+    expectedVersion: number,
+    approvalRequestKey: string,
+    metadata: MultiPersonAuthorizationMetadata,
+  ) {
+    const actor = await this.actor(header, tenantId, 'platform.mpa.approve', metadata);
+    const preparation = await this.repository.approvalPreparation({
+      contextToken: actor.contextToken,
+      actorUserId: actor.userId,
+      actorMembershipId: actor.membershipId,
+      tenantId,
+      authorizationId,
+      requestId: metadata.requestId,
+      correlationId: metadata.correlationId,
+    });
+    const current = this.required(preparation.authorization);
+    if (
+      current.version !== expectedVersion ||
+      preparation.binding === null ||
+      preparation.existingApproverUserIds.includes(actor.userId) ||
+      current.requesterUserId === actor.userId
+    ) {
+      throw new MultiPersonAuthorizationFailure('FORBIDDEN', 'Attestation is not available.');
+    }
+    if (this.attestation.issue === undefined) {
+      throw new MultiPersonAuthorizationFailure(
+        'ATTESTATION_DENIED',
+        'Attestation is not configured.',
+      );
+    }
+    const context = await this.contexts.issueContext(
+      actor.subject,
+      tenantId,
+      'platform.mpa.approve',
+    );
+    if (context === null)
+      return this.deny(actor.subject, tenantId, 'platform.mpa.approve', metadata);
+    const issued = await this.attestation.issue({
+      contextToken: context.contextToken,
+      tenantId,
+      actorUserId: actor.userId,
+      authorizationId,
+      approvalRequestKey,
+      expectedVersion,
+      requestId: metadata.requestId,
+      correlationId: metadata.correlationId,
+    });
+    if (issued === null) {
+      throw new MultiPersonAuthorizationFailure('ATTESTATION_DENIED', 'Attestation was denied.');
+    }
+    return {
+      data: { attestation_reference: issued.reference, expires_at: issued.expiresAt },
+      meta: { request_id: metadata.requestId, correlation_id: metadata.correlationId },
+    };
   }
 
   async reject(
