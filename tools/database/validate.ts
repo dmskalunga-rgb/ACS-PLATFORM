@@ -214,6 +214,12 @@ const evidenceReferenceRollbackPath = resolve(
 const evidenceReferenceTestPath = resolve(
   'database/tests/rls/xcap005_evidence_reference_validation_isolation.sql',
 );
+const humanClassificationMigrationPath = resolve(
+  'database/migrations/20260915000000_platform_principal_classification.sql',
+);
+const humanClassificationRollbackPath = resolve(
+  'database/rollbacks/20260915000000_platform_principal_classification.sql',
+);
 const usageMeteringRolesPath = resolve('database/roles/phase2_usage_metering_roles.sql');
 const usageMeteringMigrationPath = resolve(
   'database/migrations/20260829000000_phase2_usage_metering.sql',
@@ -279,6 +285,7 @@ const testRoles = [
   'acs_aigov_m0b_risk_login_test',
   'acs_platform_machine_auth_login_test',
   'acs_platform_machine_auth',
+  'acs_principal_classification_writer',
 ];
 
 async function dropTestRoles(): Promise<void> {
@@ -294,6 +301,11 @@ async function dropTestRoles(): Promise<void> {
 await client.connect();
 try {
   await dropTestRoles();
+  const humanClassificationExists = await client.query(
+    "SELECT to_regclass('platform.principal_classifications') AS relation",
+  );
+  if (humanClassificationExists.rows[0]?.relation !== null)
+    await client.query(await readFile(humanClassificationRollbackPath, 'utf8'));
   const evidenceReferenceExists = await client.query(
     "SELECT to_regprocedure('cyberdefense.validate_evidence_reference(uuid,uuid,text,text)') AS routine",
   );
@@ -631,6 +643,36 @@ try {
   await client.query(await readFile(aiGovM0bTestPath, 'utf8'));
   await client.query(await readFile(machineAuthMigrationPath, 'utf8'));
   await client.query(await readFile(evidenceReferenceMigrationPath, 'utf8'));
+  await client.query(await readFile(humanClassificationMigrationPath, 'utf8'));
+  const humanRls = await client.query<{ count: number }>(`
+    SELECT count(*)::integer AS count FROM pg_class
+    WHERE oid IN (
+      'platform.persons'::regclass,
+      'platform.principal_classifications'::regclass,
+      'platform.principal_classification_lifecycle'::regclass,
+      'platform.principal_classification_requests'::regclass,
+      'platform.human_operation_attestations'::regclass,
+      'platform.human_genesis_ceremonies'::regclass
+    ) AND relrowsecurity AND relforcerowsecurity
+  `);
+  if (humanRls.rows[0]?.count !== 6)
+    throw new Error('Human principal RLS/FORCE RLS metadata is incomplete.');
+  await client.query(await readFile(humanClassificationRollbackPath, 'utf8'));
+  const humanAfterRollback = await client.query(
+    "SELECT to_regclass('platform.human_genesis_ceremonies') AS relation",
+  );
+  if (humanAfterRollback.rows[0]?.relation !== null)
+    throw new Error('Human principal rollback left genesis state in place.');
+  const lifecycleAfterRollback = await client.query(
+    "SELECT to_regclass('platform.principal_classification_lifecycle') AS relation, " +
+      "to_regprocedure('platform.transition_human_classification(uuid,uuid,uuid,text,text,uuid,bigint,uuid,uuid,uuid)') AS routine",
+  );
+  if (
+    lifecycleAfterRollback.rows[0]?.relation !== null ||
+    lifecycleAfterRollback.rows[0]?.routine !== null
+  )
+    throw new Error('Human principal rollback left lifecycle state in place.');
+  await client.query(await readFile(humanClassificationMigrationPath, 'utf8'));
   await client.query(await readFile(evidenceReferenceTestPath, 'utf8'));
   await client.query(await readFile(evidenceReferenceRollbackPath, 'utf8'));
   const evidenceReferenceAfterRollback = await client.query(
